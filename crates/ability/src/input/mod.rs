@@ -4,14 +4,18 @@ use ohos_ime_binding::KeyboardStatus;
 use ohos_xcomponent_binding::{KeyEventData, TouchEventData};
 
 mod ime;
+mod mouse_event;
 mod text_input;
 pub use ime::*;
+pub use mouse_event::*;
 pub use text_input::*;
 
 #[derive(Clone)]
 pub enum InputEvent {
     KeyEvent(KeyEventData),
     TouchEvent(TouchEventData),
+    MouseEvent(MouseEventData),
+    AxisEvent(AxisEventData),
     ImeEvent(ImeEvent),
 }
 
@@ -20,6 +24,8 @@ impl Debug for InputEvent {
         match self {
             InputEvent::KeyEvent(data) => write!(f, "KeyEvent: {:?}", data),
             InputEvent::TouchEvent(data) => write!(f, "TouchEvent: {:?}", data),
+            InputEvent::MouseEvent(data) => write!(f, "MouseEvent: {:?}", data),
+            InputEvent::AxisEvent(data) => write!(f, "AxisEvent: {:?}", data),
             InputEvent::ImeEvent(data) => write!(f, "ImeEvent: {:?}", data),
         }
     }

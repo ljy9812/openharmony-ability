@@ -92,6 +92,12 @@ struct Index {
           .onClick(() => {
             router.pushUrl({ url: 'pages/WindowTransparentTest' });
           })
+        Button("⌨ Key Repeat Test")
+          .fontSize(12)
+          .backgroundColor('#4CAF50')
+          .onClick(() => {
+            router.pushUrl({ url: 'pages/KeyRepeatTest' });
+          })
       }.width("100%")
 
       Row({ space: 12 }) {

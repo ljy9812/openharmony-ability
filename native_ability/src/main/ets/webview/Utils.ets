@@ -6,6 +6,25 @@ export const getCookies = (url: string): string => {
   return webview.WebCookieManager.fetchCookieSync(url);
 };
 
+export const setCookie = (url: string, value: string): void => {
+  webview.WebCookieManager.configCookieSync(url, value);
+};
+
+// Tracked web debugging access state. OHOS WebviewController.setWebDebuggingAccess
+// is a static global setter with no getter, so the state is tracked here.
+let webDebuggingEnabled = false;
+
+// Set web debugging access (static global API). Call the API first, then update
+// the tracked state — if the API throws, the state stays accurate.
+export const setWebDebuggingAccess = (enabled: boolean): void => {
+  webview.WebviewController.setWebDebuggingAccess(enabled);
+  webDebuggingEnabled = enabled;
+};
+
+export const isWebDebuggingAccess = (): boolean => {
+  return webDebuggingEnabled;
+};
+
 /**
  * Convert `#RRGGBBAA` format from wry to `#AARRGGBB` format accepted by OHOS.
  * Supports string, Color enum, number, and undefined inputs:
@@ -45,6 +64,9 @@ export interface SnapshotData {
 
 export interface JsHelper {
   getCookies: (url: string) => string;
+  setCookie: (url: string, value: string) => void;
+  setWebDebuggingAccess: (enabled: boolean) => void;
+  isWebDebuggingAccess: () => boolean;
   getUrl: () => string;
   loadUrl: (url: string, header?: Record<string, string>) => void;
   loadHtml: (html: string) => void;
@@ -54,9 +76,12 @@ export interface JsHelper {
   runJavaScript: (code: string, callback: (result?: string) => void) => void;
   setBackgroundColor: (color: number) => void;
   setVisible: (visible: boolean) => void;
+  setBounds: (x: number, y: number, width: number, height: number) => void;
+  setBlurRadius: (radius: number) => void;
   dispose: () => void;
   clearAllBrowsingData: () => void;
   webPageSnapshot: () => Promise<SnapshotData>;
+  createPdf: (path: string, config: Record<string, number | boolean>, callback: (success: boolean) => void) => void;
 }
 
 /**
@@ -84,6 +109,27 @@ export class ProxyJsHelper implements JsHelper {
 
   getCookies(url: string): string {
     return this.realController ? this.realController.getCookies(url) : '';
+  }
+
+  setCookie(url: string, value: string): void {
+    if (this.realController) {
+      this.realController.setCookie(url, value);
+    } else {
+      hilog.info(DOMAIN, 'ProxyJsHelper', 'Caching setCookie: %{public}s', url);
+      this.pendingOperations.push(() => this.realController!.setCookie(url, value));
+    }
+  }
+
+  setWebDebuggingAccess(enabled: boolean): void {
+    // setWebDebuggingAccess is a static global API (no controller instance needed),
+    // so apply it immediately rather than caching via pendingOperations.
+    setWebDebuggingAccess(enabled);
+  }
+
+  isWebDebuggingAccess(): boolean {
+    // Return the tracked state directly — accurate even before the controller binds,
+    // reflecting the init devtools flag.
+    return webDebuggingEnabled;
   }
 
   getUrl(): string {
@@ -157,6 +203,22 @@ export class ProxyJsHelper implements JsHelper {
     }
   }
 
+  setBounds(x: number, y: number, width: number, height: number): void {
+    if (this.realController) {
+      this.realController.setBounds(x, y, width, height);
+    } else {
+      this.pendingOperations.push(() => this.realController!.setBounds(x, y, width, height));
+    }
+  }
+
+  setBlurRadius(radius: number): void {
+    if (this.realController) {
+      this.realController.setBlurRadius(radius);
+    } else {
+      this.pendingOperations.push(() => this.realController!.setBlurRadius(radius));
+    }
+  }
+
   dispose(): void {
     if (this.realController) {
       this.realController.dispose();
@@ -178,5 +240,13 @@ export class ProxyJsHelper implements JsHelper {
       return this.realController.webPageSnapshot();
     }
     return Promise.reject(new Error('WebviewController not bound yet'));
+  }
+
+  createPdf(path: string, config: Record<string, number | boolean>, callback: (success: boolean) => void): void {
+    if (this.realController) {
+      this.realController.createPdf(path, config, callback);
+    } else {
+      this.pendingOperations.push(() => this.realController!.createPdf(path, config, callback));
+    }
   }
 }

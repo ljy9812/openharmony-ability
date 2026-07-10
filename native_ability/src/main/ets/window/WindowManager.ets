@@ -3,10 +3,11 @@ import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { RustWebviewNodeController, WebviewInitData } from '../webview/DefaultWebview';
+import { RustWebviewNodeController, WebviewInitData, WebviewStyle } from '../webview/DefaultWebview';
 import { ProxyJsHelper } from '../webview/Utils';
 import * as FloatPage from '../components/FloatPage';
 import { DOMAIN } from '../helper/constants';
+import { objectAssign } from '../helper';
 
 interface WindowEntry {
   window: window.Window;
@@ -33,15 +34,34 @@ export class WindowManager {
   private windows: Map<number, WindowEntry> = new Map();
   private controllers: Map<number, RustWebviewNodeController> = new Map();
   private uiContexts: Map<number, UIContext> = new Map();
-  
+
+  // Track the last focused window via WINDOW_ACTIVE (kept for backward compat / debugging)
+  private lastFocusedWindow: window.Window | null = null;
+  private lastFocusedWindowId: number = -1;
+
+  // Track the window the user last physically touched (onTouch-based).
+  // Unlike WINDOW_ACTIVE, onTouch only fires on actual user touch — immune to
+  // cascade broadcasts, GoForeground events, and programmatic showWindow().
+  // Semantically equivalent to macOS Key Window / Windows Foreground Window.
+  private lastUserInteractedWindowId: number = -1;
+
+  // Pending window action for StatusBar menu race condition fix
+  // When a tray menu item is clicked, the system triggers onNewWant → GoForeground
+  // which can undo our window operations (minimize/hide/close).
+  // Solution: defer window operations until WINDOW_ACTIVE/WINDOW_SHOWN event fires.
+  private pendingAction: (() => void) | null = null;
+  private cleanupTimer: number | null = null;
+
   // Proxy object queue (caches Rust operations before Controller is ready)
   private pendingJsHelperProxies: Map<number, ProxyJsHelper> = new Map();
-  
+
   // Pending URL queue
   private pendingUrls: Map<number, string> = new Map();
   // Pending WebView init queue (resolves race conditions)
   private pendingInits: Map<number, WebviewInitData> = new Map();
-  
+  // Pending window blur queue (vibrancy effect applied before webview controller is ready)
+  private pendingBlurs: Map<number, number> = new Map();
+
   private constructor(context: common.UIAbilityContext) {
     this.context = context;
   }
@@ -65,6 +85,249 @@ export class WindowManager {
   setWindowStage(windowStage: window.WindowStage): void {
     this.windowStage = windowStage;
     hilog.info(DOMAIN, 'WindowManager', 'WindowStage set');
+
+    // Register main window (id=0) for focus tracking
+    try {
+      const mainWindow = windowStage.getMainWindowSync();
+      this.registerFocusTracking(mainWindow, 0);
+      hilog.info(DOMAIN, 'WindowManager', 'Main window focus tracking registered');
+    } catch (e) {
+      hilog.warn(DOMAIN, 'WindowManager', 'Failed to register main window focus tracking: %{public}s', String(e));
+    }
+  }
+
+  // Register WINDOW_ACTIVE listener for focus tracking
+  // Also listens for RESUMED/WINDOW_ACTIVE to consume pending actions
+  private registerFocusTracking(win: window.Window, windowId: number): void {
+    win.on('windowEvent', (eventType: window.WindowEventType) => {
+      // Track last focused window
+      if (eventType === window.WindowEventType.WINDOW_ACTIVE) {
+        this.lastFocusedWindow = win;
+        this.lastFocusedWindowId = windowId;
+        hilog.info(DOMAIN, 'WindowManager', 'Last focused window updated: id=%{public}d', windowId);
+      }
+
+      // Consume pending action when system foreground transition completes
+      // WINDOW_ACTIVE: window gained focus (marks end of foreground transition)
+      // WINDOW_SHOWN: window is visible (alternative trigger)
+      if (eventType === window.WindowEventType.WINDOW_ACTIVE ||
+          eventType === window.WindowEventType.WINDOW_SHOWN) {
+        if (this.hasPendingAction()) {
+          hilog.info(DOMAIN, 'WindowManager',
+            'System foreground transition complete (event: %{public}s), executing pending action',
+            eventType === window.WindowEventType.WINDOW_ACTIVE ? 'WINDOW_ACTIVE' : 'WINDOW_SHOWN');
+          this.consumePendingAction();
+        }
+      }
+    });
+  }
+
+  // Get the last focused window via WINDOW_ACTIVE (kept for backward compat)
+  getFocusedWindow(): window.Window | null {
+    return this.lastFocusedWindow;
+  }
+
+  // Get the last focused window ID
+  getFocusedWindowId(): number {
+    return this.lastFocusedWindowId;
+  }
+
+  // ─── User Interaction Tracking (onTouch-based window targeting) ───
+  //
+  // Called from page root Stack.onTouch() (MainPage/FloatPage, D8) when the user physically touches a window.
+  // ArkUI onTouch bubbles from child to parent, covering MenuBarComponent + webview + drag bars.
+  // Used by tray menu to determine which window to operate on.
+  setUserInteractedWindow(windowId: number): void {
+    this.lastUserInteractedWindowId = windowId;
+    hilog.info(DOMAIN, 'WindowManager', 'User interacted with window: id=%{public}d', windowId);
+  }
+
+  // Get the window the user last physically touched (for Tray menu path)
+  getUserInteractedWindow(): window.Window | null {
+    if (this.lastUserInteractedWindowId < 0) {
+      return null;
+    }
+    return this.getWindow(this.lastUserInteractedWindowId) ?? null;
+  }
+
+  // Get the ID of the window the user last physically touched
+  getUserInteractedWindowId(): number {
+    return this.lastUserInteractedWindowId;
+  }
+
+  // Reset user interaction tracking after window becomes invisible (minimize/hide/close).
+  // Subsequent tray menu operations will fall back to main window.
+  resetUserInteractionTracking(): void {
+    this.lastUserInteractedWindowId = -1;
+  }
+
+  // ─── Window Operation Wrappers ───
+  // These wrappers ensure resetUserInteractionTracking() is called after operations
+  // that make a window invisible (minimize/hide/close).
+
+  async minimizeWindow(windowId: number): Promise<void> {
+    const win = this.getWindow(windowId);
+    if (!win) {
+      hilog.warn(DOMAIN, 'WindowManager', 'minimizeWindow: window %{public}d not found', windowId);
+      return;
+    }
+    await win.minimize();
+    // Only reset tracking if the minimized window was the last interacted one
+    if (this.lastUserInteractedWindowId === windowId) {
+      this.resetUserInteractionTracking();
+    }
+  }
+
+  focusWindow(windowId: number): void {
+    const win = this.getWindow(windowId);
+    if (!win) {
+      hilog.warn(DOMAIN, 'WindowManager', 'focusWindow: window %{public}d not found', windowId);
+      return;
+    }
+    win.raiseToAppTop().then(() => {
+      hilog.debug(DOMAIN, 'WindowManager', 'focusWindow: window %{public}d raised to top', windowId);
+    }).catch((err: ESObject) => {
+      hilog.error(DOMAIN, 'WindowManager', 'focusWindow: raiseToAppTop failed: %{public}s', String(err));
+    });
+  }
+
+  setWindowFocusable(windowId: number, focusable: boolean): void {
+    const win = this.getWindow(windowId);
+    if (!win) {
+      hilog.warn(DOMAIN, 'WindowManager', 'setWindowFocusable: window %{public}d not found', windowId);
+      return;
+    }
+    win.setWindowFocusable(focusable).then(() => {
+      hilog.debug(DOMAIN, 'WindowManager', 'setWindowFocusable: window %{public}d focusable=%{public}s', windowId, String(focusable));
+    }).catch((err: ESObject) => {
+      hilog.error(DOMAIN, 'WindowManager', 'setWindowFocusable failed: %{public}s', JSON.stringify(err));
+    });
+  }
+
+  // Destroy a window and clean up all resources.
+  // Works for both main window (id=0) and sub-windows.
+  async destroyWindow(windowId: number): Promise<void> {
+    const win = this.getWindow(windowId);
+    if (!win) {
+      hilog.warn(DOMAIN, 'WindowManager', 'destroyWindow: window %{public}d not found', windowId);
+      return;
+    }
+    try {
+      await win.destroyWindow();
+    } catch (e) {
+      hilog.warn(DOMAIN, 'WindowManager', 'destroyWindow failed for %{public}d: %{public}s', windowId, String(e));
+    }
+    this.removeWindow(windowId);
+  }
+
+  // Close a sub-window (id > 0): destroy + cleanup + reset.
+  // For main window (id=0): hideAbility() + reset.
+  async closeWindow(windowId: number): Promise<void> {
+    if (windowId <= 0) {
+      // Main window: hide the Ability to background
+      await this.hideAbility();
+      return;
+    }
+    const win = this.getWindow(windowId);
+    if (!win) {
+      hilog.warn(DOMAIN, 'WindowManager', 'closeWindow: window %{public}d not found', windowId);
+      return;
+    }
+    try {
+      await win.destroyWindow();
+    } catch (e) {
+      hilog.warn(DOMAIN, 'WindowManager', 'closeWindow destroy failed for %{public}d: %{public}s', windowId, String(e));
+    }
+    // removeWindow handles conditional resetUserInteractionTracking
+    this.removeWindow(windowId);
+  }
+
+  // Hide the entire Ability (app) to background.
+  // Equivalent to macOS Cmd+H (hide:) — all windows become invisible, process stays alive.
+  async hideAbility(): Promise<void> {
+    if (!this.context) {
+      hilog.warn(DOMAIN, 'WindowManager', 'hideAbility: context not set');
+      return;
+    }
+    try {
+      await this.context.hideAbility();
+      this.resetUserInteractionTracking();
+    } catch (e) {
+      hilog.warn(DOMAIN, 'WindowManager', 'hideAbility failed: %{public}s', String(e));
+    }
+  }
+
+  // ─── Pending Action Management (StatusBar menu race condition) ───
+  //
+  // When a tray menu item is clicked, the system triggers onNewWant → GoForeground
+  // which can undo window operations executed in the menu click callback.
+  //
+  // Solution: defer window operations until RESUMED/WINDOW_ACTIVE event fires,
+  // indicating the system's foreground transition is complete.
+  //
+  // Flow:
+  // 1. Tray menu click → setPendingAction(action) + start 2s cleanup timer
+  // 2. System triggers onNewWant → cancelCleanupTimer()
+  // 3. RESUMED/WINDOW_ACTIVE fires → consumePendingAction() executes the action
+  // 4. If onNewWant never fires (edge case), cleanup timer clears state after 2s
+
+  setPendingAction(action: () => void): void {
+    // Clear any existing pending action
+    this.clearPendingAction();
+
+    this.pendingAction = action;
+    hilog.info(DOMAIN, 'WindowManager',
+      'Pending action set, waiting for system foreground transition');
+
+    // Start safety net cleanup timer (2s)
+    this.cleanupTimer = setTimeout(() => {
+      if (this.pendingAction) {
+        hilog.warn(DOMAIN, 'WindowManager', 'Pending action timeout (2s), cleaning up stale state');
+        this.pendingAction = null;
+      }
+      this.cleanupTimer = null;
+    }, 2000);
+  }
+
+  consumePendingAction(): boolean {
+    if (!this.pendingAction) {
+      return false;
+    }
+
+    const action = this.pendingAction;
+    this.pendingAction = null;
+
+    // Cancel cleanup timer since we're executing the action
+    this.cancelCleanupTimer();
+
+    hilog.info(DOMAIN, 'WindowManager', 'Consuming pending action after system foreground transition');
+    try {
+      action();
+      return true;
+    } catch (e) {
+      hilog.error(DOMAIN, 'WindowManager', 'Failed to execute pending action: %{public}s', String(e));
+      return false;
+    }
+  }
+
+  hasPendingAction(): boolean {
+    return this.pendingAction !== null;
+  }
+
+  cancelCleanupTimer(): void {
+    if (this.cleanupTimer !== null) {
+      clearTimeout(this.cleanupTimer);
+      this.cleanupTimer = null;
+      hilog.info(DOMAIN, 'WindowManager', 'Cleanup timer cancelled');
+    }
+  }
+
+  clearPendingAction(): void {
+    if (this.pendingAction) {
+      hilog.info(DOMAIN, 'WindowManager', 'Clearing pending action without execution');
+      this.pendingAction = null;
+    }
+    this.cancelCleanupTimer();
   }
 
   async createSubWindow(opts: SubWindowOptions): Promise<number> {
@@ -100,6 +363,9 @@ export class WindowManager {
     storage.setOrCreate('windowId', windowId);
     storage.setOrCreate('decorations', decorations);
     this.windows.set(windowId, { window: win, storage });
+
+    // Register focus tracking for sub-window
+    this.registerFocusTracking(win, windowId);
 
     try {
       hilog.info(DOMAIN, 'WindowManager', `Loading content: FloatPage for window %{public}d`, windowId);
@@ -180,14 +446,52 @@ export class WindowManager {
   // Trigger load when page initialization is complete and Controller is registered
   registerController(id: number, controller: RustWebviewNodeController): void {
     hilog.info(DOMAIN, 'WindowManager', `Controller registered for window: %{public}d`, id);
+    // pendingBlurs key is normalized to number (applyWindowBlur stores Number(windowId)
+    // because Rust NAPI i64 arrives as BigInt).
+    const pb = this.pendingBlurs.get(Number(id));
+    if (pb !== undefined) {
+      this.pendingBlurs.delete(Number(id));
+    }
+    const injectBlur = (data: WebviewInitData): void => {
+      if (pb !== undefined) {
+        if (!data.style) {
+          data.style = {};
+        }
+        data.style.blurRadius = pb;
+      }
+    };
     this.controllers.set(id, controller);
 
     // 1. Process pending WebView init requests (resolves race conditions)
     const pendingInit = this.pendingInits.get(id);
     if (pendingInit) {
       hilog.info(DOMAIN, 'WindowManager', `Processing pending init for window ${id}`);
+      injectBlur(pendingInit);
       const result = controller.addWebview(pendingInit);
       this.pendingInits.delete(id);
+
+      // Attach real implementations to result.controller
+      // (same as ArkHelper.ets normal path — without this, ProxyJsHelper replays to no-op stubs)
+      const applyStyle = (style: WebviewStyle) => {
+        objectAssign(pendingInit.style as Record<string, ESObject>, style);
+        controller.updateWebviewStyle(result.webTag, pendingInit.style as WebviewStyle);
+      };
+
+      result.controller.setBackgroundColor = (color: number) => {
+        applyStyle({ backgroundColor: color } as WebviewStyle);
+      };
+
+      result.controller.setVisible = (visible: boolean) => {
+        applyStyle({ visible } as WebviewStyle);
+      };
+
+      result.controller.setBounds = (x: number, y: number, width: number, height: number) => {
+        applyStyle({ x, y, width, height } as WebviewStyle);
+      };
+
+      result.controller.dispose = () => {
+        controller.removeWebview(result.webTag);
+      };
 
       // 2. Activate proxy (bind real Controller to proxy)
       const proxy = this.takePendingJsHelperProxy(id);
@@ -201,7 +505,9 @@ export class WindowManager {
     const pendingUrl = this.pendingUrls.get(id);
     if (pendingUrl) {
       hilog.info(DOMAIN, 'WindowManager', `Pending URL found! Triggering load for window ${id}: ${pendingUrl}`);
-      controller.addWebview({ url: pendingUrl });
+      const urlData: WebviewInitData = { url: pendingUrl };
+      injectBlur(urlData);
+      controller.addWebview(urlData);
       this.pendingUrls.delete(id);
     } else {
       hilog.info(DOMAIN, 'WindowManager', `No pending URL for window ${id}. Waiting for command.`);
@@ -228,8 +534,26 @@ export class WindowManager {
   }
   
   getWindow(id: number): window.Window | undefined {
+    // Main window (id=0) is not in the windows Map, get it from windowStage
+    if (id === 0 && this.windowStage) {
+      try {
+        return this.windowStage.getMainWindowSync();
+      } catch (e) {
+        hilog.warn(DOMAIN, 'WindowManager', 'Failed to get main window: %{public}s', String(e));
+        return undefined;
+      }
+    }
     const entry = this.windows.get(id);
     return entry?.window;
+  }
+
+  getAllWindowIds(): number[] {
+    const ids = Array.from(this.windows.keys());
+    // Include main window (id=0) if windowStage is set
+    if (this.windowStage && !ids.includes(0)) {
+      ids.unshift(0);
+    }
+    return ids;
   }
 
   // Phase 2: Update window decorations at runtime via LocalStorage reactive update
@@ -249,58 +573,53 @@ export class WindowManager {
     }
   }
 
-  // Phase 3: Update window background color at runtime
   setWindowBackgroundColor(windowId: number, color: number): void {
     const colorStr = '#' + color.toString(16).padStart(8, '0');
-    hilog.info(DOMAIN, 'WindowManager', `setWindowBackgroundColor: windowId=%{public}d, color=%{public}s`, windowId, colorStr);
+    hilog.debug(DOMAIN, 'WindowManager', `setWindowBackgroundColor: windowId=%{public}d, color=%{public}s`, windowId, colorStr);
     if (windowId === 0 && this.windowStage) {
-      // Main window
       try {
         const mainWindow = this.windowStage.getMainWindowSync();
         mainWindow.setWindowBackgroundColor(colorStr);
-        // On 2in1 devices, also set container color for full transparency (requires API 20+)
         if (deviceInfo.sdkApiVersion >= 20) {
           try {
             mainWindow.setWindowContainerColor(colorStr, colorStr);
           } catch (containerErr: any) {
-            if (containerErr.code === 801) {
-              hilog.debug(DOMAIN, 'WindowManager', 'setWindowContainerColor not supported on this device (error 801)');
-            } else if (containerErr.code === 201) {
-              hilog.error(DOMAIN, 'WindowManager', 'setWindowContainerColor permission denied (error 201): missing ohos.permission.SET_WINDOW_TRANSPARENT');
-            } else {
-              hilog.error(DOMAIN, 'WindowManager', `Failed to set container color: code=%{public}d, message=%{public}s`, containerErr.code, containerErr.message);
-            }
+            hilog.debug(DOMAIN, 'WindowManager', 'setWindowContainerColor: code=%{public}d', containerErr.code);
           }
         }
       } catch (e) {
-        hilog.error(DOMAIN, 'WindowManager', `Failed to set main window background: %{public}s`, JSON.stringify(e));
+        hilog.error(DOMAIN, 'WindowManager', `Failed to set main window background: %{public}s`, String(e));
       }
     } else {
       const entry = this.windows.get(windowId);
-      if (entry) {
+      if (entry?.window) {
         try {
           entry.window.setWindowBackgroundColor(colorStr);
-          if (deviceInfo.sdkApiVersion >= 20) {
-            try {
-              entry.window.setWindowContainerColor(colorStr, colorStr);
-            } catch (containerErr: any) {
-              if (containerErr.code === 801) {
-                hilog.debug(DOMAIN, 'WindowManager', 'setWindowContainerColor not supported on this device (error 801)');
-              } else if (containerErr.code === 201) {
-                hilog.error(DOMAIN, 'WindowManager', 'setWindowContainerColor permission denied (error 201): missing ohos.permission.SET_WINDOW_TRANSPARENT');
-              } else {
-                hilog.warn(DOMAIN, 'WindowManager', `Sub-window container color failed: code=%{public}d`, containerErr.code);
-              }
-            }
-          }
-        } catch (e) {
-          hilog.warn(DOMAIN, 'WindowManager', `Failed to set background for window %{public}d: %{public}s`, windowId, JSON.stringify(e));
+        } catch (err) {
+          hilog.error(DOMAIN, 'WindowManager', `Sub-window %{public}d background failed: %{public}s`, windowId, String(err));
         }
       }
     }
   }
 
-  // Phase 2: Hide system status bar for main window (decorations=false)
+  // Window vibrancy: Apply backdrop blur to WebView container component.
+  // NOTE: backdropBlur must be applied at webview BUILD time (BuilderNode.update
+  // does not refresh .backdropBlur). The blur radius is queued here and consumed
+  // when the webview node is built. No hilog calls inside this method — hilog
+  // throws "Argc mismatch" when invoked from a NAPI-reentrant ArkTS context.
+  applyWindowBlur(windowId: number, radius: number): void {
+    // windowId arrives from Rust NAPI as i64 → BigInt (1n). Normalize to number
+    // so it matches the ArkTS number keys used by registerController.
+    const id = Number(windowId);
+    this.pendingBlurs.set(id, radius);
+    // Runtime refresh: if the window's controller is already registered, apply blur immediately
+    // via AttributeUpdater (BuilderNode.update does not refresh backdropBlur). For not-yet-built
+    // windows, registerController will inject blurRadius from pendingBlurs at build time.
+    const controller = this.controllers.get(id);
+    if (controller) {
+      controller.setAllWebviewsBlurRadius(radius);
+    }
+  }
   private hideSystemBar(): void {
     if (!this.windowStage) return;
     try {
@@ -354,6 +673,11 @@ export class WindowManager {
   // Remove window: clean up all Maps to prevent memory leaks
   removeWindow(windowId: number): void {
     hilog.info(DOMAIN, 'WindowManager', `Removing window %{public}d from all maps`, windowId);
+    // Clear user interaction tracking if this window was the last interacted one
+    if (this.lastUserInteractedWindowId === windowId) {
+      this.lastUserInteractedWindowId = -1;
+      hilog.info(DOMAIN, 'WindowManager', 'Cleared lastUserInteractedWindowId (removed window)');
+    }
     this.windows.delete(windowId);
     this.controllers.delete(windowId);
     this.uiContexts.delete(windowId);

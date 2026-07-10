@@ -14,7 +14,7 @@ use futures_channel::oneshot;
 use napi_ohos::{
     bindgen_prelude::{CallbackContext, JsObjectValue, Object, PromiseRaw, Unknown},
     threadsafe_function::ThreadsafeFunctionCallMode,
-    Error, Result, Status,
+    Error, JsValue, Result, Status,
 };
 use serde::{Deserialize, Serialize};
 
@@ -42,7 +42,7 @@ impl Updater {
         let tsfn = get_updater_check_tsfn()
             .ok_or_else(|| Error::from_reason("updater check TSFN not initialized"))?;
 
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel::<std::result::Result<Option<CheckResult>, String>>();
         let tx_cell = Rc::new(Cell::new(Some(tx)));
 
         let status = tsfn.call_with_return_value(
@@ -53,7 +53,7 @@ impl Updater {
                     Ok(value) => {
                         handle_check_promise(value, tx_cell.clone());
                     }
-                    Err(err) => send_once(&tx_cell, Err(err)),
+                    Err(err) => send_once(&tx_cell, Err(err.to_string())),
                 }
                 Ok(())
             },
@@ -68,6 +68,7 @@ impl Updater {
 
         rx.await
             .map_err(|_| Error::from_reason("updater check receiver dropped"))?
+            .map_err(|msg| Error::from_reason(msg))
     }
 
     /// Show the AppGallery update dialog. Drives the full download+install flow.
@@ -75,7 +76,7 @@ impl Updater {
         let tsfn = get_updater_download_and_install_tsfn()
             .ok_or_else(|| Error::from_reason("updater download_and_install TSFN not initialized"))?;
 
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel::<std::result::Result<(), String>>();
         let tx_cell = Rc::new(Cell::new(Some(tx)));
 
         let status = tsfn.call_with_return_value(
@@ -86,7 +87,7 @@ impl Updater {
                     Ok(value) => {
                         handle_void_promise(value, tx_cell.clone());
                     }
-                    Err(err) => send_once(&tx_cell, Err(err)),
+                    Err(err) => send_once(&tx_cell, Err(err.to_string())),
                 }
                 Ok(())
             },
@@ -101,6 +102,7 @@ impl Updater {
 
         rx.await
             .map_err(|_| Error::from_reason("updater download_and_install receiver dropped"))?
+            .map_err(|msg| Error::from_reason(msg))
     }
 }
 
@@ -118,13 +120,13 @@ fn send_once<T>(cell: &Rc<Cell<Option<oneshot::Sender<T>>>>, value: T) {
 /// Extracts CheckResult fields on the JS thread (NAPI values cannot cross threads).
 fn handle_check_promise(
     value: Unknown<'static>,
-    tx: Rc<Cell<Option<oneshot::Sender<Result<Option<CheckResult>>>>>>,
+    tx: Rc<Cell<Option<oneshot::Sender<std::result::Result<Option<CheckResult>, String>>>>>,
 ) {
     let promise = unsafe { value.cast::<PromiseRaw<'static, Object<'static>>>() };
     let promise = match promise {
         Ok(p) => p,
         Err(e) => {
-            send_once(&tx, Err(e));
+            send_once(&tx, Err(e.to_string()));
             return;
         }
     };
@@ -133,12 +135,15 @@ fn handle_check_promise(
     let _ = promise
         .then(move |ctx: CallbackContext<Object<'static>>| {
             let result = parse_check_result(&ctx.value);
-            send_once(&tx_then, result);
+            send_once(&tx_then, result.map_err(|e| e.to_string()));
             Ok(())
         })
         .and_then(|p| {
             p.catch(move |ctx: CallbackContext<Unknown>| {
-                send_once(&tx, Err(ctx.value.into()));
+                let msg: String = ctx.value.coerce_to_string()
+                    .and_then(|s| s.into_utf8().and_then(|u| u.into_owned()))
+                    .unwrap_or_else(|_| "unknown rejection".to_string());
+                send_once(&tx, Err(format!("rejected: {}", msg)));
                 Ok(())
             })
         });
@@ -147,13 +152,13 @@ fn handle_check_promise(
 /// Attach `.then`/`.catch` to a `Promise<void>`.
 fn handle_void_promise(
     value: Unknown<'static>,
-    tx: Rc<Cell<Option<oneshot::Sender<Result<()>>>>>,
+    tx: Rc<Cell<Option<oneshot::Sender<std::result::Result<(), String>>>>>,
 ) {
     let promise = unsafe { value.cast::<PromiseRaw<'static, ()>>() };
     let promise = match promise {
         Ok(p) => p,
         Err(e) => {
-            send_once(&tx, Err(e));
+            send_once(&tx, Err(e.to_string()));
             return;
         }
     };
@@ -166,7 +171,10 @@ fn handle_void_promise(
         })
         .and_then(|p| {
             p.catch(move |ctx: CallbackContext<Unknown>| {
-                send_once(&tx, Err(ctx.value.into()));
+                let msg: String = ctx.value.coerce_to_string()
+                    .and_then(|s| s.into_utf8().and_then(|u| u.into_owned()))
+                    .unwrap_or_else(|_| "unknown rejection".to_string());
+                send_once(&tx, Err(format!("rejected: {}", msg)));
                 Ok(())
             })
         });

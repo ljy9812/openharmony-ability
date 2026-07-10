@@ -11,7 +11,7 @@ import {
   WindowAvoidAreaInfo,
   WindowConfig,
 } from "../ability/type";
-import { exit, restart, check as updaterCheckFn, showUpdateDialog as updaterShowDialogFn, downloadAndInstall as updaterDownloadAndInstallFn, objectAssign, writeImageToClipboard, openAutostartSettings, getAutostartStatus } from "../helper";
+import { exit, restart, check as updaterCheckFn, showUpdateDialog as updaterShowDialogFn, downloadAndInstall as updaterDownloadAndInstallFn, objectAssign, writeImageToClipboard, openAutostartSettings, getAutostartStatus, registerHotkey, unregisterHotkey, unregisterAllHotkeys } from "../helper";
 import { requestPermission } from "../helper/permission";
 import { getPredefinedActionExecutor } from "../helper/menu";
 import { PredefinedType } from "../helper/menu_types";
@@ -314,6 +314,13 @@ export function createArkHelper(): ArkHelper {
           applyStyle({ visible });
         };
 
+        ret.controller.setBounds = (x: number, y: number, width: number, height: number) => {
+          applyStyle({ x, y, width, height });
+        };
+        ret.controller.setBlurRadius = (radius: number) => {
+          applyStyle({ blurRadius: radius });
+        };
+
         ret.controller.dispose = () => {
           targetController!.removeWebview(ret.webTag);
         };
@@ -391,6 +398,13 @@ export function createArkHelper(): ArkHelper {
           applyStyle({ visible });
         };
 
+        ret.controller.setBounds = (x: number, y: number, width: number, height: number) => {
+          applyStyle({ x, y, width, height });
+        };
+        ret.controller.setBlurRadius = (radius: number) => {
+          applyStyle({ blurRadius: radius });
+        };
+
         ret.controller.dispose = () => {
           manager.removeWebview(ret.webTag);
         };
@@ -443,6 +457,39 @@ export function createArkHelper(): ArkHelper {
         wm.setWindowBackgroundColor(windowId, color);
       } catch (err) {
         hilog.error(DOMAIN, 'ArkHelper', 'setWindowBackgroundColor failed: %{public}s', JSON.stringify(err));
+      }
+    },
+
+    focusWindow: (windowId: number): void => {
+      try {
+        const wm = WindowManager.getInstance();
+        wm.focusWindow(windowId);
+      } catch (err) {
+        hilog.error(DOMAIN, 'ArkHelper', 'focusWindow failed: %{public}s', String(err));
+      }
+    },
+
+    setWindowFocusable: (windowId: number, focusable: boolean): void => {
+      try {
+        const wm = WindowManager.getInstance();
+        wm.setWindowFocusable(windowId, focusable);
+      } catch (err) {
+        hilog.error(DOMAIN, 'ArkHelper', 'setWindowFocusable failed: %{public}s', String(err));
+      }
+    },
+
+    setWindowBlur: (windowId: number, radius: number): void => {
+      try {
+        WindowManager.getInstance().applyWindowBlur(windowId, radius);
+      } catch (_err) {
+        // Intentionally no hilog here: this is called from Rust NAPI (NAPI-reentrant ArkTS
+        // context), where hilog throws "Argc mismatch" and would mask the original error.
+        // Note: the error is NOT propagated to Rust — set_window_blur uses TSFN fire-and-forget
+        // (NonBlocking, no return value wait), so Rust receives Ok regardless of ArkTS failure.
+        // applyWindowBlur has internal fallbacks (queue pendingBlurs for build-time inject,
+        // modifier refresh for runtime), so a throw here is non-fatal. If synchronous error
+        // propagation is needed later, switch to call_with_return_value + oneshot (like
+        // clipboard_write_image).
       }
     },
 
@@ -576,12 +623,27 @@ export function createArkHelper(): ArkHelper {
 
     executePredefinedAction: (actionType: string) => {
       const executor = getPredefinedActionExecutor();
-      if (executor) {
-        // Tray actions always target main window (no targetWindowId → defaults to this.win)
-        executor.execute(actionType as PredefinedType);
-      } else {
+      if (!executor) {
         hilog.warn(DOMAIN, 'ArkHelper',
           'PredefinedActionExecutor not initialized, action: %{public}s', actionType);
+        return;
+      }
+
+      // Window operations from tray menu must be deferred to avoid race condition
+      // with system's onNewWant → GoForeground transition.
+      // These operations are deferred until RESUMED/WINDOW_ACTIVE event fires.
+      const WINDOW_OPERATIONS: PredefinedType[] = ['minimize', 'hide', 'close'];
+      if (WINDOW_OPERATIONS.includes(actionType as PredefinedType)) {
+        hilog.info(DOMAIN, 'ArkHelper',
+          'Deferring window operation "%{public}s" to avoid race with system foreground transition',
+          actionType);
+        const wm = WindowManager.getInstance();
+        wm.setPendingAction(() => {
+          executor.execute(actionType as PredefinedType);
+        });
+      } else {
+        // Non-window operations (quit, showAll, bringAllToFront, etc.) execute immediately
+        executor.execute(actionType as PredefinedType);
       }
     },
 
@@ -669,6 +731,18 @@ export function createArkHelper(): ArkHelper {
         hilog.error(DOMAIN, 'ArkHelper', 'autostartIsEnabled failed: %{public}s', JSON.stringify(err));
         throw err;
       }
+    },
+
+    registerHotkey: (jsonStr: string): void => {
+      registerHotkey(jsonStr);
+    },
+
+    unregisterHotkey: (id: number): void => {
+      unregisterHotkey(id);
+    },
+
+    unregisterAllHotkeys: (): void => {
+      unregisterAllHotkeys();
     },
 
   };

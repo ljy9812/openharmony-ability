@@ -6,7 +6,7 @@ use ohos_ime_binding::IME;
 use crate::{
     create_autostart_disable_tsfn, create_autostart_enable_tsfn, create_autostart_is_enabled_tsfn,
     create_permission_request_tsfn, create_restart_tsfn,
-    input, set_helper,
+    input, input::set_mouse_event_callback, set_helper,
     set_main_thread_env, Event, InputEvent, IntervalInfo, OpenHarmonyApp, Rect, Size,
 };
 
@@ -30,6 +30,12 @@ pub fn render(
     #[cfg(feature = "clipboard")]
     if let Err(e) = crate::clipboard::init_clipboard_tsfn(env) {
         crate::error!("init_clipboard_tsfn failed: {}", e);
+    }
+
+    // Initialize vibrancy ThreadsafeFunctions (set_window_blur / set_window_background_color)
+    // for cross-thread calls without needing the main-thread thread_local Env.
+    if let Err(e) = crate::window::init_vibrancy_tsfn(env) {
+        crate::error!("init_vibrancy_tsfn failed: {}", e);
     }
 
     // Initialize permission request threadsafe function
@@ -181,7 +187,38 @@ pub fn render(
         Ok(())
     });
 
+    // Register mouse event callback via NDK FFI.
+    // The binding crate (v0.2.0) does not expose on_mouse_event, so we register
+    // the OH_NativeXComponent_MouseEvent_Callback directly using the raw pointer.
+    let on_mouse_event_app = app.clone();
+    set_mouse_event_callback(move |_, _, data| {
+        if let Some(ref mut h) = *on_mouse_event_app.event_loop.borrow_mut() {
+            h(Event::Input(InputEvent::MouseEvent(data)));
+        }
+        Ok(())
+    });
+
+    // Register axis (scroll wheel) callback via ArkUI UIInputEvent API.
+    let on_axis_event_app = app.clone();
+    input::set_axis_event_callback(move |data| {
+        if let Some(ref mut h) = *on_axis_event_app.event_loop.borrow_mut() {
+            h(Event::Input(InputEvent::AxisEvent(data)));
+        }
+        Ok(())
+    });
+
     xcomponent.register_callback()?;
+
+    // Register mouse + hover callbacks via NDK FFI (separate from the base callback struct).
+    unsafe {
+        if let Err(e) = input::register_mouse_callbacks(xcomponent.raw()) {
+            // Mouse callbacks are best-effort; log but don't abort init.
+            #[cfg(feature = "log")]
+            log::warn!("Failed to register mouse callbacks: {}", e);
+            #[cfg(not(feature = "log"))]
+            let _ = e;
+        }
+    }
 
     root.mount(xcomponent_native)
         .map_err(|e| Error::from_reason(e.reason.to_string()))?;

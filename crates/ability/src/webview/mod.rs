@@ -6,13 +6,15 @@ use napi_ohos::{
     Error, Result,
 };
 
-use crate::helper::{DownloadStartResult, OnWindowNewResult, WebViewInitData, WebViewStyle, Webview};
+use crate::helper::{
+    DownloadStartResult, OnWindowNewResult, WebViewInitData, WebViewStyle, Webview,
+};
 
 mod drag;
 
 type OnDownloadStart = Box<dyn Fn(String, &mut PathBuf) -> bool>;
 type OnDownloadEnd = Box<dyn Fn(String, Option<PathBuf>, bool)>;
-type OnWindowNew = Box<dyn Fn(String, bool, bool) -> bool>;
+type OnWindowNew = Box<dyn Fn(String, bool, bool) -> OnWindowNewResult>;
 
 #[cfg(feature = "webview")]
 #[derive(Default)]
@@ -238,7 +240,7 @@ impl WebViewBuilder {
     /// # Safety note
     /// Uses `transmute` to erase the lifetime bound. This is safe because the builder
     /// is consumed (via `build()`) before the closure's captured references go out of scope.
-    pub fn on_window_new<F: Fn(String, bool, bool) -> bool>(
+    pub fn on_window_new<F: Fn(String, bool, bool) -> OnWindowNewResult>(
         self,
         on_window_new: F,
     ) -> WebViewBuilder {
@@ -246,8 +248,8 @@ impl WebViewBuilder {
         // Same pattern as on_navigation_request, on_page_begin, etc.
         let static_handler = unsafe {
             std::mem::transmute::<
-                Box<dyn Fn(String, bool, bool) -> bool>,
-                Box<dyn Fn(String, bool, bool) -> bool + 'static>,
+                Box<dyn Fn(String, bool, bool) -> OnWindowNewResult>,
+                Box<dyn Fn(String, bool, bool) -> OnWindowNewResult + 'static>,
             >(Box::new(on_window_new))
         };
         WebViewBuilder {
@@ -407,12 +409,15 @@ impl WebViewBuilder {
                             Either::A(b) => b,
                             Either::B(_) => false,
                         };
-                        let allow = handler(target_url_str, is_alert_bool, is_user_trigger_bool);
-                        Ok(OnWindowNewResult { allow })
+                        let result = handler(target_url_str, is_alert_bool, is_user_trigger_bool);
+                        Ok(result)
                     }) {
                         Ok(func) => Some(func),
                         Err(e) => {
-                            log::error!("[WebViewBuilder] on_window_new NAPI registration failed: {}", e);
+                            log::error!(
+                                "[WebViewBuilder] on_window_new NAPI registration failed: {}",
+                                e
+                            );
                             None
                         }
                     }

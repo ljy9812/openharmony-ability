@@ -36,8 +36,7 @@ pub fn create_restart_tsfn(env: &Env) -> Result<Arc<RestartTsfn>> {
                 let helper_borrow = helper.borrow();
                 if let Some(helper_ref) = helper_borrow.as_ref() {
                     let helper_obj = helper_ref.get_value(env_ref)?;
-                    let fn_ref =
-                        helper_obj.get_named_property::<RestartCall<'_>>("restart")?;
+                    let fn_ref = helper_obj.get_named_property::<RestartCall<'_>>("restart")?;
                     return fn_ref.call(());
                 }
             }

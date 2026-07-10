@@ -26,12 +26,12 @@ const SPECIAL_KEY_MAP: Map<string, string> = new Map([
 const MODIFIER_KEYCODES: Set<number> = new Set([
   2072, // KEYCODE_CTRL_LEFT
   2073, // KEYCODE_CTRL_RIGHT
-  2074, // KEYCODE_SHIFT_LEFT
-  2075, // KEYCODE_SHIFT_RIGHT
-  2076, // KEYCODE_ALT_LEFT
-  2077, // KEYCODE_ALT_RIGHT
-  2078, // KEYCODE_META_LEFT
-  2079, // KEYCODE_META_RIGHT
+  2047, // KEYCODE_SHIFT_LEFT
+  2048, // KEYCODE_SHIFT_RIGHT
+  2045, // KEYCODE_ALT_LEFT
+  2046, // KEYCODE_ALT_RIGHT
+  2076, // KEYCODE_META_LEFT
+  2077, // KEYCODE_META_RIGHT
 ]);
 
 // Clipboard accelerators handled natively by webview — intercepting them breaks paste/copy/cut

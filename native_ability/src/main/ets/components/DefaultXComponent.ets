@@ -28,7 +28,7 @@ import {
   emitter,
   BusinessError,
 } from "../helper/StatusBarUtils";
-import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from '../helper/constants';
+import { DOMAIN, NATIVE_MODULE_STORAGE_KEY, MAIN_WINDOW_ID } from '../helper/constants';
 
 export const RouteName = "NativeAbility";
 
@@ -60,7 +60,7 @@ export struct DefaultXComponent {
 
   // Check if this is the main window based on windowId
   private isMainWindow(): boolean {
-    const result = this.windowId === 0;
+    const result = this.windowId === MAIN_WINDOW_ID;
     hilog.info(DOMAIN, 'DefaultXComponent', 'isMainWindow() called: windowId=%{public}d, result=%{public}b', 
       this.windowId, result);
     return result;
@@ -140,8 +140,8 @@ export struct DefaultXComponent {
         // Register main window to WindowManager (id=0)
         try {
           const wm = WindowManager.getInstance();
-          wm.registerController(0, this.webviewController);
-          hilog.info(DOMAIN, 'DefaultXComponent', 'Main window registered to WindowManager with id=0');
+          wm.registerController(MAIN_WINDOW_ID, this.webviewController);
+          hilog.info(DOMAIN, 'DefaultXComponent', 'Main window registered to WindowManager with id=%{public}d', MAIN_WINDOW_ID);
         } catch (err) {
           hilog.warn(DOMAIN, 'DefaultXComponent', 'Failed to register main window to WindowManager: %{public}s',
             JSON.stringify(err));
@@ -149,8 +149,8 @@ export struct DefaultXComponent {
       } else {
         // Sub-window mode: register to WindowManager
         hilog.info(DOMAIN, 'DefaultXComponent', 'Entering SUB WINDOW logic');
-        if (this.windowId === 0) {
-          hilog.error(DOMAIN, 'DefaultXComponent', 'windowId is 0 but not main window, this should not happen');
+        if (this.windowId === MAIN_WINDOW_ID) {
+          hilog.error(DOMAIN, 'DefaultXComponent', 'windowId is MAIN_WINDOW_ID but not main window, this should not happen');
           return;
         }
 
@@ -178,7 +178,6 @@ export struct DefaultXComponent {
         .backgroundColor(Color.Transparent)
       }
       .height("100%")
-      .hitTestBehavior(HitTestMode.Transparent)
       .backgroundColor(Color.Transparent)
     }
     .backgroundColor(Color.Transparent);

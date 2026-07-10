@@ -27,8 +27,7 @@ pub type UpdaterCheckTsfn = ThreadsafeFunction<(), Unknown<'static>, (), Status,
 
 type UpdaterCheckTsfnStore = LazyLock<RwLock<Option<Arc<UpdaterCheckTsfn>>>>;
 
-pub(crate) static UPDATER_CHECK_TSFN: UpdaterCheckTsfnStore =
-    LazyLock::new(|| RwLock::new(None));
+pub(crate) static UPDATER_CHECK_TSFN: UpdaterCheckTsfnStore = LazyLock::new(|| RwLock::new(None));
 
 /// Create the TSFN that calls `helper.updaterCheck()`.
 /// Must be called after `set_main_thread_env`.
@@ -139,16 +138,17 @@ pub(crate) static UPDATER_DOWNLOAD_AND_INSTALL_TSFN: UpdaterDownloadAndInstallTs
 pub fn create_updater_download_and_install_tsfn(
     env: &Env,
 ) -> Result<Arc<UpdaterDownloadAndInstallTsfn>> {
-    let callback: Function<'_, (), Unknown<'_>> = env
-        .create_function_from_closure("updater_download_and_install_callback", move |_ctx| {
+    let callback: Function<'_, (), Unknown<'_>> =
+        env.create_function_from_closure("updater_download_and_install_callback", move |_ctx| {
             if let Some(env_ref) = get_main_thread_env().borrow().as_ref() {
                 let helper = unsafe { crate::get_helper() };
                 let helper_borrow = helper.borrow();
                 if let Some(helper_ref) = helper_borrow.as_ref() {
                     let helper_obj = helper_ref.get_value(env_ref)?;
-                    let fn_ref = helper_obj.get_named_property::<UpdaterDownloadAndInstallCall<'_>>(
-                        "updaterDownloadAndInstall",
-                    )?;
+                    let fn_ref = helper_obj
+                        .get_named_property::<UpdaterDownloadAndInstallCall<'_>>(
+                            "updaterDownloadAndInstall",
+                        )?;
                     return fn_ref.call(());
                 }
             }

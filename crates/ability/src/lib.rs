@@ -34,6 +34,9 @@ pub mod menu;
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
 
+#[cfg(feature = "global_shortcut")]
+pub mod global_shortcut;
+
 // ─── Logging macros (gated behind "log" feature) ───
 // When the feature is on, delegate to the `log` crate (backed by ohos-hilog-binding on OHOS).
 // When off, expand to no-ops — zero overhead, no dependency on `log`.
@@ -128,7 +131,15 @@ pub use menu::{
 #[cfg(feature = "clipboard")]
 pub use clipboard::{clipboard_write_image, init_clipboard_tsfn};
 
+#[cfg(feature = "global_shortcut")]
+pub use global_shortcut::{
+    register_shortcut, unregister_shortcut, unregister_all_shortcuts,
+    shortcut_event_receiver, init_forwarder,
+    ShortcutEvent, ShortcutState, ShortcutKey, ShortcutModifier,
+};
+
 // re-export arkui and avoid the need to import it in the lib.rs
+pub use napi_ohos::Either;
 pub use ohos_arkui_binding as arkui;
 pub use ohos_ime_binding as ime;
 pub use ohos_resource_manager_binding as resource_manager;

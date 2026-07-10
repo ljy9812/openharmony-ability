@@ -9,7 +9,8 @@ import {
 } from "./MenuBarComponent";
 import { KeyCode } from "@kit.InputKit";
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { DOMAIN } from '../helper/constants';
+import { DOMAIN, MAIN_WINDOW_ID } from '../helper/constants';
+import { WindowManager } from '../window/WindowManager';
 
 export const RouteName = "NativeAbility";
 
@@ -65,14 +66,14 @@ struct MainPage {
     Stack() {
       Column() {
         MenuBarComponent({
-          windowId: 0,
+          windowId: MAIN_WINDOW_ID,
           acceleratorMatcher: this.acceleratorMatcher,
         })
 
         Row() {
           Column() {
             if (this.resolvedModuleName !== "") {
-              DefaultXComponent({ moduleName: this.resolvedModuleName, windowId: 0 })
+              DefaultXComponent({ moduleName: this.resolvedModuleName, windowId: MAIN_WINDOW_ID })
             } else {
               Text("Loading Main Window...")
                 .fontSize(20)
@@ -88,7 +89,7 @@ struct MainPage {
         if (event.type === KeyType.Down && this.acceleratorMatcher.matches(event)) {
           const matchedItem = this.acceleratorMatcher.getMatchedItem();
           if (matchedItem) {
-            const handler = getMenuClickHandler(0);
+            const handler = getMenuClickHandler(MAIN_WINDOW_ID);
             if (handler) {
               handler(matchedItem);
             }
@@ -96,8 +97,8 @@ struct MainPage {
           return true;
         }
         // ESC to restore menubar from fullscreen
-        if (event.type === KeyType.Down && event.keyCode === KeyCode.KEYCODE_ESCAPE && !isMenubarVisible(0)) {
-          const recoverFn = getMenuBarRecoverFn(0);
+        if (event.type === KeyType.Down && event.keyCode === KeyCode.KEYCODE_ESCAPE && !isMenubarVisible(MAIN_WINDOW_ID)) {
+          const recoverFn = getMenuBarRecoverFn(MAIN_WINDOW_ID);
           if (recoverFn) {
             recoverFn();
           }
@@ -109,5 +110,32 @@ struct MainPage {
     .width('100%')
     .height('100%')
     .backgroundColor(Color.Transparent)
+    // Track user touch for tray menu window targeting (D8: migrated from DefaultXComponent).
+    // ArkUI onTouch bubbles from child to parent, covering MenuBarComponent + webview + all children.
+    // Note: Web component may internally consume some touch events (scroll/zoom).
+    // If webview touch tracking is unreliable, add onTouch to DefaultXComponent as fallback.
+    .onTouch((event: TouchEvent) => {
+      if (event.type === TouchType.Down) {
+        try {
+          WindowManager.getInstance().setUserInteractedWindow(MAIN_WINDOW_ID);
+        } catch (e) {
+          hilog.warn(DOMAIN, 'MainPage', 'onTouch: WindowManager not ready: %{public}s', String(e));
+        }
+      }
+    })
+    // Track mouse cursor position for cursor_position() API.
+    // NDK DispatchMouseEvent doesn't fire when cursor is over WebView,
+    // so we use ArkTS onMouse which bubbles from all children.
+    .onMouse((event: MouseEvent) => {
+      if (event.action === MouseAction.Move || event.action === MouseAction.Press) {
+        try {
+          if (typeof this.nativeModule?.updateCursorPosition === "function") {
+            this.nativeModule.updateCursorPosition(event.x, event.y);
+          }
+        } catch (e) {
+          // Silently ignore — cursor tracking is best-effort
+        }
+      }
+    })
   }
 }

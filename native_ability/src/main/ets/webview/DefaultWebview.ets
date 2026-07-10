@@ -4,17 +4,29 @@ import { ComponentContent, NodeController, BuilderNode, FrameNode } from "@ohos.
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { randomString } from "../helper";
 import { OnDownloadStartResult, OnWindowNewResult } from "../ability/type";
-import { getCookies, JsHelper, convertRRGGBBAAtoAARRGGBB, SnapshotData } from "./Utils";
-import { WebHeader } from "@kit.ArkUI";
+import { getCookies, setCookie, setWebDebuggingAccess, isWebDebuggingAccess, JsHelper, convertRRGGBBAAtoAARRGGBB, SnapshotData } from "./Utils";
+import { WebHeader, AttributeUpdater } from "@kit.ArkUI";
 import { router } from '@kit.ArkUI';
 import { WindowManager } from '../window/WindowManager';
 import { DOMAIN } from '../helper/constants';
 import { openNewWindowDialog } from "./NewWindowDialog";
 import { BusinessError } from '@kit.BasicServicesKit';
+import { fileIo } from '@kit.CoreFileKit';
+
+const DEFAULT_PDF_CONFIG: web_webview.PdfConfiguration = {
+  width: 8.27,              // A4 width in inches (210mm / 25.4)
+  height: 11.69,            // A4 height in inches (297mm / 25.4)
+  marginTop: 0,
+  marginBottom: 0,
+  marginRight: 0,
+  marginLeft: 0,
+  shouldPrintBackground: true
+};
 
 /**
  * Shared onWindowNew handler for both WebBuilder and EmbeddedWebBuilder.
- * Parses event params, calls the NAPI callback, and either opens a dialog or denies.
+ * Parses event params, calls the NAPI callback, and either opens a dialog,
+ * creates a real OS sub-window, or denies.
  */
 function handleWindowNew(
   event: { targetUrl?: string; isAlert?: boolean; isUserTrigger?: boolean; handler: { setWebController: (ctrl: web_webview.WebviewController | null) => void } },
@@ -29,11 +41,21 @@ function handleWindowNew(
   try {
     if (typeof data?.onWindowNew === 'function') {
       const result: OnWindowNewResult = data.onWindowNew(targetUrl, isAlert, isUserTrigger);
-      if (result.allow) {
+      hilog.debug(DOMAIN, 'DefaultWebview', '%{public}s onWindowNew: result={allow:%{public}s, isCreate:%{public}s}', tag, String(result.allow), String(result.isCreate));
+      if (result.isCreate) {
+        // Create mode: the Tauri user's handler already created a real OS window
+        // via WebviewWindowBuilder::build() → createOSWindow.
+        // Call setWebController(null) to tell ArkWeb NOT to create its own window,
+        // preventing double windows.
+        // Note: if the handler failed to create a window, this results in a silent no-op
+        // (no dialog, no window). The handler should log errors on its side.
+        hilog.debug(DOMAIN, 'DefaultWebview', '%{public}s onWindowNew: CREATE — OS window already created by handler', tag);
+        event.handler.setWebController(null);
+      } else if (result.allow) {
+        // Allow mode: open in-page dialog
         hilog.debug(DOMAIN, 'DefaultWebview', '%{public}s onWindowNew: ALLOW — opening dialog', tag);
         const newCtrl = new web_webview.WebviewController();
         event.handler.setWebController(newCtrl);
-        // Defer dialog to next tick so the callback returns immediately
         if (data?.uiContext) {
           const uiCtx = data.uiContext;
           setTimeout(() => {
@@ -57,11 +79,27 @@ function handleWindowNew(
   }
 }
 
+/**
+ * AttributeUpdater for runtime backdropBlur refresh.
+ * BuilderNode.update does not refresh backdropBlur, so we use AttributeUpdater to
+ * directly modify the Stack's backdropBlur attribute at runtime (setWindowBlur path).
+ * attribute?.backdropBlur(radius) triggers an immediate component update without @State.
+ */
+export class BlurModifier extends AttributeUpdater<CommonAttribute> {
+  initializeModifier(_instance: CommonAttribute): void {
+    // Intentionally empty: let the build-time Stack.backdropBlur(data.style.blurRadius) take
+    // effect. Runtime setWindowBlur refreshes via attribute?.backdropBlur(radius).
+  }
+}
+
 export interface WebviewStyle {
   x?: number | string;
   y?: number | string;
+  width?: number | string;
+  height?: number | string;
   backgroundColor?: string | Color | number;
   visible?: boolean;
+  blurRadius?: number;
 }
 
 export interface WebviewInitData {
@@ -93,24 +131,29 @@ export interface WebviewInitData {
 interface WebviewNodeData extends WebviewInitData {
   controller: WebviewController;
   didInitialLoad?: boolean;
+  blurModifier?: BlurModifier;
 }
 
 @Builder
 function WebBuilder(data: WebviewNodeData) {
   // init with empty url and reload with loadUrl or loadData with onControllerAttach
-  Web({
-    src: "",
-    controller: data.controller as web_webview.WebviewController,
-    renderMode: data?.transparent ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER
-  })
-    .width("100%")
-    .height("100%")
-    .position({
-      x: data.style?.x ?? 0,
-      y: data.style?.y ?? 0,
+  // NOTE: data.blurModifier is initialized in addWebview (cannot assign inside @Builder).
+  // Runtime setWindowBlur refreshes backdropBlur via modifier.attribute?.backdropBlur(radius)
+  // because BuilderNode.update does not refresh backdropBlur.
+  Stack() {
+    Web({
+      src: "",
+      controller: data.controller as web_webview.WebviewController,
+      renderMode: data?.transparent ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER
     })
-    .backgroundColor(convertRRGGBBAAtoAARRGGBB(data?.style?.backgroundColor))
-    .visibility(data?.style?.visible === false ? Visibility.Hidden : Visibility.Visible)
+      .width(data.style?.width ?? "100%")
+      .height(data.style?.height ?? "100%")
+      .position({
+        x: data.style?.x ?? 0,
+        y: data.style?.y ?? 0,
+      })
+      .backgroundColor(convertRRGGBBAAtoAARRGGBB(data?.style?.backgroundColor))
+      .visibility(data?.style?.visible === false ? Visibility.Hidden : Visibility.Visible)
     .javaScriptAccess(data?.javascriptEnable)
     .domStorageAccess(true)
     .mediaPlayGestureAccess(
@@ -219,6 +262,12 @@ function WebBuilder(data: WebviewNodeData) {
     .onWindowNew((event) => {
       handleWindowNew(event, data, 'WebBuilder');
     });
+  }
+  .width("100%")
+  .height("100%")
+  .backgroundColor(Color.Transparent)
+  .backdropBlur(data?.style?.blurRadius ?? 0)
+  .attributeModifier(data.blurModifier)
 }
 
 @Builder
@@ -232,8 +281,8 @@ function EmbeddedWebBuilder(data: WebviewNodeData) {
       controller: data.controller as web_webview.WebviewController,
       renderMode: data?.transparent ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER
     })
-      .width("100%")
-      .height("100%")
+      .width(data.style?.width ?? "100%")
+      .height(data.style?.height ?? "100%")
       .backgroundColor(convertRRGGBBAAtoAARRGGBB(data?.style?.backgroundColor))
       .javaScriptAccess(data?.javascriptEnable)
       .domStorageAccess(true)
@@ -325,8 +374,12 @@ function EmbeddedWebBuilder(data: WebviewNodeData) {
         handleWindowNew(event, data, 'EmbeddedWebBuilder');
       })
     }
-  .width("100%")
-  .height("100%")
+  .width(data.style?.width ?? "100%")
+  .height(data.style?.height ?? "100%")
+  .position({
+    x: data.style?.x ?? 0,
+    y: data.style?.y ?? 0,
+  })
   .backgroundColor(Color.Transparent)
   .clip(true)
   .visibility(data?.style?.visible === false ? Visibility.Hidden : Visibility.Visible)
@@ -365,7 +418,7 @@ function ensureWebviewNodeData(data: WebviewInitData): WebviewNodeData {
   prepared.didInitialLoad = prepared.didInitialLoad === true;
 
   if (prepared?.devtools) {
-    web_webview.WebviewController.setWebDebuggingAccess(true);
+    setWebDebuggingAccess(true);
   }
 
   return prepared;
@@ -418,6 +471,15 @@ function buildJsHelper(controller: WebviewController): JsHelper {
   };
   const getCookiesHelper = (url: string) => {
     return getCookies(url) as string;
+  };
+  const setCookieHelper = (url: string, value: string) => {
+    setCookie(url, value);
+  };
+  const setWebDebuggingAccessHelper = (enabled: boolean) => {
+    setWebDebuggingAccess(enabled);
+  };
+  const isWebDebuggingAccessHelper = (): boolean => {
+    return isWebDebuggingAccess();
   };
   const loadUrl = (url: string, header?: Record<string, string>) => {
     const headers = Object.keys((header || {}) as Record<string, string>).reduce(
@@ -539,9 +601,73 @@ function buildJsHelper(controller: WebviewController): JsHelper {
     });
   };
 
+  const activePdfOps = new Map<string, boolean>();
+
+  const createPdf = (path: string, config: Record<string, number | boolean>, callback: (success: boolean) => void) => {
+    // Per-path mutex: prevent concurrent writes to the same file
+    if (activePdfOps.has(path)) {
+      hilog.warn(DOMAIN, 'DefaultWebview', 'createPdf: operation already in progress for %{public}s', path);
+      callback(false);
+      return;
+    }
+    activePdfOps.set(path, true);
+    const done = (success: boolean) => { activePdfOps.delete(path); callback(success); };
+
+    // API 14+ guard: createPdf is not available on API 12/13 devices
+    if (typeof controller.createPdf !== 'function') {
+      hilog.error(DOMAIN, 'DefaultWebview', 'createPdf requires API 14+, not available on this device');
+      done(false);
+      return;
+    }
+
+    // Merge user config with defaults
+    const mergedConfig: web_webview.PdfConfiguration = { ...DEFAULT_PDF_CONFIG };
+    if (config) {
+      if (config['width'] !== undefined) mergedConfig.width = config['width'] as number;
+      if (config['height'] !== undefined) mergedConfig.height = config['height'] as number;
+      if (config['marginTop'] !== undefined) mergedConfig.marginTop = config['marginTop'] as number;
+      if (config['marginBottom'] !== undefined) mergedConfig.marginBottom = config['marginBottom'] as number;
+      if (config['marginLeft'] !== undefined) mergedConfig.marginLeft = config['marginLeft'] as number;
+      if (config['marginRight'] !== undefined) mergedConfig.marginRight = config['marginRight'] as number;
+      if (config['shouldPrintBackground'] !== undefined) mergedConfig.shouldPrintBackground = config['shouldPrintBackground'] as boolean;
+      if (config['scale'] !== undefined) mergedConfig.scale = config['scale'] as number;
+    }
+
+    controller.createPdf(mergedConfig)
+      .then(async (result) => {
+        try {
+          const buffer = result.pdfArrayBuffer().buffer;
+          if (buffer.byteLength === 0) {
+            hilog.warn(DOMAIN, 'DefaultWebview', 'createPdf: empty PDF buffer (blank page?)');
+            done(false);
+            return;
+          }
+          const file = fileIo.openSync(path, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+          try {
+            await fileIo.write(file.fd, buffer);
+            done(true);
+          } catch (writeErr) {
+            hilog.error(DOMAIN, 'DefaultWebview', 'createPdf write failed: %{public}s', JSON.stringify(writeErr));
+            done(false);
+          } finally {
+            fileIo.closeSync(file);
+          }
+        } catch (err) {
+          hilog.error(DOMAIN, 'DefaultWebview', 'createPdf file IO failed: %{public}s', JSON.stringify(err));
+          done(false);
+        }
+      })
+      .catch((err) => {
+        hilog.error(DOMAIN, 'DefaultWebview', 'createPdf failed: %{public}s', JSON.stringify(err));
+        done(false);
+      });
+  };
   return {
     getUrl,
     getCookies: getCookiesHelper,
+    setCookie: setCookieHelper,
+    setWebDebuggingAccess: setWebDebuggingAccessHelper,
+    isWebDebuggingAccess: isWebDebuggingAccessHelper,
     loadUrl,
     loadHtml,
     zoom,
@@ -552,7 +678,10 @@ function buildJsHelper(controller: WebviewController): JsHelper {
     webPageSnapshot,
     setBackgroundColor: (_color: number) => {},
     setVisible: (_visible: boolean) => {},
+    setBounds: (_x: number, _y: number, _width: number, _height: number) => {},
+    setBlurRadius: (_radius: number) => {},
     dispose: () => {},
+    createPdf,
   } as JsHelper;
 }
 
@@ -574,8 +703,39 @@ export class RustWebviewNodeController extends NodeController {
       return;
     }
 
-    entry.style = style;
-    node.update(entry);
+    const newEntry: WebviewNodeData = { ...entry, style: style };
+    this.webviewEntries.set(webTag, newEntry);
+    // Runtime refresh via AttributeUpdater — node.update does not refresh backdropBlur/backgroundColor,
+    // so Acrylic/Mica tints (set_window_background_color) and blur radius need modifier.attribute to
+    // trigger an immediate component update.
+    if (entry.blurModifier) {
+      if (style.backgroundColor !== undefined && style.backgroundColor !== null) {
+        entry.blurModifier.attribute?.backgroundColor(style.backgroundColor);
+      }
+      if (style.blurRadius !== undefined) {
+        entry.blurModifier.attribute?.backdropBlur(style.blurRadius);
+      }
+    }
+    node.update(newEntry);
+  }
+
+  /**
+   * Update blur radius for all webviews managed by this controller.
+   * Called by WindowManager.setWindowBlur() to apply window-level blur effect.
+   */
+  setAllWebviewsBlurRadius(radius: number): void {
+    for (const [webTag, entry] of this.webviewEntries) {
+      // Runtime refresh via AttributeUpdater — BuilderNode.update does not refresh backdropBlur,
+      // so call modifier.attribute?.backdropBlur(radius) which triggers an immediate update.
+      if (entry.blurModifier) {
+        entry.blurModifier.attribute?.backdropBlur(radius);
+      }
+      // Keep style.blurRadius in sync so any subsequent re-build preserves the value.
+      if (!entry.style) {
+        entry.style = {};
+      }
+      entry.style.blurRadius = radius;
+    }
   }
 
   private buildData(controller: WebviewController) {
@@ -595,6 +755,9 @@ export class RustWebviewNodeController extends NodeController {
       data.uiContext = this.uiContext;
     }
     const prepared = ensureWebviewNodeData(data);
+    if (!prepared.blurModifier) {
+      prepared.blurModifier = new BlurModifier();
+    }
     const webTag = prepared.webTag!;
     if (this.rootNode === null) {
       this.rootNode = new FrameNode(this.uiContext!);
@@ -625,6 +788,11 @@ export class RustWebviewNodeController extends NodeController {
     this.webviewList.delete(webTag);
 
     this.rootNode?.removeChild(node.getFrameNode());
+  }
+
+  getPrimaryWebviewController(): web_webview.WebviewController | null {
+    const firstEntry = this.webviewEntries.values().next().value;
+    return (firstEntry as WebviewNodeData)?.controller ?? null;
   }
 }
 
@@ -671,8 +839,19 @@ export class EmbeddedWebviewManager {
       return;
     }
 
-    entry.data.style = style;
-    entry.content.update(entry.data);
+    const newData: WebviewNodeData = { ...entry.data, style: style };
+    entry.data = newData;
+    entry.content.update(newData);
+  }
+
+  /**
+   * Update blur radius for all embedded webviews managed by this manager.
+   * NOTE: EmbeddedWebBuilder does not attach a BlurModifier and content.update does not refresh
+   * backdropBlur, so this is a no-op. Vibrancy is only supported via RustWebviewNodeController
+   * (WebBuilder path). Kept as no-op to satisfy the controller interface.
+   */
+  setAllWebviewsBlurRadius(_radius: number): void {
+    // No-op: embedded webviews do not support runtime backdropBlur refresh.
   }
 
   removeWebview(webTag: string) {
@@ -691,6 +870,8 @@ declare class WebviewController extends web_webview.WebviewController {
   getCookies: (url: string) => string;
   setBackgroundColor: (color: number) => void;
   setVisible: (visible: boolean) => void;
+  setBounds: (x: number, y: number, width: number, height: number) => void;
+  setBlurRadius: (radius: number) => void;
   dispose: () => void;
   clearAllBrowsingData: () => void;
 }

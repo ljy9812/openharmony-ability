@@ -93,7 +93,7 @@ pub async fn clipboard_write_image(rgba: &[u8], width: u32, height: u32) -> Resu
             rgba.len(), expected, width, height)));
     }
 
-    let (tx, rx) = oneshot::channel::<Result<()>>();
+    let (tx, rx) = oneshot::channel::<std::result::Result<(), String>>();
 
     let tsfn = TSFN_WRITE_IMAGE.get()
         .ok_or_else(|| {
@@ -117,9 +117,7 @@ pub async fn clipboard_write_image(rgba: &[u8], width: u32, height: u32) -> Resu
                     // If writeImageToClipboard returns non-Promise, .then()/.catch() is UB.
                     let value_type = value.get_type()?;
                     if value_type != napi_ohos::ValueType::Object {
-                        let _ = tx.send(Err(Error::from_reason(
-                            "writeImageToClipboard did not return a Promise"
-                        )));
+                        let _ = tx.send(Err("writeImageToClipboard did not return a Promise".to_string()));
                         return Ok(());
                     }
 
@@ -141,13 +139,17 @@ pub async fn clipboard_write_image(rgba: &[u8], width: u32, height: u32) -> Resu
                                 let reason: String = ctx.value.coerce_to_string()
                                     .and_then(|s| s.into_utf8().and_then(|u| u.into_owned()))
                                     .unwrap_or_else(|_| "unknown rejection".to_string());
-                                let _ = sender.send(Err(Error::from_reason(format!("rejected: {}", reason))));
+                                let _ = sender.send(Err(format!("rejected: {}", reason)));
                             }
                             Ok(())
                         })?;
                 }
                 Err(err) => {
-                    let _ = tx.send(Err(err));
+                    // Extract error message as string to avoid sending napi_ohos::Error
+                    // across threads (its Drop calls napi_reference_unref which must
+                    // run on the main thread).
+                    let msg = err.to_string();
+                    let _ = tx.send(Err(msg));
                 }
             }
             Ok(())
@@ -160,8 +162,9 @@ pub async fn clipboard_write_image(rgba: &[u8], width: u32, height: u32) -> Resu
 
     // Add timeout to rx.await — if ArkTS Promise never resolves/rejects,
     // oneshot Receiver waits forever → UI freeze.
-    timeout(Duration::from_secs(10), rx)
+    let result = timeout(Duration::from_secs(10), rx)
         .await
         .map_err(|_| Error::from_reason("clipboard write timed out"))?
-        .map_err(|_| Error::from_reason("clipboard write cancelled"))?
+        .map_err(|_| Error::from_reason("clipboard write cancelled"))?;
+    result.map_err(|msg| Error::from_reason(msg))
 }

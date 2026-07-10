@@ -15,6 +15,7 @@ log = ["dep:log", "dep:ohos-hilog-binding"]
 statusbar = []
 updater = []
 window = []
+global_shortcut = []
 
 [dependencies]
 # common dependencies
@@ -35,6 +36,8 @@ napi-derive-ohos = { workspace = true }
 # for xcomponent native render
 ohos-arkui-binding = { workspace = true, features = ["napi"] }
 ohos-xcomponent-binding = { workspace = true }
+ohos-xcomponent-sys = { workspace = true }
+ohos-arkui-sys = { workspace = true }
 ohos-ime-binding = { workspace = true }
 ohos-display-binding = { workspace = true }
 ohos-resource-manager-binding = { workspace = true }

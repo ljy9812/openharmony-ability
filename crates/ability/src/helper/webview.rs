@@ -8,7 +8,10 @@ use std::{
 use http::{HeaderName, HeaderValue, Request, Response};
 use napi_derive_ohos::napi;
 use napi_ohos::{
-    bindgen_prelude::{CallbackContext, FnArgs, Function, JsObjectValue, JsValue, Object, ObjectRef, PromiseRaw, Uint8Array, Unknown},
+    bindgen_prelude::{
+        CallbackContext, FnArgs, Function, JsObjectValue, JsValue, Object, ObjectRef, PromiseRaw,
+        Uint8Array, Unknown,
+    },
     Either, Error, Result,
 };
 use ohos_web_binding::{ArkWebResponse, CustomProtocolHandler, Web};
@@ -28,8 +31,55 @@ pub struct SnapshotData {
 pub struct WebViewStyle {
     pub x: Option<Either<f64, String>>,
     pub y: Option<Either<f64, String>>,
+    pub width: Option<Either<f64, String>>,
+    pub height: Option<Either<f64, String>>,
     pub visible: Option<bool>,
     pub background_color: Option<u32>,
+}
+
+#[derive(Default, Clone, Debug)]
+pub struct PdfConfig {
+    pub width: Option<f64>,
+    pub height: Option<f64>,
+    pub margin_top: Option<f64>,
+    pub margin_bottom: Option<f64>,
+    pub margin_left: Option<f64>,
+    pub margin_right: Option<f64>,
+    pub scale: Option<f64>,
+    pub should_print_background: Option<bool>,
+}
+
+impl PdfConfig {
+    /// Convert to HashMap for NAPI transport. Only includes fields that are Some.
+    /// Keys use camelCase to match ArkTS PdfConfiguration naming.
+    pub fn to_napi_map(&self) -> HashMap<String, Either<f64, bool>> {
+        let mut map = HashMap::new();
+        if let Some(v) = self.width {
+            map.insert("width".to_string(), Either::A(v));
+        }
+        if let Some(v) = self.height {
+            map.insert("height".to_string(), Either::A(v));
+        }
+        if let Some(v) = self.margin_top {
+            map.insert("marginTop".to_string(), Either::A(v));
+        }
+        if let Some(v) = self.margin_bottom {
+            map.insert("marginBottom".to_string(), Either::A(v));
+        }
+        if let Some(v) = self.margin_left {
+            map.insert("marginLeft".to_string(), Either::A(v));
+        }
+        if let Some(v) = self.margin_right {
+            map.insert("marginRight".to_string(), Either::A(v));
+        }
+        if let Some(v) = self.scale {
+            map.insert("scale".to_string(), Either::A(v));
+        }
+        if let Some(v) = self.should_print_background {
+            map.insert("shouldPrintBackground".to_string(), Either::B(v));
+        }
+        map
+    }
 }
 
 #[napi(object)]
@@ -41,10 +91,13 @@ pub struct DownloadStartResult {
 
 /// Result of the `on_window_new` NAPI callback.
 /// ArkTS reads `allow` to decide whether to call `setWebController(ctrl)` or `setWebController(null)`.
+/// `is_create` controls the window creation mode: true creates a real OS sub-window
+/// (user handler already created it), false uses the in-page dialog.
 #[napi(object)]
 #[derive(Debug, Clone, Default)]
 pub struct OnWindowNewResult {
     pub allow: bool,
+    pub is_create: bool,
 }
 
 type OnDownloadStart<'a> = Option<Function<'a, (String, String), DownloadStartResult>>;
@@ -214,6 +267,36 @@ impl Webview {
         }
     }
 
+    /// Set web debugging access via `WebviewController.setWebDebuggingAccess`
+    /// (a static global setter). The state is tracked ArkTS-side (OHOS has no
+    /// getter). `open_devtools`/`close_devtools` map to this.
+    pub fn set_web_debugging_access(&self, enabled: bool) -> Result<()> {
+        if let Some(env) = get_main_thread_env().borrow().as_ref() {
+            let set_debugging_js_function = self
+                .inner
+                .get_value(env)?
+                .get_named_property::<Function<'_, bool, ()>>("setWebDebuggingAccess")?;
+            set_debugging_js_function.call(enabled)?;
+            Ok(())
+        } else {
+            Err(Error::from_reason("Failed to get main thread env"))
+        }
+    }
+
+    /// Query the tracked web debugging access state. OHOS has no getter for
+    /// `setWebDebuggingAccess`, so this returns the ArkTS-side tracked value.
+    pub fn is_web_debugging_access(&self) -> Result<bool> {
+        if let Some(env) = get_main_thread_env().borrow().as_ref() {
+            let is_debugging_js_function = self
+                .inner
+                .get_value(env)?
+                .get_named_property::<Function<'_, (), bool>>("isWebDebuggingAccess")?;
+            is_debugging_js_function.call(())
+        } else {
+            Err(Error::from_reason("Failed to get main thread env"))
+        }
+    }
+
     pub fn evaluate_script(&self, js: &str) -> Result<()> {
         self.evaluate_script_with_callback(js, None)
     }
@@ -262,8 +345,27 @@ impl Webview {
         }
     }
 
+    /// Set a single cookie for the given url via `WebCookieManager.configCookieSync`.
+    /// `value` must follow the Set-Cookie format (e.g. `name=value; Domain=...; Path=...`).
+    pub fn set_cookie(&self, url: String, value: String) -> Result<()> {
+        if let Some(env) = get_main_thread_env().borrow().as_ref() {
+            let set_cookie_js_function = self.inner.get_value(env)?.get_named_property::<Function<
+                '_,
+                FnArgs<(String, String)>,
+                (),
+            >>("setCookie")?;
+            set_cookie_js_function.call((url, value).into())?;
+            Ok(())
+        } else {
+            Err(Error::from_reason("Failed to get main thread env"))
+        }
+    }
+
     pub fn set_background_color(&self, color: u32) -> Result<()> {
-        crate::debug!("[openharmony-ability] set_background_color(0x{:08X})", color);
+        crate::debug!(
+            "[openharmony-ability] set_background_color(0x{:08X})",
+            color
+        );
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let set_background_color_js_function = self
                 .inner
@@ -289,6 +391,27 @@ impl Webview {
                 .get_value(env)?
                 .get_named_property::<Function<'_, bool, ()>>("setVisible")?;
             set_visible_js_function.call(visible)?;
+            Ok(())
+        } else {
+            Err(Error::from_reason("Failed to get main thread env"))
+        }
+    }
+
+    pub fn set_bounds(&self, x: f64, y: f64, width: f64, height: f64) -> Result<()> {
+        crate::debug!(
+            "[openharmony-ability] set_bounds({}, {}, {}, {})",
+            x,
+            y,
+            width,
+            height
+        );
+        if let Some(env) = get_main_thread_env().borrow().as_ref() {
+            let set_bounds_js_function = self.inner.get_value(env)?.get_named_property::<Function<
+                '_,
+                FnArgs<(f64, f64, f64, f64)>,
+                (),
+            >>("setBounds")?;
+            set_bounds_js_function.call((x, y, width, height).into())?;
             Ok(())
         } else {
             Err(Error::from_reason("Failed to get main thread env"))
@@ -385,6 +508,79 @@ impl Webview {
         } else {
             Err(Error::from_reason("Failed to get main thread env"))
         }
+    }
+
+    /// Generates a PDF of the current web content and writes it to `path`.
+    ///
+    /// IMPORTANT: Must only be called after the page has fully loaded
+    /// (i.e., after onPageEnd fires). Calling earlier produces a blank
+    /// or incomplete PDF.
+    ///
+    /// # Callback contract
+    /// - On success: `callback(true)` is called after the file is written
+    /// - On early errors (invalid env, missing NAPI function): `callback(false)` is called before returning `Err`
+    /// - On catastrophic NAPI failures (closure creation or call fails after callback is moved):
+    ///   the callback is dropped without invocation. This is unrecoverable.
+    pub fn create_pdf(
+        &self,
+        path: &str,
+        config: Option<PdfConfig>,
+        callback: Box<dyn Fn(bool) + Send + 'static>,
+    ) -> Result<()> {
+        let binding = get_main_thread_env();
+        let borrowed = binding.borrow();
+        let env = match borrowed.as_ref() {
+            Some(env) => env,
+            None => {
+                callback(false);
+                return Err(Error::from_reason("Failed to get main thread env"));
+            }
+        };
+
+        let config_map = config.unwrap_or_default().to_napi_map();
+
+        let create_pdf_fn = match self.inner.get_value(env) {
+            Ok(v) => v,
+            Err(e) => {
+                callback(false);
+                return Err(e);
+            }
+        };
+
+        let create_pdf_fn = match create_pdf_fn.get_named_property::<Function<
+            '_,
+            FnArgs<(
+                String,
+                HashMap<String, Either<f64, bool>>,
+                Function<'_, bool, ()>,
+            )>,
+            (),
+        >>("createPdf")
+        {
+            Ok(f) => f,
+            Err(e) => {
+                callback(false);
+                return Err(e);
+            }
+        };
+
+        // callback is moved into the NAPI closure below.
+        // If create_function_from_closure or call() fails after this point,
+        // the callback cannot be invoked — these are catastrophic NAPI failures.
+        let cb = env.create_function_from_closure("create_pdf_callback", move |ctx| {
+            // napi-ohos try_get returns Either<T, JsUnknown>; Either::B covers
+            // the case where the ArkTS callback passes a non-bool (e.g. undefined).
+            let success = ctx.try_get::<bool>(0)?;
+            let success = match success {
+                Either::A(b) => b,
+                Either::B(_) => false,
+            };
+            callback(success);
+            Ok(())
+        })?;
+
+        create_pdf_fn.call((path.to_string(), config_map, cb).into())?;
+        Ok(())
     }
 
     pub fn on_controller_attach<F>(&self, callback: F) -> Result<()>

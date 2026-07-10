@@ -50,6 +50,7 @@ export interface OnDownloadStartResult {
 
 export interface OnWindowNewResult {
   allow: boolean;
+  isCreate: boolean;
 }
 
 export interface WebViewInitData {
@@ -79,6 +80,8 @@ export interface WebViewInitData {
 export interface WebViewStyle {
   x?: number | string;
   y?: number | string;
+  width?: number | string;
+  height?: number | string;
   visible?: boolean;
   backgroundColor?: string | Color | number;
 }
@@ -131,6 +134,9 @@ export interface ArkHelper {
   createOSWindow: (config: WindowConfig) => Promise<number>;
   setWindowDecorations: (windowId: number, decorations: boolean) => void;
   setWindowBackgroundColor: (windowId: number, color: number) => void;
+  focusWindow: (windowId: number) => void;
+  setWindowFocusable: (windowId: number, focusable: boolean) => void;
+  setWindowBlur: (windowId: number, radius: number) => void;
   loadUrl: (id: number, url: string) => void;
   createMenu?: (options: MenuCreateOptions) => Promise<string>;
   createMenuItem?: (options: MenuItemCreateOptions) => Promise<string>;
@@ -154,6 +160,9 @@ export interface ArkHelper {
   autostartEnable: () => Promise<void>;
   autostartDisable: () => Promise<void>;
   autostartIsEnabled: () => Promise<boolean>;
+  registerHotkey: (jsonStr: string) => void;
+  unregisterHotkey: (id: number) => void;
+  unregisterAllHotkeys: () => void;
 }
 
 export interface WindowAvoidAreaInfo {

@@ -19,3 +19,5 @@ export * from "./predefined";
 export * from "./ClipboardHelper";
 
 export * from "./autostart";
+
+export * from "./global_shortcut";

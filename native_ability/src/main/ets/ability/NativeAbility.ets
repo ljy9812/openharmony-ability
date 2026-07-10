@@ -146,6 +146,7 @@ export class NativeAbility extends UIAbility {
     });
     const mainWindow = windowStage.getMainWindowSync();
     executor.setWindow(mainWindow);
+    executor.setContext(this.context as common.UIAbilityContext);
     setPredefinedActionExecutor(executor);
     executor.setShowAboutFn((metadata: AboutMetadataData) => {
       const appName = metadata.name ?? '';
@@ -316,6 +317,20 @@ export class NativeAbility extends UIAbility {
     const uri = want.uri ?? '';
     const parametersJson = JSON.stringify(want.parameters ?? {});
     hilog.info(DOMAIN, 'NativeAbility', 'onNewWant - uri: %{public}s, parametersJson.length: %{public}d', uri, parametersJson.length);
+
+    // Cancel cleanup timer when system triggers onNewWant
+    // This indicates the system's foreground transition has started,
+    // so we don't need the safety net timer anymore.
+    try {
+      const wm = WindowManager.getInstance();
+      if (wm.hasPendingAction()) {
+        hilog.info(DOMAIN, 'NativeAbility', 'onNewWant detected pending action, cancelling cleanup timer');
+        wm.cancelCleanupTimer();
+      }
+    } catch (e) {
+      // WindowManager might not be initialized yet, ignore
+    }
+
     this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onNewWant({ uri, parametersJson }));
   }
 

@@ -17,6 +17,8 @@ proc-macro2 = { version = "1.0" }
 
 ohos-arkui-binding = { version = "0.1" }
 ohos-xcomponent-binding = { version = "0.2" }
+ohos-xcomponent-sys = { version = "0.0.2" }
+ohos-arkui-sys = { version = "0.0.1" }
 ohos-ime-binding = { version = "0.1" }
 ohos-web-binding = { version = "0.1" }
 ohos-display-binding = { version = "0.0.1" }

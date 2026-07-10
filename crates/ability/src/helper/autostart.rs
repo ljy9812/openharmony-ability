@@ -47,8 +47,8 @@ pub fn create_autostart_enable_tsfn(env: &Env) -> Result<Arc<AutostartEnableTsfn
                 let helper_borrow = helper.borrow();
                 if let Some(helper_ref) = helper_borrow.as_ref() {
                     let helper_obj = helper_ref.get_value(env_ref)?;
-                    let fn_ref =
-                        helper_obj.get_named_property::<AutostartEnableCall<'_>>("autostartEnable")?;
+                    let fn_ref = helper_obj
+                        .get_named_property::<AutostartEnableCall<'_>>("autostartEnable")?;
                     return fn_ref.call(());
                 }
             }
@@ -153,8 +153,9 @@ static AUTOSTART_IS_ENABLED_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 pub fn create_autostart_is_enabled_tsfn(env: &Env) -> Result<Arc<AutostartIsEnabledTsfn>> {
     if AUTOSTART_IS_ENABLED_INITIALIZED.load(Ordering::Acquire) {
-        return get_autostart_is_enabled_tsfn()
-            .ok_or_else(|| Error::from_reason("AUTOSTART_IS_ENABLED_TSFN flag set but TSFN is None"));
+        return get_autostart_is_enabled_tsfn().ok_or_else(|| {
+            Error::from_reason("AUTOSTART_IS_ENABLED_TSFN flag set but TSFN is None")
+        });
     }
     let callback: Function<'_, (), Unknown<'_>> =
         env.create_function_from_closure("autostart_is_enabled_callback", move |_ctx| {

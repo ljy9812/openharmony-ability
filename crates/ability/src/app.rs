@@ -5,7 +5,7 @@ use std::{
     fmt::Debug,
     rc::Rc,
     sync::{
-        atomic::{AtomicBool, AtomicI64},
+        atomic::{AtomicBool, AtomicI64, AtomicU64},
         Arc, Mutex, RwLock,
     },
 };
@@ -741,6 +741,27 @@ pub fn drain_pending_window_closes() -> Vec<i32> {
         .lock()
         .map(|mut q| q.drain(..).collect())
         .unwrap_or_default()
+}
+
+// ─── Cursor position tracking ─────────────────────────────────────────────────
+// ArkTS onMouse handler calls update_cursor_position() via NAPI.
+// tao reads these values in cursor_position().
+
+/// Last known cursor X position (f64 stored as u64 bits).
+#[cfg(target_env = "ohos")]
+pub static CURSOR_POSITION_X: AtomicU64 = AtomicU64::new(0);
+/// Last known cursor Y position (f64 stored as u64 bits).
+#[cfg(target_env = "ohos")]
+pub static CURSOR_POSITION_Y: AtomicU64 = AtomicU64::new(0);
+
+/// NAPI function called from ArkTS onMouse handler to update cursor position.
+/// ArkTS passes window-relative coordinates from MouseEvent.x/y.
+#[napi]
+#[cfg(target_env = "ohos")]
+pub fn update_cursor_position(x: f64, y: f64) {
+    use std::sync::atomic::Ordering;
+    CURSOR_POSITION_X.store(x.to_bits(), Ordering::Relaxed);
+    CURSOR_POSITION_Y.store(y.to_bits(), Ordering::Relaxed);
 }
 
 #[derive(Clone)]

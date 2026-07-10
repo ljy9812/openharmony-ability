@@ -2,6 +2,7 @@
   "src": [
     "pages/Index",
     "pages/TransparencyTest",
-    "pages/WindowTransparentTest"
+    "pages/WindowTransparentTest",
+    "pages/KeyRepeatTest"
   ]
 }

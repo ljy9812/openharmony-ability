@@ -1,8 +1,11 @@
 import common from "@ohos.app.ability.common";
+import { Want } from "@kit.AbilityKit";
 import { image } from "@kit.ImageKit";
 import { statusBarManager } from "@kit.DeskTopExtensionKit";
 import { emitter, BusinessError } from "@kit.BasicServicesKit";
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ArkHelper } from "../ability/type";
+import { DOMAIN } from './constants';
 
 // Global state
 let abilityContext: common.UIAbilityContext | null = null;
@@ -22,6 +25,25 @@ export function setHelperRef(ref: ArkHelper | null): void {
 // Re-registered after each addToStatusBar() to bind to the current ScbServerMessageReceiver.
 const iconClickHandler = (event: emitter.EventData): void => {
   console.info('[StatusBar] PROXY iconClickHandler fired!');
+
+  // Auto-restore app from background when tray icon is clicked
+  // Uses startAbility() to bring the hidden Ability back to front
+  if (abilityContext) {
+    try {
+      const bundleName = abilityContext.abilityInfo.bundleName;
+      const abilityName = currentAbilityName;
+      const want: Want = { bundleName, abilityName };
+      abilityContext.startAbility(want).then(() => {
+        hilog.info(DOMAIN, 'StatusBar', 'startAbility succeeded');
+      }).catch((e: Error) => {
+        hilog.warn(DOMAIN, 'StatusBar', 'startAbility failed: %{public}s', String(e));
+      });
+    } catch (e) {
+      hilog.warn(DOMAIN, 'StatusBar', 'startAbility error: %{public}s', String(e));
+    }
+  }
+
+  // Dispatch to Rust _onIconClick handler
   const h = helperRef as ESObject;
   if (h && h._onIconClick) {
     console.info('[StatusBar] dispatching to Rust _onIconClick');

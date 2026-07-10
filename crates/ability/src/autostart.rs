@@ -22,7 +22,7 @@ use futures_channel::oneshot;
 use napi_ohos::{
     bindgen_prelude::{CallbackContext, PromiseRaw, Unknown},
     threadsafe_function::ThreadsafeFunctionCallMode,
-    Error, Result, Status, ValueType,
+    Error, JsValue, Result, Status, ValueType,
 };
 use tokio::time::{timeout, Duration};
 
@@ -47,7 +47,7 @@ impl AutostartManager {
         let tsfn = get_autostart_enable_tsfn()
             .ok_or_else(|| Error::from_reason("autostart enable TSFN not initialized"))?;
 
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel::<std::result::Result<(), String>>();
         let tx_cell = Rc::new(Cell::new(Some(tx)));
 
         let status = tsfn.call_with_return_value(
@@ -55,9 +55,10 @@ impl AutostartManager {
             ThreadsafeFunctionCallMode::NonBlocking,
             move |result, _env| {
                 match result {
-                    Ok(value) => handle_void_promise(value, tx_cell.clone()),
-                    Err(err) => { send_once(&tx_cell, Err(err)); Ok(()) }
+                    Ok(value) => { handle_void_promise(value, tx_cell.clone()); }
+                    Err(err) => { send_once(&tx_cell, Err(err.to_string())); }
                 }
+                Ok(())
             },
         );
 
@@ -69,10 +70,11 @@ impl AutostartManager {
         }
 
         // Timeout: 10s for enable (user may take time in settings page)
-        timeout(Duration::from_secs(10), rx)
+        let result = timeout(Duration::from_secs(10), rx)
             .await
             .map_err(|_| Error::from_reason("autostart enable timed out"))?
-            .map_err(|_| Error::from_reason("autostart enable receiver dropped"))?
+            .map_err(|_| Error::from_reason("autostart enable receiver dropped"))?;
+        result.map_err(|msg| Error::from_reason(msg))
     }
 
     /// Navigate to system autostart settings page.
@@ -84,7 +86,7 @@ impl AutostartManager {
         let tsfn = get_autostart_disable_tsfn()
             .ok_or_else(|| Error::from_reason("autostart disable TSFN not initialized"))?;
 
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel::<std::result::Result<(), String>>();
         let tx_cell = Rc::new(Cell::new(Some(tx)));
 
         let status = tsfn.call_with_return_value(
@@ -92,9 +94,10 @@ impl AutostartManager {
             ThreadsafeFunctionCallMode::NonBlocking,
             move |result, _env| {
                 match result {
-                    Ok(value) => handle_void_promise(value, tx_cell.clone()),
-                    Err(err) => { send_once(&tx_cell, Err(err)); Ok(()) }
+                    Ok(value) => { handle_void_promise(value, tx_cell.clone()); }
+                    Err(err) => { send_once(&tx_cell, Err(err.to_string())); }
                 }
+                Ok(())
             },
         );
 
@@ -106,10 +109,11 @@ impl AutostartManager {
         }
 
         // Timeout: 10s for disable (same as enable)
-        timeout(Duration::from_secs(10), rx)
+        let result = timeout(Duration::from_secs(10), rx)
             .await
             .map_err(|_| Error::from_reason("autostart disable timed out"))?
-            .map_err(|_| Error::from_reason("autostart disable receiver dropped"))?
+            .map_err(|_| Error::from_reason("autostart disable receiver dropped"))?;
+        result.map_err(|msg| Error::from_reason(msg))
     }
 
     /// Query whether autostart is enabled for this app.
@@ -125,7 +129,7 @@ impl AutostartManager {
         let tsfn = get_autostart_is_enabled_tsfn()
             .ok_or_else(|| Error::from_reason("autostart isEnabled TSFN not initialized"))?;
 
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel::<std::result::Result<bool, String>>();
         let tx_cell = Rc::new(Cell::new(Some(tx)));
 
         let status = tsfn.call_with_return_value(
@@ -133,9 +137,10 @@ impl AutostartManager {
             ThreadsafeFunctionCallMode::NonBlocking,
             move |result, _env| {
                 match result {
-                    Ok(value) => handle_bool_promise(value, tx_cell.clone()),
-                    Err(err) => { send_once(&tx_cell, Err(err)); Ok(()) }
+                    Ok(value) => { handle_bool_promise(value, tx_cell.clone()); }
+                    Err(err) => { send_once(&tx_cell, Err(err.to_string())); }
                 }
+                Ok(())
             },
         );
 
@@ -147,10 +152,11 @@ impl AutostartManager {
         }
 
         // Timeout: 5s for isEnabled (pure query, should be fast)
-        timeout(Duration::from_secs(5), rx)
+        let result = timeout(Duration::from_secs(5), rx)
             .await
             .map_err(|_| Error::from_reason("autostart isEnabled timed out"))?
-            .map_err(|_| Error::from_reason("autostart isEnabled receiver dropped"))?
+            .map_err(|_| Error::from_reason("autostart isEnabled receiver dropped"))?;
+        result.map_err(|msg| Error::from_reason(msg))
     }
 }
 
@@ -164,52 +170,60 @@ fn send_once<T>(cell: &Rc<Cell<Option<oneshot::Sender<T>>>>, value: T) {
 
 fn handle_void_promise(
     value: Unknown<'static>,
-    tx: Rc<Cell<Option<oneshot::Sender<Result<()>>>>>,
-) -> Result<()> {
+    tx: Rc<Cell<Option<oneshot::Sender<std::result::Result<(), String>>>>>,
+) {
     // Validate type before unsafe cast (prevent UB on non-Promise values)
-    if value.get_type()? != ValueType::Object {
-        send_once(&tx, Err(Error::from_reason("expected Promise from ArkTS")));
-        return Ok(());
+    let type_check = value.get_type();
+    if !matches!(type_check, Ok(ValueType::Object)) {
+        send_once(&tx, Err("expected Promise from ArkTS".to_string()));
+        return;
     }
 
-    let promise: PromiseRaw<'static, ()> = unsafe { value.cast()? };
+    let promise: PromiseRaw<'static, ()> = unsafe { value.cast().unwrap_unchecked() };
 
     let tx_catch = tx.clone();
-    promise
+    let _ = promise
         .then(move |_ctx: CallbackContext<()>| {
             send_once(&tx, Ok(()));
             Ok(())
-        })?
-        .catch(move |ctx: CallbackContext<Unknown>| {
-            send_once(&tx_catch, Err(ctx.value.into()));
-            Ok(())
-        })?;
-
-    Ok(())
+        })
+        .and_then(|p| {
+            p.catch(move |ctx: CallbackContext<Unknown>| {
+                let msg: String = ctx.value.coerce_to_string()
+                    .and_then(|s| s.into_utf8().and_then(|u| u.into_owned()))
+                    .unwrap_or_else(|_| "unknown rejection".to_string());
+                send_once(&tx_catch, Err(format!("rejected: {}", msg)));
+                Ok(())
+            })
+        });
 }
 
 fn handle_bool_promise(
     value: Unknown<'static>,
-    tx: Rc<Cell<Option<oneshot::Sender<Result<bool>>>>>,
-) -> Result<()> {
+    tx: Rc<Cell<Option<oneshot::Sender<std::result::Result<bool, String>>>>>,
+) {
     // Validate type before unsafe cast (prevent UB on non-Promise values)
-    if value.get_type()? != ValueType::Object {
-        send_once(&tx, Err(Error::from_reason("expected Promise from ArkTS")));
-        return Ok(());
+    let type_check = value.get_type();
+    if !matches!(type_check, Ok(ValueType::Object)) {
+        send_once(&tx, Err("expected Promise from ArkTS".to_string()));
+        return;
     }
 
-    let promise: PromiseRaw<'static, bool> = unsafe { value.cast()? };
+    let promise: PromiseRaw<'static, bool> = unsafe { value.cast().unwrap_unchecked() };
 
     let tx_catch = tx.clone();
-    promise
+    let _ = promise
         .then(move |ctx: CallbackContext<bool>| {
             send_once(&tx, Ok(ctx.value));
             Ok(())
-        })?
-        .catch(move |ctx: CallbackContext<Unknown>| {
-            send_once(&tx_catch, Err(ctx.value.into()));
-            Ok(())
-        })?;
-
-    Ok(())
+        })
+        .and_then(|p| {
+            p.catch(move |ctx: CallbackContext<Unknown>| {
+                let msg: String = ctx.value.coerce_to_string()
+                    .and_then(|s| s.into_utf8().and_then(|u| u.into_owned()))
+                    .unwrap_or_else(|_| "unknown rejection".to_string());
+                send_once(&tx_catch, Err(format!("rejected: {}", msg)));
+                Ok(())
+            })
+        });
 }

@@ -74,7 +74,7 @@ struct FloatPage {
     this.windowClass?.moveWindowTo(this.windowPosition.x, this.windowPosition.y);
   }
 
-  async aboutToAppear(): Promise<void> {
+  aboutToAppear(): void {
     hilog.info(DOMAIN, 'FloatPage', '=== FloatPage aboutToAppear START ===');
     hilog.info(DOMAIN, 'FloatPage', 'Received windowId: %{public}d', this.windowId);
 
@@ -326,6 +326,20 @@ struct FloatPage {
         return true;
       }
       return false;
+    })
+    // Track user touch for tray menu window targeting (D8: migrated from DefaultXComponent).
+    // ArkUI onTouch bubbles from child to parent, covering MenuBarComponent + webview + drag bars.
+    // Note: Web component may internally consume some touch events (scroll/zoom).
+    // If webview touch tracking is unreliable, add onTouch to DefaultXComponent as fallback.
+    // onTouch does not compete with Gesture (PanGesture for drag/resize), confirmed by ArkUI docs.
+    .onTouch((event: TouchEvent) => {
+      if (event.type === TouchType.Down) {
+        try {
+          WindowManager.getInstance().setUserInteractedWindow(this.windowId);
+        } catch (e) {
+          hilog.warn(DOMAIN, 'FloatPage', 'onTouch: WindowManager not ready: %{public}s', String(e));
+        }
+      }
     })
   }
 }
