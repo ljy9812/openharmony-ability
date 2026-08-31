@@ -137,9 +137,8 @@ pub fn can_i_use(syscap: &str) -> bool {
         return false;
     };
 
-    let helper_cell = unsafe { get_helper() };
-    let helper_borrow = helper_cell.borrow();
-    let Some(helper_ref) = helper_borrow.as_ref() else {
+    let helper_cell = get_helper();
+    let Some(helper_ref) = helper_cell.helper() else {
         crate::warn!("can_i_use: ArkHelper not initialized, returning false");
         return false;
     };
@@ -202,7 +201,7 @@ mod tests {
 
     // NAPI-dependent tests: require OHOS device runtime
     // Run via ohos-rust-ut skill:
-    //   PACKAGE=openharmony-ability bash D:/workspace/tauri/tauri/.claude/skills/ohos-rust-ut/scripts/run-ut.sh version::
+    //   PACKAGE=openharmony-ability bash .claude/skills/ohos-rust-ut/scripts/run-ut.sh version::
     #[cfg(target_env = "ohos")]
     mod ohos_device_tests {
         use crate::{init, sdk_api_version, distribution_api_version, can_i_use};

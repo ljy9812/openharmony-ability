@@ -20,14 +20,6 @@ type ShortcutEventChannel = (Sender<ShortcutEvent>, Receiver<ShortcutEvent>);
 static SHORTCUT_EVENT_CHANNEL: LazyLock<ShortcutEventChannel> =
     LazyLock::new(|| bounded::<ShortcutEvent>(256));
 
-/// Returns a clone of the shortcut event channel receiver.
-///
-/// Consumer crates (e.g. tauri-plugin-global-shortcut) use this to
-/// receive shortcut trigger events from the OHOS `inputConsumer` bridge.
-pub fn shortcut_event_receiver() -> Receiver<ShortcutEvent> {
-    SHORTCUT_EVENT_CHANNEL.1.clone()
-}
-
 /// Internal: push a shortcut event onto the channel.
 /// Called from the NAPI callback below.
 pub(crate) fn emit_event(event: ShortcutEvent) {
@@ -44,8 +36,8 @@ pub(crate) fn emit_event(event: ShortcutEvent) {
 /// The `state` parameter is `"Pressed"` or `"Released"`.
 ///
 /// OHOS `inputConsumer` only fires on key-down, so the ArkTS bridge emits
-/// both Pressed and Released events sequentially to match `global-hotkey`
-/// crate behavior on desktop platforms.
+/// both Pressed and Released events sequentially to match the desktop
+/// hotkey crate behavior on desktop platforms.
 #[napi_derive_ohos::napi]
 pub fn emit_shortcut_event(id: u32, state: String) {
     let parsed_state = match state.as_str() {

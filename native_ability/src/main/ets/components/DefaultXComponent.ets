@@ -1,49 +1,67 @@
 import { NodeContent } from "@kit.ArkUI";
-import display from '@ohos.display';
-import {
-  ArkHelper,
-  StatusBarIconRgba,
-  WebViewInitData as NativeWebViewInitData,
-  WindowAvoidAreaInfo,
-} from "../ability/type";
-import { exit, objectAssign } from "../helper";
-import { Loadable } from "../helper/loadable";
-import { requestPermission } from "../helper/permission";
-import common from "@ohos.app.ability.common";
-import window from "@ohos.window";
-import {
-  EmbeddedWebviewManager,
-  RustWebviewNodeController,
-  WebviewStyle,
-  WebviewInitData,
-} from "../webview/DefaultWebview";
+import { FrameNode, NodeController } from "@ohos.arkui.node";
+import { UIContext } from "@ohos.arkui.UIContext";
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { Module } from "../ability/type";
+import { BridgeHostRegistry } from "../bridge/BridgeHost";
+import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
 import { WindowManager } from "../window/WindowManager";
-import { createArkHelper } from "../ability/ArkHelper";
-import {
-  setAbilityContext,
-  setHelperRef,
-  helperRef,
-  statusBarManager,
-  emitter,
-  BusinessError,
-} from "../helper/StatusBarUtils";
-import { DOMAIN, NATIVE_MODULE_STORAGE_KEY, MAIN_WINDOW_ID } from '../helper/constants';
 
 export const RouteName = "NativeAbility";
 
-import web_webview from '@ohos.web.webview';
+let nextRenderOwnerId: number = 1;
 
-export let primaryWebviewControllerCallback: ((controller: web_webview.WebviewController) => void) | null = null;
-
-export function setPrimaryWebviewControllerCallback(cb: (controller: web_webview.WebviewController) => void): void {
+/**
+ * Hook invoked once the primary webview controller has attached. WebviewPlugin.
+ * handleControllerAttached calls `notifyPrimaryWebviewController` after the controller is
+ * attached and verified, injecting it into PredefinedActionExecutor so that Tray
+ * right-click predefined actions (Copy/Cut/Paste/SelectAll/Undo/Redo) can reach the
+ * live webview controller instead of no-op'ing. The callback itself is registered by
+ * NativeAbility.setupMenuPopup via `setPrimaryWebviewControllerCallback`.
+ */
+let primaryWebviewControllerCallback: ((controller: ESObject) => void) | null = null;
+export function setPrimaryWebviewControllerCallback(cb: (controller: ESObject) => void): void {
   primaryWebviewControllerCallback = cb;
 }
-
 export function clearPrimaryWebviewControllerCallback(): void {
   primaryWebviewControllerCallback = null;
 }
 
+/**
+ * Invoker for `primaryWebviewControllerCallback`. Called by WebviewPlugin.
+ * handleControllerAttached to forward the freshly-attached webview controller to
+ * NativeAbility's PredefinedActionExecutor. Kept as a same-module wrapper rather than
+ * exporting the `let` directly: cross-module live-binding of a `let` is unreliable,
+ * whereas an exported function closes over the module-local binding stably.
+ */
+export function notifyPrimaryWebviewController(controller: ESObject): void {
+  if (primaryWebviewControllerCallback) {
+    primaryWebviewControllerCallback(controller);
+    // one-shot: clear after injecting so only the first-attached webview (=main)
+    // controller is captured. Without this, every sub-window attach overwrites
+    // executor.controller, so Tray Copy/Cut run getSelection() on the wrong window.
+    // Mirrors origin/ohdev ArkHelper.ets:411 (lost during bridge refactor).
+    clearPrimaryWebviewControllerCallback();
+  }
+}
+
+
+interface ComponentAttachment {
+  sessionId: string;
+  moduleName: string;
+  renderOwner: string;
+  nativeModule: Module;
+}
+
+/**
+ * Mounts only the Rust XComponent render surface and module root. The generic bridge transport
+ * already belongs to the NativeAbility/module session, so ability-only capabilities do not wait
+ * for this component. A capability that needs ArkUI content (for example WebView) owns a plugin
+ * and mounts its own FrameNode into the root this component provides.
+ *
+ * Every instance must use its own native module. One Ability may host multiple instances (in the
+ * same window or different windows) by declaring and assigning a distinct module to each one.
+ */
 @Component
 export struct DefaultXComponent {
   // Main window mode: moduleName is non-empty
@@ -52,125 +70,136 @@ export struct DefaultXComponent {
   @Prop windowId: number = 0;
 
   private rootSlot = new NodeContent();
-  private webviewController: RustWebviewNodeController | null = null;
-  private nativeModule: ESObject;
-
-  // Global ArkHelper instance (window-agnostic)
-  private helper: ArkHelper = createArkHelper();
-
-  // Check if this is the main window based on windowId
-  private isMainWindow(): boolean {
-    const result = this.windowId === MAIN_WINDOW_ID;
-    hilog.info(DOMAIN, 'DefaultXComponent', 'isMainWindow() called: windowId=%{public}d, result=%{public}b', 
-      this.windowId, result);
-    return result;
-  }
-
-  // loadMode is read only once in aboutToAppear; no need for @StorageProp reactive binding
-  private loadMode: "async" | "sync" = "async";
-
-  aboutToDisappear(): void {
-    hilog.info(DOMAIN, 'DefaultXComponent', 'aboutToDisappear for windowId: %{public}d', this.windowId);
-    // Clean up this window's controller and UIContext from WindowManager
-    try {
-      const wm = WindowManager.getInstance();
-      wm.removeControllerAndUIContext(this.windowId);
-    } catch (e) {
-      hilog.warn(DOMAIN, 'DefaultXComponent', 'aboutToDisappear cleanup failed: %{public}s', String(e));
-    }
-    this.webviewController = null;
-  }
+  private nodeController = new BridgeRootNodeController();
+  @StorageProp("bridgeSessionId") bridgeSessionId: string = "";
+  @StorageProp("loadMode") loadMode: "async" | "sync" = "async";
+  private appearanceGeneration: number = 0;
+  private attachment?: ComponentAttachment;
+  private releasePromise: Promise<void> = Promise.resolve();
 
   async aboutToAppear(): Promise<void> {
-    // Read loadMode once from AppStorage (avoids reactive re-render on AppStorage changes)
-    this.loadMode = (AppStorage.get<string>("loadMode") as "async" | "sync") ?? "async";
-    hilog.info(DOMAIN, 'DefaultXComponent', '=== aboutToAppear START ===');
-    hilog.info(DOMAIN, 'DefaultXComponent', 'Props -> moduleName: "%{public}s", windowId: %{public}d',
-      this.moduleName, this.windowId);
+    const generation = ++this.appearanceGeneration;
+    await this.releasePromise;
+    if (generation !== this.appearanceGeneration) {
+      return;
+    }
+    const moduleName = this.moduleName.trim();
+    hilog.info(0xA01999, 'DefaultXComponent', 'aboutToAppear: moduleName="%{public}s" windowId=%{public}d', moduleName, this.windowId);
 
-    setAbilityContext(this.getUIContext().getHostContext() as common.UIAbilityContext);
-    // Only set helperRef for main window. Sub-windows (FloatPage) create their own
-    // ArkHelper but must NOT overwrite the global helperRef, because:
-    // - Rust's init_tray_tsfn() sets _onIconClick/_onMenuClick only on the main window's helper
-    // - The statusBarManager PROXY callback reads helperRef to dispatch click events
-    // - If a FloatPage overwrites helperRef, the PROXY reads a helper without NAPI callbacks
-    if (this.isMainWindow()) {
-      setHelperRef(this.helper);
+    // Sub-window mode: no moduleName, but windowId > 0.
+    // Create a root FrameNode for webviews to mount into, register with WindowManager.
+    // No bridge host / NativeModule needed — the webview plugin handles rendering.
+    if (!moduleName && this.windowId > 0) {
+      const root = this.nodeController.makeNode(this.getUIContext());
+      WindowManager.getInstance().registerComponentRoot(this.windowId, root);
+      hilog.info(0xA01999, 'DefaultXComponent', 'sub-window mode: root registered for windowId=%{public}d', this.windowId);
+      return;
     }
 
+    if (!moduleName) {
+      throw new Error("DefaultXComponent.moduleName is required");
+    }
+
+    const nativeModule = await NativeModuleLoader.load(moduleName, this.loadMode);
+    if (generation !== this.appearanceGeneration) {
+      return;
+    }
+
+    // Apply transparent background + container color for main windows that were
+    // created with transparent=true. This was dead code after the pluginize refactor
+    // (the old aboutToAppear called it, but the new one didn't). Without this,
+    // backgroundBlurStyle on transparent windows has no visible effect because
+    // the container remains opaque.
+    hilog.info(0xA01999, 'DefaultXComponent', '[DBG] aboutToAppear: calling applyTransparentBackground(windowId=%{public}d)', this.windowId);
+    WindowManager.getInstance().applyTransparentBackground(this.windowId);
+
+    const sessionId = this.bridgeSessionId;
+    if (!sessionId) {
+      throw new Error(
+        "DefaultXComponent cannot render before NativeAbility finishes creating its bridge session",
+      );
+    }
+    const renderOwner = `${sessionId}:${moduleName}:${nextRenderOwnerId++}`;
+    nativeModule.render(this.rootSlot, renderOwner);
+
+    if (generation !== this.appearanceGeneration) {
+      nativeModule.disposeRender(renderOwner);
+      return;
+    }
+
+    const attachment: ComponentAttachment = {
+      sessionId,
+      moduleName,
+      renderOwner,
+      nativeModule,
+    };
+    this.attachment = attachment;
     try {
-      // Register UIContext to WindowManager
-      const uiCtx = this.getUIContext();
-      if (uiCtx) {
-        try {
-          const wm = WindowManager.getInstance();
-          wm.registerUIContext(this.windowId, uiCtx);
-          hilog.info(DOMAIN, 'DefaultXComponent', 'UIContext registered for window %{public}d', this.windowId);
-        } catch (e) {
-          hilog.error(DOMAIN, 'DefaultXComponent', 'Failed to register UIContext: %{public}s', JSON.stringify(e));
-        }
+      const root = this.nodeController.makeNode(this.getUIContext());
+      await BridgeHostRegistry.attachComponent(
+        sessionId,
+        moduleName,
+        renderOwner,
+        this.getUIContext(),
+        root,
+      );
+      if (generation !== this.appearanceGeneration) {
+        await this.releasePromise;
       }
-
-      // Initialize webviewController
-      this.webviewController = new RustWebviewNodeController(uiCtx);
-      hilog.info(DOMAIN, 'DefaultXComponent', 'RustWebviewNodeController created');
-
-      if (this.isMainWindow()) {
-        // Main window mode: call render to set up helper and XComponent
-        hilog.info(DOMAIN, 'DefaultXComponent', 'Entering MAIN WINDOW logic');
-        const moduleName = this.moduleName.trim();
-        if (!moduleName) {
-          hilog.error(DOMAIN, 'DefaultXComponent', 'moduleName is empty, cannot initialize main window');
-          throw new Error("DefaultXComponent.moduleName is required for main window");
-        }
-
-        hilog.info(DOMAIN, 'DefaultXComponent', 'Loading native module: %{public}s', moduleName);
-        this.nativeModule = await Loadable.load(moduleName, this.loadMode);
-        hilog.info(DOMAIN, 'DefaultXComponent', 'Native module loaded, calling render()');
-
-        // Store NAPI module reference in AppStorage so ArkHelper can access
-        // notifyWindowClose() for proper sub-window close lifecycle.
-        // All windows share the same native module loaded from the .so,
-        // so multiple XComponent creations just overwrite with the same reference.
-        AppStorage.setOrCreate<ESObject>(NATIVE_MODULE_STORAGE_KEY, this.nativeModule);
-
-        this.nativeModule.render(this.helper, this.rootSlot);
-        hilog.info(DOMAIN, 'DefaultXComponent', 'render() completed');
-
-        // Register main window to WindowManager (id=0)
-        try {
-          const wm = WindowManager.getInstance();
-          wm.registerController(MAIN_WINDOW_ID, this.webviewController);
-          hilog.info(DOMAIN, 'DefaultXComponent', 'Main window registered to WindowManager with id=%{public}d', MAIN_WINDOW_ID);
-        } catch (err) {
-          hilog.warn(DOMAIN, 'DefaultXComponent', 'Failed to register main window to WindowManager: %{public}s',
-            JSON.stringify(err));
-        }
-      } else {
-        // Sub-window mode: register to WindowManager
-        hilog.info(DOMAIN, 'DefaultXComponent', 'Entering SUB WINDOW logic');
-        if (this.windowId === MAIN_WINDOW_ID) {
-          hilog.error(DOMAIN, 'DefaultXComponent', 'windowId is MAIN_WINDOW_ID but not main window, this should not happen');
-          return;
-        }
-
-        hilog.info(DOMAIN, 'DefaultXComponent', 'Registering sub-window controller with id: %{public}d', this.windowId);
-        const wm = WindowManager.getInstance();
-        wm.registerController(this.windowId, this.webviewController);
-        hilog.info(DOMAIN, 'DefaultXComponent', 'Sub-window controller registered');
+    } catch (error) {
+      if (generation !== this.appearanceGeneration) {
+        await this.releasePromise;
+        return;
       }
-    } catch (err) {
-      hilog.error(DOMAIN, 'DefaultXComponent', 'aboutToAppear FAILED: %{public}s', JSON.stringify(err));
-      throw err;
+      const release = this.releaseAttachment(attachment);
+      this.releasePromise = release;
+      await release;
+      throw new Error(String(error));
     }
+  }
+
+  aboutToDisappear(): void {
+    // Sub-window mode cleanup: unregister component root and dispose FrameNode
+    if (!this.moduleName.trim() && this.windowId > 0) {
+      WindowManager.getInstance().registerComponentRoot(this.windowId, undefined as any);
+      this.nodeController.disposeRoot();
+      return;
+    }
+    this.appearanceGeneration += 1;
+    this.releasePromise = this.releaseAttachment(this.attachment);
+  }
+
+  private releaseAttachment(expected?: ComponentAttachment): Promise<void> {
+    if (expected !== undefined && this.attachment !== expected) {
+      return this.releasePromise;
+    }
+    const attachment = expected ?? this.attachment;
+    this.attachment = undefined;
+    if (attachment === undefined) {
+      this.nodeController.disposeRoot();
+      return Promise.resolve();
+    }
+    attachment.nativeModule.disposeRender(attachment.renderOwner);
+    return BridgeHostRegistry.detachComponent(
+      attachment.sessionId,
+      attachment.moduleName,
+      attachment.renderOwner,
+    )
+      .catch(() => {})
+      .finally(() => {
+        this.nodeController.disposeRoot();
+      });
   }
 
   build() {
     Stack() {
+      // ContentSlot stays below the plugin tree exactly as before: the XComponent/RS render root
+      // is the base layer, and the session plugin tree overlays it with the legacy transparent
+      // hit-test policy.
       ContentSlot(this.rootSlot)
       Row() {
         Column() {
-          NodeContainer(this.webviewController)
+          NodeContainer(this.nodeController)
             .height("100%")
             .width("100%")
         }
@@ -181,5 +210,28 @@ export struct DefaultXComponent {
       .backgroundColor(Color.Transparent)
     }
     .backgroundColor(Color.Transparent);
+  }
+}
+
+/**
+ * Owns this native module's single component root FrameNode. Plugins never touch this controller directly; they
+ * receive the root through `BridgePluginContext.getRootFrameNode()`.
+ */
+class BridgeRootNodeController extends NodeController {
+  private root: FrameNode | null = null;
+
+  makeNode(uiContext: UIContext): FrameNode {
+    if (this.root === null) {
+      this.root = new FrameNode(uiContext);
+    }
+    return this.root;
+  }
+
+  disposeRoot(): void {
+    const root = this.root;
+    this.root = null;
+    try {
+      root?.dispose();
+    } catch {}
   }
 }

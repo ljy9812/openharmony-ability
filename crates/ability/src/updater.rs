@@ -2,24 +2,104 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-//! Updater functionality for OpenHarmony via AppGallery.
+//! Updater functionality for OpenHarmony via AppGallery (bridge plugin).
 //!
-//! The ArkTS side (`helper/updater.ets`) provides async operations backed by
-//! `updateManager` from `@kit.AppGalleryKit`. The TSFN infrastructure (in
-//! `helper/updater.rs`) bridges ArkTS Promises to Rust Futures.
+//! The ArkTS half (`plugins/updater/src/main/ets/UpdaterPlugin.ets`) is an
+//! `AsyncPluginBase` with id `ohos.updater` and `requires: ["ability"]`. It
+//! wraps `updateManager` from `@kit.AppGalleryKit` and exposes two actions:
+//! - `check`              → pure query via `updateManager.checkAppUpdate`; no
+//!   dialog. Returns `updateAvailable` plus `currentVersion` / `version` /
+//!   `body` / `date`.
+//! - `downloadAndInstall` → shows the system AppGallery update dialog, which
+//!   drives the entire download + install flow.
+//!
+//! This replaces the former TSFN transport (`helper/updater.ets` +
+//! `get_updater_check_tsfn()` / `get_updater_download_and_install_tsfn()`).
+//! Those globals were never initialized after the `#[ability]` derive
+//! refactor — `set_helper` is never called, so the TSFN callbacks could not
+//! resolve `helper.updaterCheck()` / `updaterDownloadAndInstall()`, and every
+//! call failed at runtime with "TSFN not initialized". The bridge plugin model
+//! routes through `OpenHarmonyApp::bridge()` → `bridgeInvoke`, which is wired
+//! up per Ability session.
 
-use std::{cell::Cell, rc::Rc};
-
-use futures_channel::oneshot;
-use napi_ohos::{
-    bindgen_prelude::{CallbackContext, JsObjectValue, Object, PromiseRaw, Unknown},
-    threadsafe_function::ThreadsafeFunctionCallMode,
-    Error, JsValue, Result, Status,
-};
+use napi_derive_ohos::napi;
+use napi_ohos::{Error, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::helper::{get_updater_check_tsfn, get_updater_download_and_install_tsfn};
+use crate::{
+    impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgeContextRequirement,
+    BridgeNapiType, BridgePlugin, BridgeRuntime, OpenHarmonyApp,
+};
 
+// ── Plugin identity ────────────────────────────────────────────────────────
+
+/// Core-privileged OHOS capability (not Tauri-shaped).
+///
+/// First-class OHOS ability exposed on par with `RuntimeInitArgs.app`.
+/// Intentionally NOT facade-ized: the API has no Tauri shape (pure OHOS
+/// platform capability). Precedent: `OpenHarmonyApp::updater()`.
+pub struct UpdaterBridgePlugin;
+
+impl BridgePlugin for UpdaterBridgePlugin {
+    type Mode = AsyncBridge;
+
+    const ID: &'static str = "ohos.updater";
+    const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
+        &[BridgeContextRequirement::Ability];
+}
+
+// ── Request / Response contracts ────────────────────────────────────────────
+
+/// Empty request marker for the `check` action.
+#[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct UpdaterCheckRequest {}
+
+impl_bridge_napi_type!(UpdaterCheckRequest, "ohos.updater.CheckRequest");
+
+/// Response carrying the AppGallery update probe result. The `update_available`
+/// flag lets the Rust facade decide whether to surface a `CheckResult`.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct UpdaterCheckResponse {
+    pub update_available: bool,
+    pub current_version: String,
+    pub version: String,
+    pub body: Option<String>,
+    pub date: Option<String>,
+}
+
+impl_bridge_napi_type!(UpdaterCheckResponse, "ohos.updater.CheckResponse");
+
+/// Empty request marker for the `downloadAndInstall` action.
+#[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct UpdaterDownloadAndInstallRequest {}
+
+impl_bridge_napi_type!(
+    UpdaterDownloadAndInstallRequest,
+    "ohos.updater.DownloadAndInstallRequest"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct UpdaterDownloadAndInstallResponse {
+    pub accepted: bool,
+}
+
+impl_bridge_napi_type!(
+    UpdaterDownloadAndInstallResponse,
+    "ohos.updater.DownloadAndInstallResponse"
+);
+
+// ── CheckResult (public serde type) ─────────────────────────────────────────
+
+/// Core-privileged OHOS capability (not Tauri-shaped).
+///
+/// First-class OHOS ability exposed on par with `RuntimeInitArgs.app`.
+/// Intentionally NOT facade-ized: the API has no Tauri shape (pure OHOS
+/// platform capability). Precedent: `OpenHarmonyApp::updater()`.
+///
 /// Result from checking for updates via AppGallery.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,174 +110,95 @@ pub struct CheckResult {
     pub date: Option<String>,
 }
 
-/// Updater handle for checking and installing updates via AppGallery.
+// ── Updater facade ───────────────────────────────────────────────────────────
+
+/// Core-privileged OHOS capability (not Tauri-shaped).
 ///
-/// Obtain via `OpenHarmonyApp::updater()`.
-pub struct Updater;
+/// First-class OHOS ability exposed on par with `RuntimeInitArgs.app`.
+/// Intentionally NOT facade-ized: the API has no Tauri shape (pure OHOS
+/// platform capability). Precedent: `OpenHarmonyApp::updater()`.
+///
+/// Updater handle for checking and installing updates via AppGallery.
+/// Holds a [`BridgeRuntime`] clone obtained from [`OpenHarmonyApp::bridge`].
+///
+/// # Breaking change (2026-08-21)
+///
+/// `OpenHarmonyApp::updater()` previously returned `Updater` directly (the handle
+/// was zero-sized and relied on global TSFNs). Those TSFNs were never wired up
+/// after the `#[ability]` derive refactor (`set_helper` is never called), so
+/// every call silently failed. The method now returns `Result<Updater>` and the
+/// handle resolves the bridge runtime explicitly. Callers must update:
+///
+/// ```ignore
+/// // before
+/// let updater = app.updater();
+/// // after
+/// let updater = app.updater()?;
+/// ```
+pub struct Updater {
+    bridge: BridgeRuntime,
+}
 
 impl Updater {
+    /// Create a new handle bound to the given app's bridge runtime.
+    pub(crate) fn new(app: &OpenHarmonyApp) -> Result<Self> {
+        Ok(Self {
+            bridge: app.bridge()?,
+        })
+    }
+
     /// Check for app updates via AppGallery. Pure query — no dialog is shown.
     /// Returns `Ok(Some(result))` if an update is available, `Ok(None)` otherwise.
     pub async fn check(&self) -> Result<Option<CheckResult>> {
-        let tsfn = get_updater_check_tsfn()
-            .ok_or_else(|| Error::from_reason("updater check TSFN not initialized"))?;
-
-        let (tx, rx) = oneshot::channel::<std::result::Result<Option<CheckResult>, String>>();
-        let tx_cell = Rc::new(Cell::new(Some(tx)));
-
-        let status = tsfn.call_with_return_value(
-            (),
-            ThreadsafeFunctionCallMode::NonBlocking,
-            move |result, _env| {
-                match result {
-                    Ok(value) => {
-                        handle_check_promise(value, tx_cell.clone());
-                    }
-                    Err(err) => send_once(&tx_cell, Err(err.to_string())),
-                }
-                Ok(())
-            },
-        );
-
-        if status != Status::Ok {
-            return Err(Error::from_reason(format!(
-                "call updaterCheck TSFN failed: {:?}",
-                status
-            )));
+        let response = self
+            .call::<UpdaterCheckRequest, UpdaterCheckResponse>(
+                "check",
+                UpdaterCheckRequest {},
+            )
+            .await?;
+        if !response.update_available {
+            return Ok(None);
         }
-
-        rx.await
-            .map_err(|_| Error::from_reason("updater check receiver dropped"))?
-            .map_err(|msg| Error::from_reason(msg))
+        Ok(Some(CheckResult {
+            current_version: response.current_version,
+            version: response.version,
+            body: response.body,
+            date: response.date,
+        }))
     }
 
     /// Show the AppGallery update dialog. Drives the full download+install flow.
     pub async fn download_and_install(&self) -> Result<()> {
-        let tsfn = get_updater_download_and_install_tsfn()
-            .ok_or_else(|| Error::from_reason("updater download_and_install TSFN not initialized"))?;
-
-        let (tx, rx) = oneshot::channel::<std::result::Result<(), String>>();
-        let tx_cell = Rc::new(Cell::new(Some(tx)));
-
-        let status = tsfn.call_with_return_value(
-            (),
-            ThreadsafeFunctionCallMode::NonBlocking,
-            move |result, _env| {
-                match result {
-                    Ok(value) => {
-                        handle_void_promise(value, tx_cell.clone());
-                    }
-                    Err(err) => send_once(&tx_cell, Err(err.to_string())),
-                }
-                Ok(())
-            },
-        );
-
-        if status != Status::Ok {
-            return Err(Error::from_reason(format!(
-                "call updaterDownloadAndInstall TSFN failed: {:?}",
-                status
-            )));
-        }
-
-        rx.await
-            .map_err(|_| Error::from_reason("updater download_and_install receiver dropped"))?
-            .map_err(|msg| Error::from_reason(msg))
-    }
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────
-
-/// Send a value through a oneshot sender that is wrapped in `Rc<Cell<Option>>`.
-/// Only the first call actually sends; subsequent calls are no-ops.
-fn send_once<T>(cell: &Rc<Cell<Option<oneshot::Sender<T>>>>, value: T) {
-    if let Some(sender) = cell.replace(None) {
-        let _ = sender.send(value);
-    }
-}
-
-/// Attach `.then`/`.catch` to the ArkTS `updaterCheck` Promise.
-/// Extracts CheckResult fields on the JS thread (NAPI values cannot cross threads).
-fn handle_check_promise(
-    value: Unknown<'static>,
-    tx: Rc<Cell<Option<oneshot::Sender<std::result::Result<Option<CheckResult>, String>>>>>,
-) {
-    let promise = unsafe { value.cast::<PromiseRaw<'static, Object<'static>>>() };
-    let promise = match promise {
-        Ok(p) => p,
-        Err(e) => {
-            send_once(&tx, Err(e.to_string()));
-            return;
-        }
-    };
-
-    let tx_then = tx.clone();
-    let _ = promise
-        .then(move |ctx: CallbackContext<Object<'static>>| {
-            let result = parse_check_result(&ctx.value);
-            send_once(&tx_then, result.map_err(|e| e.to_string()));
+        let response = self
+            .call::<UpdaterDownloadAndInstallRequest, UpdaterDownloadAndInstallResponse>(
+                "downloadAndInstall",
+                UpdaterDownloadAndInstallRequest {},
+            )
+            .await?;
+        if response.accepted {
             Ok(())
-        })
-        .and_then(|p| {
-            p.catch(move |ctx: CallbackContext<Unknown>| {
-                let msg: String = ctx.value.coerce_to_string()
-                    .and_then(|s| s.into_utf8().and_then(|u| u.into_owned()))
-                    .unwrap_or_else(|_| "unknown rejection".to_string());
-                send_once(&tx, Err(format!("rejected: {}", msg)));
-                Ok(())
-            })
-        });
-}
-
-/// Attach `.then`/`.catch` to a `Promise<void>`.
-fn handle_void_promise(
-    value: Unknown<'static>,
-    tx: Rc<Cell<Option<oneshot::Sender<std::result::Result<(), String>>>>>,
-) {
-    let promise = unsafe { value.cast::<PromiseRaw<'static, ()>>() };
-    let promise = match promise {
-        Ok(p) => p,
-        Err(e) => {
-            send_once(&tx, Err(e.to_string()));
-            return;
+        } else {
+            Err(Error::from_reason("updater downloadAndInstall rejected by plugin"))
         }
-    };
-
-    let tx_then = tx.clone();
-    let _ = promise
-        .then(move |_ctx: CallbackContext<()>| {
-            send_once(&tx_then, Ok(()));
-            Ok(())
-        })
-        .and_then(|p| {
-            p.catch(move |ctx: CallbackContext<Unknown>| {
-                let msg: String = ctx.value.coerce_to_string()
-                    .and_then(|s| s.into_utf8().and_then(|u| u.into_owned()))
-                    .unwrap_or_else(|_| "unknown rejection".to_string());
-                send_once(&tx, Err(format!("rejected: {}", msg)));
-                Ok(())
-            })
-        });
-}
-
-/// Extract CheckResult fields from a JS Object.
-/// Must run on the JS main thread (NAPI values are thread-bound).
-fn parse_check_result(obj: &Object<'static>) -> Result<Option<CheckResult>> {
-    let update_available = obj.get_named_property::<bool>("updateAvailable").unwrap_or(false);
-    if !update_available {
-        return Ok(None);
     }
 
-    Ok(Some(CheckResult {
-        current_version: obj
-            .get_named_property::<String>("currentVersion")
-            .unwrap_or_else(|_| "unknown".to_string()),
-        version: obj
-            .get_named_property::<String>("version")
-            .unwrap_or_else(|_| "unknown".to_string()),
-        body: obj.get("body").ok().flatten(),
-        date: obj.get("date").ok().flatten(),
-    }))
+    async fn call<Request, Response>(
+        &self,
+        action: &str,
+        request: Request,
+    ) -> Result<Response>
+    where
+        Request: BridgeNapiType,
+        Response: BridgeNapiType,
+    {
+        self.bridge
+            .call_async::<UpdaterBridgePlugin, Request, Response>(
+                action,
+                request,
+                BridgeCallOptions::default(),
+            )
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -243,5 +244,34 @@ mod tests {
         };
         let json = serde_json::to_value(&result).unwrap();
         assert_eq!(json["version"], "unknown");
+    }
+
+    #[test]
+    fn updater_plugin_targets_ability_context() {
+        assert_eq!(UpdaterBridgePlugin::ID, "ohos.updater");
+        assert_eq!(
+            UpdaterBridgePlugin::REQUIRED_CONTEXTS,
+            &[BridgeContextRequirement::Ability]
+        );
+    }
+
+    #[test]
+    fn updater_types_have_stable_named_napi_contracts() {
+        assert_eq!(
+            <UpdaterCheckRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.updater.CheckRequest"
+        );
+        assert_eq!(
+            <UpdaterCheckResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.updater.CheckResponse"
+        );
+        assert_eq!(
+            <UpdaterDownloadAndInstallRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.updater.DownloadAndInstallRequest"
+        );
+        assert_eq!(
+            <UpdaterDownloadAndInstallResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.updater.DownloadAndInstallResponse"
+        );
     }
 }

@@ -114,6 +114,52 @@ export class AcceleratorMatcher {
     return this.matchedItem;
   }
 
+  /**
+   * Returns true if the key event is a clipboard accelerator (Ctrl+C/X/V/A/Z/Y).
+   * Used by onKeyPreIme to block native clipboard shortcuts when with_clipboard(false).
+   * Orthogonal to matches(): matches() always skips clipboard keys (lets ArkWeb handle);
+   * this method identifies them so the caller can consume them when clipboard is disabled.
+   */
+  matchesClipboardShortcut(event: KeyEvent): boolean {
+    if (event.type !== KeyType.Down) {
+      return false;
+    }
+    if (MODIFIER_KEYCODES.has(event.keyCode)) {
+      return false;
+    }
+    const keyText = this.getKeyText(event);
+    if (!keyText) {
+      return false;
+    }
+    let combo = '';
+    if (this.isModifierPressed(event, 'Ctrl')) combo += 'ctrl+';
+    combo += keyText.toLowerCase();
+    return CLIPBOARD_ACCELERATORS.has(combo);
+  }
+
+  /**
+   * Returns true if the key event is a zoom hotkey (Ctrl+=/-/0, incl. KEYCODE_* forms).
+   * Used by onKeyPreIme to block native zoom when with_zoom_hotkeys(false).
+   * See ohos-webview-flag-zoom-hotkeys spec.
+   */
+  matchesZoomShortcut(event: KeyEvent): boolean {
+    if (event.type !== KeyType.Down) {
+      return false;
+    }
+    if (MODIFIER_KEYCODES.has(event.keyCode)) {
+      return false;
+    }
+    if (!this.isModifierPressed(event, 'Ctrl')) {
+      return false;
+    }
+    const keyText = this.getKeyText(event);
+    if (!keyText) {
+      return false;
+    }
+    const k = keyText.toLowerCase();
+    return k === '=' || k === '0' || k === '-' || k === 'equals' || k === 'minus';
+  }
+
   private getKeyText(event: KeyEvent): string | null {
     const text = event.keyText;
     if (!text) {
@@ -139,4 +185,40 @@ export class AcceleratorMatcher {
     }
     return text;
   }
+}
+
+// Per-window clipboard flag: windowId -> clipboard enabled (default true = ArkWeb native).
+// Set by ArkHelper.createWebview from WebviewInitData.clipboard; read by onKeyPreIme
+// to decide whether to block clipboard shortcuts. See ohos-webview-flag-clipboard spec.
+const clipboardEnabledMap: Map<number, boolean> = new Map();
+
+export function setClipboardEnabled(windowId: number, enabled: boolean): void {
+  clipboardEnabledMap.set(windowId, enabled);
+}
+
+export function isClipboardEnabled(windowId: number): boolean {
+  // Default true (ArkWeb native clipboard) when not explicitly set.
+  return clipboardEnabledMap.get(windowId) ?? true;
+}
+
+export function clearClipboardEnabled(windowId: number): void {
+  clipboardEnabledMap.delete(windowId);
+}
+
+// Per-window zoom-hotkeys flag: windowId -> enabled (default true = ArkWeb native zoom).
+// Set by ArkHelper.createWebview from WebviewInitData.zoomHotkeysEnabled; read by onKeyPreIme
+// to decide whether to block zoom hotkeys. See ohos-webview-flag-zoom-hotkeys spec.
+const zoomHotkeysEnabledMap: Map<number, boolean> = new Map();
+
+export function setZoomHotkeysEnabled(windowId: number, enabled: boolean): void {
+  zoomHotkeysEnabledMap.set(windowId, enabled);
+}
+
+export function isZoomHotkeysEnabled(windowId: number): boolean {
+  // Default true (ArkWeb native zoom) when not explicitly set.
+  return zoomHotkeysEnabledMap.get(windowId) ?? true;
+}
+
+export function clearZoomHotkeysEnabled(windowId: number): void {
+  zoomHotkeysEnabledMap.delete(windowId);
 }

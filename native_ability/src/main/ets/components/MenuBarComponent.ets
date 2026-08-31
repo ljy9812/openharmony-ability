@@ -3,16 +3,23 @@ import { AcceleratorMatcher } from '../helper/accelerator_matcher';
 import { image } from '@kit.ImageKit';
 import { buffer } from '@kit.ArkTS';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 
 // --- Per-window click handler registry (MW-1) ---
 const windowMenuClickHandlers: Map<number, (item: MenuItemData) => void> = new Map();
 
 export function setMenuClickHandler(windowId: number, handler: (item: MenuItemData) => void): void {
+  hilog.info(0x1999, 'MenuBar', 'setMenuClickHandler registered for windowId=%{public}d', windowId);
   windowMenuClickHandlers.set(windowId, handler);
 }
 
 export function getMenuClickHandler(windowId: number): ((item: MenuItemData) => void) | null {
-  return windowMenuClickHandlers.get(windowId) ?? null;
+  const handler = windowMenuClickHandlers.get(windowId) ?? null;
+  if (!handler) {
+    hilog.warn(0x1999, 'MenuBar', 'getMenuClickHandler NULL for windowId=%{public}d (map size=%{public}d)',
+      windowId, windowMenuClickHandlers.size);
+  }
+  return handler;
 }
 
 export function unregisterMenuClickHandler(windowId: number): void {
@@ -133,7 +140,10 @@ export struct MenuBarComponent {
         `submenuItems=${this.menubarItems.length}, details=${submenuDetails.join('; ')}`
       );
       // If dropdown is open, close and reopen to force re-render with updated data
+      // 诊断埋点#3：close-reopen 分支。判读：若点击后先看到此日志再看到 onWillDisappear → 根因B
+      // (set-menubar 二次到达触发 close-reopen，reopen 因 activeDropdownId 已被清空而失败)。
       if (this.activeDropdownShown && this.activeDropdownId) {
+        hilog.info(0x1999, 'MenuBar', 'onMenubarJsonChange close-reopen: activeId=%{public}s', this.activeDropdownId);
         this.activeDropdownShown = false;
         setTimeout(() => {
           this.activeDropdownShown = true;
@@ -203,17 +213,27 @@ export struct MenuBarComponent {
   // --- Native icon resolution ---
 
   /**
-   * Maps a nativeIcon string (e.g. "sys.symbol.ohos_star") to a SymbolGlyphModifier.
-   * $r() requires compile-time string literals, so we use a switch/case for known-valid variants.
+   * Maps a nativeIcon string (e.g. "sys.symbol.ohos_star") to the raw symbol Resource.
+   * $r() requires compile-time string literals, so we use a switch/case for known-valid variants
+   * (names validated against the SDK's sysResource.js symbol table).
    * Returns null for unmapped icons, which renders as no icon (consistent with Windows/Linux).
    */
-  private nativeIconSymbol(nativeIcon: string): SymbolGlyphModifier | null {
+  private nativeIconResource(nativeIcon: string): Resource | null {
     switch (nativeIcon) {
-      case 'sys.symbol.ohos_star': return new SymbolGlyphModifier($r('sys.symbol.ohos_star'));
-      case 'sys.symbol.ohos_lock': return new SymbolGlyphModifier($r('sys.symbol.ohos_lock'));
-      case 'sys.symbol.ohos_wifi': return new SymbolGlyphModifier($r('sys.symbol.ohos_wifi'));
+      case 'sys.symbol.ohos_star': return $r('sys.symbol.ohos_star');
+      case 'sys.symbol.ohos_lock': return $r('sys.symbol.ohos_lock');
+      case 'sys.symbol.ohos_wifi': return $r('sys.symbol.ohos_wifi');
+      case 'sys.symbol.folder': return $r('sys.symbol.folder');
       default: return null;
     }
+  }
+
+  /**
+   * Maps a nativeIcon string to a SymbolGlyphModifier (for MenuItem symbolStartIcon).
+   */
+  private nativeIconSymbol(nativeIcon: string): SymbolGlyphModifier | null {
+    const resource = this.nativeIconResource(nativeIcon);
+    return resource ? new SymbolGlyphModifier(resource) : null;
   }
 
   // --- Menu builders ---
@@ -270,6 +290,8 @@ export struct MenuBarComponent {
               .enabled(item.enabled ?? true)
               .onClick(() => {
                 const handler = getMenuClickHandler(this.windowId);
+                hilog.info(0x1999, 'MenuBar', 'menuItem onClick id=%{public}s windowId=%{public}d handler=%{public}s',
+                  item.id, this.windowId, handler ? 'found' : 'NULL');
                 if (handler) {
                   handler(item);
                 }
@@ -323,20 +345,31 @@ export struct MenuBarComponent {
               .width(16)
               .height(16)
               .margin({ right: 4 })
+          } else if (item.nativeIcon && this.nativeIconResource(item.nativeIcon)) {
+            // Top-level nativeIcon: render as a system symbol, mirroring the
+            // Image branch above (submenu icon and nativeIcon are mutually exclusive)
+            SymbolGlyph(this.nativeIconResource(item.nativeIcon) as Resource)
+              .fontSize(16)
+              .margin({ right: 4 })
           }
           Text(item.text ?? '')
             .fontSize(14)
-            .fontColor((item.enabled ?? true) ? $r('app.color.menubar_text') : $r('app.color.menubar_text_disabled'))
+            .fontColor((item.enabled ?? true) ? '#333333' : '#999999')
         }
         .padding({ left: 12, right: 12, top: 10, bottom: 10 })
         .enabled(item.enabled ?? true)
         .opacity((item.enabled ?? true) ? 1.0 : 0.5)
         .backgroundColor(
-          this.activeDropdownId === item.id ? $r('app.color.menubar_item_active') :
-          this.hoveredItemId === item.id ? $r('app.color.menubar_item_hover') :
-          $r('app.color.menubar_bg')
+          this.activeDropdownId === item.id ? '#E0E0E0' :
+          this.hoveredItemId === item.id ? '#EBEBEB' :
+          '#F5F5F5'
         )
         .onClick(() => {
+          // 诊断埋点#1：menubar Row 点击。判读：
+          //  - 若点击后立即看到 onWillDisappear 且无第二次 onClick → 根因A（bindMenu 竞争/子窗口失焦）
+          //  - 若 onWillDisappear 在无 onClick 的情况下触发 → 根因C（子窗口 attach/focus 时序）
+          hilog.info(0x1999, 'MenuBar', 'dropdown onClick id=%{public}s prevShown=%{public}s prevActive=%{public}s',
+            item.id, this.activeDropdownShown, this.activeDropdownId);
           this.activeDropdownId = item.id;
           this.activeDropdownShown = true;
         })
@@ -349,6 +382,8 @@ export struct MenuBarComponent {
           {
             showInSubWindow: true,
             onWillDisappear: () => {
+              // 诊断埋点#2：dropdown 消失。判读：配合埋点#1 的时序判断根因 A/B/C
+              hilog.info(0x1999, 'MenuBar', 'onWillDisappear activeId=%{public}s', this.activeDropdownId);
               this.activeDropdownShown = false;
               this.activeDropdownId = '';
             }
@@ -358,7 +393,7 @@ export struct MenuBarComponent {
     }
     .width('100%')
     .height(40)
-    .backgroundColor($r('app.color.menubar_bg'))
+    .backgroundColor('#F5F5F5')
     .alignItems(VerticalAlign.Center)
   }
 
@@ -393,6 +428,8 @@ export struct MenuBarComponent {
         menubarVisibilityTracker.set(this.windowId, visible);
       },
       onMenuPopup: (json: string, x: number, y: number) => {
+        hilog.info(0x1999, 'MenuBar', 'onMenuPopup windowId=%{public}d x=%{public}d y=%{public}d jsonLen=%{public}d',
+          this.windowId, x, y, json.length);
         this.menuJson = json;
         this.menuX = x;
         this.menuY = y;
@@ -434,15 +471,19 @@ export struct MenuBarComponent {
         this.MenuBarRow()
       }
 
-      // Popup menu anchor (1x1 invisible)
+      // Popup menu anchor (1x1 invisible). Use bindContextMenu (not bindMenu):
+      // bindMenu + showInSubWindow on an invisible anchor renders visually but
+      // does not deliver pointer events to MenuItem.onClick in the sub-window.
+      // bindContextMenu is the documented sub-window menu API (HarmonyOS 5.0.0/API12+),
+      // and its MenuItem.onClick fires reliably. Position via `offset` (API12);
+      // `anchorPosition` is API20+ and unavailable here.
       Column()
         .width(1)
         .height(1)
         .position({ x: 0, y: 0 })
-        .bindMenu(this.menuShown, this.MenuContent, {
-          anchorPosition: { x: this.menuX, y: this.menuY },
-          showInSubWindow: true,
-          onWillDisappear: () => {
+        .bindContextMenu(this.menuShown, this.MenuContent, {
+          offset: { x: this.menuX, y: this.menuY },
+          aboutToDisappear: () => {
             this.menuShown = false;
           }
         })

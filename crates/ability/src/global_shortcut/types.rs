@@ -129,7 +129,7 @@ impl Key {
     }
 }
 
-/// State of a shortcut event — matches `global-hotkey` crate's `HotKeyState`.
+/// State of a shortcut event — matches the desktop hotkey crate's `HotKeyState`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ShortcutState {
     Pressed,
@@ -143,20 +143,6 @@ pub struct ShortcutEvent {
     pub id: u32,
     /// Whether the key was pressed or released.
     pub state: ShortcutState,
-}
-
-/// Internal request sent via crossbeam channel to the forwarder thread.
-#[derive(Debug, Clone)]
-pub(crate) enum ShortcutRequest {
-    Register {
-        id: u32,
-        pre_key1: u32,  // first modifier key code (0 = unused)
-        pre_key2: u32,  // second modifier key code (0 = unused)
-        final_key: u32, // main key code
-    },
-    Unregister {
-        id: u32,
-    },
 }
 
 #[cfg(test)]
@@ -218,36 +204,5 @@ mod tests {
         let json_r = serde_json::to_string(&released).unwrap();
         assert_eq!(json_p, r#""Pressed""#);
         assert_eq!(json_r, r#""Released""#);
-    }
-
-    #[test]
-    fn modifier_count_validation() {
-        // The public API validates max 2 modifiers.
-        // This test verifies the constant is correct.
-        let max_modifiers: usize = 2;
-        let valid: Vec<Modifier> = vec![Modifier::Control, Modifier::Shift];
-        assert!(valid.len() <= max_modifiers);
-
-        let invalid: Vec<Modifier> = vec![Modifier::Control, Modifier::Shift, Modifier::Alt];
-        assert!(invalid.len() > max_modifiers);
-    }
-
-    #[test]
-    fn shortcut_request_register() {
-        let req = ShortcutRequest::Register {
-            id: 1,
-            pre_key1: 2072, // Ctrl
-            pre_key2: 2047, // Shift
-            final_key: 2017, // A
-        };
-        match req {
-            ShortcutRequest::Register { id, pre_key1, pre_key2, final_key } => {
-                assert_eq!(id, 1);
-                assert_eq!(pre_key1, 2072);
-                assert_eq!(pre_key2, 2047);
-                assert_eq!(final_key, 2017);
-            }
-            _ => panic!("Expected Register variant"),
-        }
     }
 }

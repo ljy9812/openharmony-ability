@@ -6,7 +6,7 @@ openharmony-ability is the Rust runtime crate in this repository. It provides li
 
 ## Runtime Context
 
-`NativeAbility` passes the ArkTS init context into native code during `init(context)`. In the Rust runtime, `OpenHarmonyApp` can read `moduleName`, `basePath`, `prefPath`, and `preferredLocales` via `init_context()`, `module_name()`, `base_path()`, `pref_path()`, and `preferred_locales()`. The Harmony `resourceManager` instance is also initialized during `init(context)` and is stored globally, so it can be accessed through `openharmony_ability::resource_manager()` or the compatibility method `app.resource_manager()`.
+`NativeAbility` opens the module/session bridge and passes the ArkTS init context into native code before any component render. In the Rust runtime, `OpenHarmonyApp` can read `moduleName`, `basePath`, `prefPath`, and `preferredLocales` via `init_context()`, `module_name()`, `base_path()`, `pref_path()`, and `preferred_locales()`. The Harmony `resourceManager` is a plugin capability: the `ResourceBridgePlugin` registered in the current bridge registry owns its native pointer. Access it through the `ResourceExt` extension trait on `OpenHarmonyApp`.
 
 ## License
 

@@ -1,13 +1,12 @@
 import { MenuItemData, PredefinedType, AboutMetadataData } from './menu_types';
 import web_webview from '@ohos.web.webview';
 import window from '@ohos.window';
-import display from '@ohos.display';
 import common from '@ohos.app.ability.common';
 import { Want } from '@kit.AbilityKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { WindowManager } from '../window/WindowManager';
-import { getMenuDataCallback, windowKeyForId } from '../components/MenuBarComponent';
+import { getMenuDataCallback } from '../components/MenuBarComponent';
 import { DOMAIN, NATIVE_MODULE_STORAGE_KEY, MAIN_WINDOW_ID } from './constants';
 
 // Global executor singleton — shared by Menu and Tray execution paths
@@ -120,7 +119,7 @@ export class PredefinedActionExecutor {
     const wm = WindowManager.getInstance();
 
     // Strategy 1: Use targetWindowId if provided (Window Menu Bar path)
-    if (targetWindowId !== undefined) {
+    if (targetWindowId !== undefined && targetWindowId > 0) {
       const win = wm.getWindow(targetWindowId);
       if (win) {
         hilog.info(DOMAIN, 'Menu', 'Using targetWindowId: %{public}d', targetWindowId);
@@ -144,8 +143,18 @@ export class PredefinedActionExecutor {
 
   private getTargetController(windowId: number): web_webview.WebviewController | null {
     const wm = WindowManager.getInstance();
-    const nodeController = wm.getController(windowId);
-    return nodeController?.getPrimaryWebviewController() ?? this.controller;
+    // Sub-window path: raw controller registered by WebviewPlugin.handleControllerAttached.
+    // Main window (id=0) and not-yet-attached sub-windows fall through to the one-shot
+    // executor.controller (captured from the first main-window attach).
+    // NOTE: the old wm.getController(id) -> RustWebviewNodeController.getPrimaryWebviewController()
+    // chain is dead (registerController has zero callers → controllers Map always empty)
+    // and is intentionally not revived.
+    const fromWm = wm.getWebviewController(windowId);
+    const wmHit = fromWm !== undefined;
+    hilog.info(DOMAIN, 'Menu',
+      '[TrayCopyDiag] T2 getTargetController windowId=%{public}d wmHit=%{public}s fallbackToExecutor=%{public}s',
+      windowId, wmHit ? 'true' : 'false', !wmHit ? 'true' : 'false');
+    return fromWm ?? this.controller;
   }
 
   /**
@@ -159,11 +168,10 @@ export class PredefinedActionExecutor {
       return;
     }
 
-    try {
-      await WindowManager.getInstance().minimizeWindow(windowId);
-    } catch (e) {
-      hilog.warn(DOMAIN, 'Menu', 'minimizeWindow failed: %{public}s', String(e));
-    }
+    // WindowManager.minimizeWindow is fire-and-forget (void + internal .catch),
+    // so no await/try-catch here — awaiting a void would resolve immediately and
+    // mask the async failure path that is now handled inside WindowManager.
+    WindowManager.getInstance().minimizeWindow(windowId);
   }
 
   /**
@@ -206,7 +214,11 @@ export class PredefinedActionExecutor {
       // getTargetWindow() handles both Menu Bar (targetWindowId provided) and Tray (undefined → lastUserInteractedWindow)
       const { win, windowId: resolvedWindowId } = this.getTargetWindow(targetWindowId);
 
-      const windowKey = windowKeyForId(resolvedWindowId);
+      hilog.info(DOMAIN, 'Menu',
+        '[TrayCopyDiag] T1 execute type=%{public}s targetWindowIdParam=%{public}s resolvedWindowId=%{public}d',
+        String(type),
+        targetWindowId === undefined ? 'undefined(tray)' : String(targetWindowId),
+        resolvedWindowId);
 
       // Get target window's webview controller for clipboard/edit operations (fallback to this.controller)
       const targetController = this.getTargetController(resolvedWindowId);
@@ -215,8 +227,21 @@ export class PredefinedActionExecutor {
         case 'copy': {
           try {
             const raw = await targetController?.runJavaScript('window.getSelection().toString()');
+            const rawDefined = raw !== undefined && raw !== null;
+            const rawLen = rawDefined ? String(raw).length : -1;
+            hilog.info(DOMAIN, 'Menu',
+              '[TrayCopyDiag] T4a copy rawDefined=%{public}s rawLen=%{public}d', rawDefined ? 'true' : 'false', rawLen);
             if (raw) {
-              const text = JSON.parse(raw as string);
+              // runJavaScript returns a JSON-encoded string; parse to unwrap quotes.
+              // Fallback to raw if parse fails (defensive against non-JSON returns).
+              let text: string;
+              try {
+                text = JSON.parse(raw as string) as string;
+              } catch {
+                text = raw as string;
+              }
+              hilog.info(DOMAIN, 'Menu',
+                '[TrayCopyDiag] T4b copy textLen=%{public}d', text !== undefined && text !== null ? text.length : -1);
               if (text) {
                 const pasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text as string);
                 const sysPasteboard = pasteboard.getSystemPasteboard();
@@ -231,8 +256,17 @@ export class PredefinedActionExecutor {
         case 'cut': {
           try {
             const raw = await targetController?.runJavaScript('window.getSelection().toString()');
+            hilog.info(DOMAIN, 'Menu',
+              '[TrayCopyDiag] T5cut rawDefined=%{public}s rawLen=%{public}d',
+              raw !== undefined && raw !== null ? 'true' : 'false',
+              raw !== undefined && raw !== null ? String(raw).length : -1);
             if (raw) {
-              const text = JSON.parse(raw as string);
+              let text: string;
+              try {
+                text = JSON.parse(raw as string) as string;
+              } catch {
+                text = raw as string;
+              }
               if (text) {
                 const pasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text as string);
                 const sysPasteboard = pasteboard.getSystemPasteboard();
@@ -250,6 +284,8 @@ export class PredefinedActionExecutor {
             const sysPasteboard = pasteboard.getSystemPasteboard();
             const pasteData = await sysPasteboard.getData();
             const text = pasteData.getPrimaryText();
+            hilog.info(DOMAIN, 'Menu',
+              '[TrayCopyDiag] T5paste textLen=%{public}d', text !== undefined && text !== null ? text.length : -1);
             if (text) {
               // Use JSON.stringify for safe JS string escaping (prevents JS injection)
               const safeText = JSON.stringify(text);
@@ -263,6 +299,7 @@ export class PredefinedActionExecutor {
           break;
         }
         case 'selectAll':
+          hilog.info(DOMAIN, 'Menu', '[TrayCopyDiag] T5selAll invoked');
           await targetController?.runJavaScript('document.execCommand("selectAll")');
           break;
         case 'undo':
@@ -283,31 +320,29 @@ export class PredefinedActionExecutor {
           await this.closeWindow(targetWindowId);
           break;
         case 'maximize':
-          await win?.maximize();
+          // Use FOLLOW_APP_IMMERSIVE_SETTING to preserve existing fullscreen layout (avoid white bar).
+          // ENTER_IMMERSIVE explicitly enters/exits fullscreen on maximize/recover, causing a layout gap.
+          await win?.maximize(window.MaximizePresentation.FOLLOW_APP_IMMERSIVE_SETTING);
           break;
         case 'fullscreen': {
-          // Hide menubar via callback (MW-5)
-          const cb = getMenuDataCallback(windowKey);
-          cb?.onMenubarVisible?.(false);
-          cb?.onMenuShown?.(false);
-          try {
-            const displayInfo = display.getDefaultDisplaySync();
-            if (displayInfo.width > 800) {
-              await win?.maximize(window.MaximizePresentation.ENTER_IMMERSIVE);
-            } else {
-              await win?.setWindowLayoutFullScreen(true);
-              await win?.setWindowSystemBarEnable([]);
-            }
-          } catch (e) {
-            await win?.maximize(window.MaximizePresentation.ENTER_IMMERSIVE);
-          }
+          // Delegate to WindowManager.setFullscreen so predefined fullscreen
+          // matches the window-API (WindowPlugin set-fullscreen) behaviour:
+          // desktop maximize(ENTER_IMMERSIVE) + hide title bar/Dock hover,
+          // mobile layout fullscreen + hide system bars, serializeOp-guarded,
+          // and the Tauri menubar hides via MW-5 callbacks (centralized in
+          // WindowManager.setFullscreen). The previous inline version only did
+          // a bare immersive maximize on desktop — the system title bar / Dock
+          // stayed visible, diverging from set_fullscreen().
+          WindowManager.getInstance().setFullscreen(resolvedWindowId, true);
           break;
         }
         case 'recover': {
-          // Show menubar via callback (MW-5)
-          const cb = getMenuDataCallback(windowKey);
-          cb?.onMenubarVisible?.(true);
-          await win?.recover();
+          // Exit via the same dual-path (desktop recover() + restore title
+          // bar/Dock hover; mobile exit layout fullscreen + restore system
+          // bars; menubar restored via MW-5 callbacks). Harmless when the
+          // window is not fullscreen — the desktop recover() also serves the
+          // plain un-maximize case.
+          WindowManager.getInstance().setFullscreen(resolvedWindowId, false);
           break;
         }
         case 'quit':
@@ -361,6 +396,8 @@ export class MenuManager {
   }
 
   handleItemClick(item: MenuItemData): void {
+    hilog.info(DOMAIN, 'Menu', 'handleItemClick ENTER id=%{public}s type=%{public}s predefinedType=%{public}s',
+      item.id, item.type, item.predefinedType ?? 'none');
     if (item.type === 'predefined' && item.predefinedType) {
       this.executor.execute(item.predefinedType, item.aboutMetadata, this.currentWindowIdNumeric);
     } else {

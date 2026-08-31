@@ -10,6 +10,9 @@
     "requestPermissions": [
       {
         "name": "ohos.permission.SET_WINDOW_TRANSPARENT"
+      },
+      {
+        "name": "ohos.permission.LOCK_WINDOW_CURSOR"
       }
     ]
   }

@@ -26,7 +26,7 @@ export const isWebDebuggingAccess = (): boolean => {
 };
 
 /**
- * Convert `#RRGGBBAA` format from wry to `#AARRGGBB` format accepted by OHOS.
+ * Convert `#RRGGBBAA` format from the windowing backend to `#AARRGGBB` format accepted by OHOS.
  * Supports string, Color enum, number, and undefined inputs:
  * - Color enum: passed through as-is
  * - number (0xAARRGGBB): alpha=0 is converted to Color.Transparent (OHOS Web component requirement)
@@ -82,6 +82,8 @@ export interface JsHelper {
   clearAllBrowsingData: () => void;
   webPageSnapshot: () => Promise<SnapshotData>;
   createPdf: (path: string, config: Record<string, number | boolean>, callback: (success: boolean) => void) => void;
+  print: (path: string) => void;
+  registerHttpsIntercept: (protocols: string[]) => void;
 }
 
 /**
@@ -219,6 +221,14 @@ export class ProxyJsHelper implements JsHelper {
     }
   }
 
+  print(path: string): void {
+    if (this.realController) {
+      this.realController.print(path);
+    } else {
+      this.pendingOperations.push(() => this.realController!.print(path));
+    }
+  }
+
   dispose(): void {
     if (this.realController) {
       this.realController.dispose();
@@ -247,6 +257,16 @@ export class ProxyJsHelper implements JsHelper {
       this.realController.createPdf(path, config, callback);
     } else {
       this.pendingOperations.push(() => this.realController!.createPdf(path, config, callback));
+    }
+  }
+
+  registerHttpsIntercept(protocols: string[]): void {
+    if (this.realController) {
+      this.realController.registerHttpsIntercept(protocols);
+    } else {
+      hilog.info(DOMAIN, 'ProxyJsHelper', 'Caching registerHttpsIntercept: %{public}s', protocols.join(','));
+      const captured = protocols.slice();
+      this.pendingOperations.push(() => this.realController!.registerHttpsIntercept(captured));
     }
   }
 }

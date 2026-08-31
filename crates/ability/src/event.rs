@@ -20,7 +20,12 @@ pub enum Event<'a> {
     /// window resize event
     /// alias window.on("windowSizeChange")
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-window-V5#onwindowsizechange7
-    WindowResize(Size),
+    ///
+    /// `window_id` is the OHOS window this resize originated from (0 = main,
+    /// >0 = Float sub-window). Populated by the window_resize lifecycle closure
+    /// from the `windowId` field ArkTS wraps into the options (design.md D2/D6).
+    /// Phase 3: tao's run_loop routes the event by this id.
+    WindowResize { window_id: i64, size: Size },
     /// window rect change event
     /// alias window.on("windowRectChange")
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-window-V5#onwindowrectchange12
@@ -104,7 +109,7 @@ impl<'a> Event<'a> {
             Event::WindowCreate => "WindowCreate",
             Event::WindowDestroy => "WindowDestroy",
             Event::WindowRedraw(_) => "WindowRedraw",
-            Event::WindowResize(_) => "WindowResize",
+            Event::WindowResize { .. } => "WindowResize",
             Event::ContentRectChange(_) => "ContentRectChange",
             Event::AvoidAreaChange(_) => "AvoidAreaChange",
             Event::ConfigChanged(_) => "ConfigChanged",

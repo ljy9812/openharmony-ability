@@ -1,19 +1,5 @@
-use std::cell::RefCell;
-use std::os::raw::c_void;
-use std::rc::Rc;
-
-use napi_ohos::Result;
-use ohos_xcomponent_binding::{MouseButton, WindowRaw, XComponentRaw};
-use ohos_xcomponent_sys::{
-    OH_NativeXComponent, OH_NativeXComponent_GetMouseEvent, OH_NativeXComponent_MouseEvent,
-    OH_NativeXComponent_MouseEvent_Callback, OH_NativeXComponent_RegisterMouseEventCallback,
-    OH_NativeXComponent_RegisterUIInputEventCallback,
-    OH_ArkUI_AxisEvent_GetVerticalAxisValue, OH_ArkUI_AxisEvent_GetHorizontalAxisValue,
-    OH_ArkUI_AxisEvent_GetPinchAxisScaleValue, OH_ArkUI_UIInputEvent_GetSourceType,
-};
-
-/// ArkUI input event type for axis (scroll) events.
-const ARKUI_UIINPUTEVENT_TYPE_AXIS: u32 = 2;
+use ohos_xcomponent_binding::MouseButton;
+use ohos_xcomponent_sys::OH_NativeXComponent_MouseEvent;
 
 /// Input source types from OHOS NDK.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +48,17 @@ impl From<u32> for MouseAction {
             1 => MouseAction::Press,
             2 => MouseAction::Release,
             3 => MouseAction::Move,
+            _ => MouseAction::None,
+        }
+    }
+}
+
+impl From<ohos_xcomponent_binding::MouseAction> for MouseAction {
+    fn from(value: ohos_xcomponent_binding::MouseAction) -> Self {
+        match value {
+            ohos_xcomponent_binding::MouseAction::Press => MouseAction::Press,
+            ohos_xcomponent_binding::MouseAction::Release => MouseAction::Release,
+            ohos_xcomponent_binding::MouseAction::Move => MouseAction::Move,
             _ => MouseAction::None,
         }
     }
@@ -125,106 +122,26 @@ impl MouseEventData {
     }
 }
 
-// ─── Callback storage & registration ─────────────────────────────────────────
-
-pub type OnMouseEvent =
-    Option<Rc<dyn Fn(XComponentRaw, WindowRaw, MouseEventData) -> Result<()>>>;
-
-thread_local! {
-    static MOUSE_EVENT_CALLBACK: RefCell<OnMouseEvent> = const { RefCell::new(None) };
-}
-
-/// Register a mouse event callback. The closure will be invoked whenever the
-/// NDK fires `DispatchMouseEvent` or `DispatchHoverEvent`.
-pub fn set_mouse_event_callback<F>(cb: F)
-where
-    F: Fn(XComponentRaw, WindowRaw, MouseEventData) -> Result<()> + 'static,
-{
-    MOUSE_EVENT_CALLBACK.with_borrow_mut(|f| {
-        *f = Some(Rc::new(cb));
-    });
-}
-
-/// Native callback invoked by the OHOS NDK for mouse events.
-///
-/// # Safety
-/// Called by the OHOS runtime. `component` and `window` must be valid pointers.
-pub unsafe extern "C" fn dispatch_mouse_event(
-    component: *mut OH_NativeXComponent,
-    window: *mut c_void,
-) {
-    let mut raw_event = std::mem::MaybeUninit::<OH_NativeXComponent_MouseEvent>::uninit();
-    let ret = OH_NativeXComponent_GetMouseEvent(component, window, raw_event.as_mut_ptr());
-    if ret != 0 {
-        return;
-    }
-
-    let data = MouseEventData::from(raw_event.assume_init());
-    let xcomponent = XComponentRaw(component);
-    let win = WindowRaw(window);
-
-    MOUSE_EVENT_CALLBACK.with_borrow(|f| {
-        if let Some(cb) = f {
-            let _ = cb(xcomponent, win, data);
+impl From<ohos_xcomponent_binding::MouseEventData> for MouseEventData {
+    fn from(data: ohos_xcomponent_binding::MouseEventData) -> Self {
+        Self {
+            x: data.x,
+            y: data.y,
+            screen_x: data.screen_x,
+            screen_y: data.screen_y,
+            timestamp: data.timestamp,
+            action: data.action.into(),
+            button: data.button,
         }
-    });
-}
-
-/// Native callback invoked by the OHOS NDK for hover (mouse enter/leave) events.
-///
-/// # Safety
-/// Called by the OHOS runtime. `component` must be a valid pointer.
-pub unsafe extern "C" fn dispatch_hover_event(
-    component: *mut OH_NativeXComponent,
-    is_hover: bool,
-) {
-    let data = MouseEventData::hover(is_hover);
-    let xcomponent = XComponentRaw(component);
-    // DispatchHoverEvent has no window param; pass null.
-    let win = WindowRaw(std::ptr::null_mut());
-
-    MOUSE_EVENT_CALLBACK.with_borrow(|f| {
-        if let Some(cb) = f {
-            let _ = cb(xcomponent, win, data);
-        }
-    });
-}
-
-/// Register the mouse + hover + axis callbacks with the OHOS NDK.
-///
-/// # Safety
-/// `xcomponent_raw` must be a valid `*mut OH_NativeXComponent`.
-pub unsafe fn register_mouse_callbacks(xcomponent_raw: *mut OH_NativeXComponent) -> Result<()> {
-    let mut cbs = Box::new(OH_NativeXComponent_MouseEvent_Callback {
-        DispatchMouseEvent: Some(dispatch_mouse_event),
-        DispatchHoverEvent: Some(dispatch_hover_event),
-    });
-    let ret = OH_NativeXComponent_RegisterMouseEventCallback(
-        xcomponent_raw,
-        &mut *cbs as *mut _,
-    );
-    // Leak the box so the function pointers remain valid for the lifetime of the app.
-    std::mem::forget(cbs);
-    if ret != 0 {
-        return Err(napi_ohos::Error::from_reason(
-            "XComponent register mouse event callback failed",
-        ));
     }
-
-    // Register axis (scroll wheel) callback via ArkUI UIInputEvent API.
-    let ret = OH_NativeXComponent_RegisterUIInputEventCallback(
-        xcomponent_raw,
-        Some(dispatch_axis_event),
-        ARKUI_UIINPUTEVENT_TYPE_AXIS,
-    );
-    if ret != 0 {
-        // Axis callback registration failure is non-fatal (older devices may not support it).
-        #[cfg(feature = "log")]
-        log::warn!("Failed to register axis event callback (ret={}), scroll wheel may not work", ret);
-    }
-
-    Ok(())
 }
+
+// NOTE: the legacy NDK callback infrastructure (set_mouse_event_callback /
+// set_axis_event_callback / register_mouse_callbacks and the thread-local dispatchers)
+// was removed 2026-08-24: the main tree routes mouse/axis events through the
+// ohos-arkui-binding crate (xcomponent.rs `register_mouse_event_callback` /
+// `on_mouse_event`), leaving this free-function path with zero callers.
+// MouseEventData / AxisEventData and their conversions remain live via InputEvent.
 
 // ─── Axis (scroll wheel) event support ────────────────────────────────────────
 
@@ -260,58 +177,104 @@ impl Default for AxisEventData {
     }
 }
 
-pub type OnAxisEvent = Option<Rc<dyn Fn(AxisEventData) -> Result<()>>>;
+// Axis events are dispatched by the ohos-arkui-binding crate (xcomponent.rs),
+// which constructs AxisEventData directly; the legacy NDK dispatch path here
+// had zero callers and was removed with the rest of the callback infra above.
 
-thread_local! {
-    static AXIS_EVENT_CALLBACK: RefCell<OnAxisEvent> = const { RefCell::new(None) };
-}
+#[cfg(test)]
+mod tests {
+    use ohos_xcomponent_sys::OH_NativeXComponent_MouseEvent;
 
-/// Register a callback for axis (scroll wheel) events.
-pub fn set_axis_event_callback<F>(cb: F)
-where
-    F: Fn(AxisEventData) -> Result<()> + 'static,
-{
-    AXIS_EVENT_CALLBACK.with_borrow_mut(|f| {
-        *f = Some(Rc::new(cb));
-    });
-}
+    use super::*;
 
-/// Native callback invoked by the OHOS ArkUI runtime for axis (scroll) events.
-///
-/// Extracts scroll deltas, pinch scale, and input source type from the event.
-///
-/// # Safety
-/// Called by the OHOS runtime. `component` and `event` must be valid pointers.
-pub unsafe extern "C" fn dispatch_axis_event(
-    _component: *mut OH_NativeXComponent,
-    event: *mut ohos_arkui_sys::ArkUI_UIInputEvent,
-    _type: u32,
-) {
-    if event.is_null() {
-        return;
+    #[test]
+    fn input_source_type_from_i32_covers_all_values() {
+        assert!(matches!(InputSourceType::from(1), InputSourceType::Mouse));
+        assert!(matches!(InputSourceType::from(2), InputSourceType::TouchScreen));
+        assert!(matches!(InputSourceType::from(3), InputSourceType::Touchpad));
+        assert!(matches!(InputSourceType::from(4), InputSourceType::Joystick));
+        assert!(matches!(InputSourceType::from(5), InputSourceType::Keyboard));
+        assert!(matches!(InputSourceType::from(99), InputSourceType::Unknown));
+        assert!(matches!(InputSourceType::from(0), InputSourceType::Unknown));
     }
 
-    let delta_y = OH_ArkUI_AxisEvent_GetVerticalAxisValue(event as *const _) as f32;
-    let delta_x = OH_ArkUI_AxisEvent_GetHorizontalAxisValue(event as *const _) as f32;
-    let pinch_scale = OH_ArkUI_AxisEvent_GetPinchAxisScaleValue(event as *const _) as f32;
-    let source_type = InputSourceType::from(OH_ArkUI_UIInputEvent_GetSourceType(event as *const _));
-
-    // Skip events with no scroll delta and no pinch data.
-    if delta_x == 0.0 && delta_y == 0.0 && pinch_scale == 0.0 {
-        return;
+    #[test]
+    fn mouse_action_from_u32_covers_all_values() {
+        assert!(matches!(MouseAction::from(0u32), MouseAction::None));
+        assert!(matches!(MouseAction::from(1u32), MouseAction::Press));
+        assert!(matches!(MouseAction::from(2u32), MouseAction::Release));
+        assert!(matches!(MouseAction::from(3u32), MouseAction::Move));
+        assert!(matches!(MouseAction::from(99u32), MouseAction::None));
     }
 
-    let data = AxisEventData {
-        delta_x,
-        delta_y,
-        pinch_scale,
-        source_type,
-        timestamp: 0,
-    };
+    #[test]
+    fn mouse_action_from_binding_variants() {
+        use ohos_xcomponent_binding::MouseAction as BindingMouseAction;
+        let conv = |v: BindingMouseAction| MouseAction::from(v);
+        assert!(matches!(conv(BindingMouseAction::None), MouseAction::None));
+        assert!(matches!(conv(BindingMouseAction::Press), MouseAction::Press));
+        assert!(matches!(conv(BindingMouseAction::Release), MouseAction::Release));
+        assert!(matches!(conv(BindingMouseAction::Move), MouseAction::Move));
+    }
 
-    AXIS_EVENT_CALLBACK.with_borrow(|f| {
-        if let Some(cb) = f {
-            let _ = cb(data);
-        }
-    });
+    #[test]
+    fn mouse_event_data_from_raw_ndk_event() {
+        // OHOS NDK action=2 (release), button=1 (left)
+        let raw = OH_NativeXComponent_MouseEvent {
+            x: 1.5,
+            y: 2.5,
+            screenX: 10.5,
+            screenY: 20.5,
+            timestamp: 77,
+            action: 2,
+            button: 1,
+        };
+        let data = MouseEventData::from(raw);
+        assert_eq!(data.x, 1.5);
+        assert_eq!(data.y, 2.5);
+        assert_eq!(data.screen_x, 10.5);
+        assert_eq!(data.screen_y, 20.5);
+        assert_eq!(data.timestamp, 77);
+        assert!(matches!(data.action, MouseAction::Release));
+        assert!(matches!(data.button, MouseButton::LeftButton));
+    }
+
+    #[test]
+    fn hover_events_carry_enter_leave_action() {
+        let enter = MouseEventData::hover(true);
+        assert!(matches!(enter.action, MouseAction::HoverEnter));
+        assert_eq!(enter.x, 0.0);
+        let leave = MouseEventData::hover(false);
+        assert!(matches!(leave.action, MouseAction::HoverLeave));
+    }
+
+    #[test]
+    fn mouse_event_data_from_binding_event() {
+        let binding = ohos_xcomponent_binding::MouseEventData {
+            x: 3.5,
+            y: 4.5,
+            screen_x: 30.5,
+            screen_y: 40.5,
+            timestamp: 9,
+            action: ohos_xcomponent_binding::MouseAction::Press,
+            button: MouseButton::RightButton,
+        };
+        let data = MouseEventData::from(binding);
+        assert_eq!(data.x, 3.5);
+        assert_eq!(data.screen_y, 40.5);
+        assert!(matches!(data.action, MouseAction::Press));
+        assert!(matches!(data.button, MouseButton::RightButton));
+    }
+
+    #[test]
+    fn defaults_are_neutral() {
+        let m = MouseEventData::default();
+        assert!(matches!(m.action, MouseAction::None));
+        assert!(matches!(m.button, MouseButton::NoneButton));
+        assert_eq!(m.timestamp, 0);
+        let a = AxisEventData::default();
+        assert!(matches!(a.source_type, InputSourceType::Unknown));
+        assert_eq!(a.delta_x, 0.0);
+        assert_eq!(a.pinch_scale, 0.0);
+    }
 }

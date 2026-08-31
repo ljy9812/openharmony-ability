@@ -7,8 +7,8 @@ use napi_ohos::{
 };
 
 use crate::{
-    AvoidArea, AvoidAreaInfo, AvoidAreaType, ContentRect, Event, OpenHarmonyApp, Rect, SaveLoader,
-    SaveSaver, Size, StageEventType, WAKER,
+    AvoidArea, AvoidAreaInfo, AvoidAreaType, BridgePluginDeclaration, ContentRect, Event,
+    OpenHarmonyApp, PluginLifecycleEvent, Rect, SaveLoader, SaveSaver, Size, StageEventType, WAKER,
 };
 
 #[napi(object)]
@@ -21,7 +21,7 @@ pub struct EnvironmentCallback<'a> {
 pub struct WindowStageEventCallback<'a> {
     pub on_window_stage_create: Function<'a, (), ()>,
     pub on_window_stage_destroy: Function<'a, (), ()>,
-    pub on_ability_create: Function<'a, (), ()>,
+    pub on_ability_create: Function<'a, String, ()>,
     pub on_ability_destroy: Function<'a, (), ()>,
     pub on_ability_save_state: Function<'a, (), ()>,
     pub on_ability_restore_state: Function<'a, (), ()>,
@@ -30,6 +30,7 @@ pub struct WindowStageEventCallback<'a> {
     pub on_window_rect_change: Function<'a, Object<'a>, ()>,
     pub on_avoid_area_change: Function<'a, Object<'a>, ()>,
     pub on_new_want: Function<'a, Object<'a>, ()>,
+    pub on_ability_create_with_want: Function<'a, Object<'a>, ()>,
 }
 
 #[napi(object)]
@@ -39,6 +40,7 @@ pub struct KeyboardCallback<'a> {
 
 #[napi(object)]
 pub struct ApplicationLifecycle<'a> {
+    pub bridge_plugins: Vec<BridgePluginDeclaration>,
     pub environment_callback: EnvironmentCallback<'a>,
     pub window_stage_event_callback: WindowStageEventCallback<'a>,
     pub keyboard_event_callback: KeyboardCallback<'a>,
@@ -62,6 +64,7 @@ pub fn create_lifecycle_handle<'a>(
     env: &'a Env,
     app: OpenHarmonyApp,
 ) -> Result<ApplicationLifecycle<'a>> {
+    let bridge_plugins = app.bridge_plugin_declarations()?;
     let waker_app = app.clone();
     let waker: Function<'_, (), ()> = env.create_function_from_closure("waker", move |_ctx| {
         if let Some(ref mut h) = *waker_app.event_loop.borrow_mut() {
@@ -86,7 +89,10 @@ pub fn create_lifecycle_handle<'a>(
 
     let on_memory_level_app = app.clone();
     let on_memory_level: Function<'_, i32, ()> =
-        env.create_function_from_closure("memory_level", move |_ctx| {
+        env.create_function_from_closure("memory_level", move |ctx| {
+            let level = ctx.first_arg::<i32>()?;
+            let _ = on_memory_level_app
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::MemoryLevel { level });
             if let Some(ref mut h) = *on_memory_level_app.event_loop.borrow_mut() {
                 h(Event::LowMemory)
             }
@@ -126,6 +132,8 @@ pub fn create_lifecycle_handle<'a>(
                 .write()
                 .unwrap()
                 .configuration = configuration.clone();
+            let _ = configuration_updated_app
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::ConfigurationUpdated);
             let conf = configuration.clone();
             if let Some(ref mut h) = *configuration_updated_app.event_loop.borrow_mut() {
                 h(Event::ConfigChanged(conf))
@@ -137,6 +145,8 @@ pub fn create_lifecycle_handle<'a>(
     let window_stage_event =
         env.create_function_from_closure("window_stage_event", move |ctx| {
             let event_type = ctx.first_arg::<i32>()?;
+            let _ = window_stage_event_app
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::WindowStageEvent { event_type });
 
             if let Some(ref mut h) = *window_stage_event_app.event_loop.borrow_mut() {
                 let state_event = StageEventType::from(event_type);
@@ -155,32 +165,53 @@ pub fn create_lifecycle_handle<'a>(
             Ok(())
         })?;
 
-    // TODO: we may can remove it
+    // Phase 3 (design.md D6 / task 3.5): ArkTS wraps onWindowSizeChange options as
+    // { windowId, width, height }. We read windowId here so tao's run_loop can route
+    // WindowResize to the originating window instead of always the main window.
+    // windowId is read with a fallback to 0 (main window): a registration path that
+    // does not yet wrap the options degrades to the old main-window behavior rather
+    // than failing the callback (same tolerance as window_rect_change above).
     let window_resize_app = app.clone();
     let window_resize = env.create_function_from_closure("window_resize", move |ctx| {
         let size = ctx.first_arg::<Object>()?;
         let width = size.get_named_property::<i32>("width")?;
         let height = size.get_named_property::<i32>("height")?;
+        let window_id = size.get_named_property::<i64>("windowId").unwrap_or(0);
 
         if let Some(ref mut h) = *window_resize_app.event_loop.borrow_mut() {
-            h(Event::WindowResize(Size { width, height }))
+            h(Event::WindowResize {
+                window_id,
+                size: Size { width, height },
+            })
         }
         Ok(())
     })?;
 
     // TODO: we may can remove it
+    // Phase 2 (design.md D2/D4): the ArkTS side wraps windowRectChange options as
+    // { windowId, reason, rect }. We read windowId here and route the rect into the
+    // per-window HashMap (set_window_rect) instead of the old shared single field.
+    // windowId is read with a fallback to 0 (main window): some registration points may
+    // not yet wrap the options (e.g. a path added later) — degrading to the old main-
+    // window behavior is preferable to erroring out the whole callback.
     let window_rect_app = app.clone();
     let window_rect_change =
         env.create_function_from_closure("window_rect_change", move |ctx| {
             let options = ctx.first_arg::<Object>()?;
             let reason = options.get_named_property::<i32>("reason")?;
             let rect = parse_rect(options.get_named_property::<Object>("rect")?)?;
-            window_rect_app.inner.write().unwrap().window_rect = rect;
+            // windowId is optional-with-fallback: missing or wrong type degrades to 0
+            // (main window) rather than failing the callback.
+            let window_id = options
+                .get_named_property::<i64>("windowId")
+                .unwrap_or(0);
+            window_rect_app.set_window_rect(window_id, rect);
 
             if let Some(ref mut h) = *window_rect_app.event_loop.borrow_mut() {
                 h(Event::ContentRectChange(ContentRect {
                     reason: reason.into(),
                     rect,
+                    window_id,
                 }))
             }
             Ok(())
@@ -217,6 +248,8 @@ pub fn create_lifecycle_handle<'a>(
     let on_window_stage_create_app = app.clone();
     let on_window_stage_create =
         env.create_function_from_closure("on_ability_create", move |_ctx| {
+            let _ = on_window_stage_create_app
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::WindowStageCreated);
             if let Some(ref mut h) = *on_window_stage_create_app.event_loop.borrow_mut() {
                 h(Event::WindowCreate)
             }
@@ -226,6 +259,8 @@ pub fn create_lifecycle_handle<'a>(
     let on_window_stage_destroy_app = app.clone();
     let on_window_stage_destroy =
         env.create_function_from_closure("on_window_stage_destroy", move |_ctx| {
+            let _ = on_window_stage_destroy_app
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::WindowStageDestroyed);
             if let Some(ref mut h) = *on_window_stage_destroy_app.event_loop.borrow_mut() {
                 h(Event::WindowDestroy)
             }
@@ -233,16 +268,22 @@ pub fn create_lifecycle_handle<'a>(
         })?;
 
     let on_ability_create_app = app.clone();
-    let on_ability_create = env.create_function_from_closure("on_ability_create", move |_ctx| {
-        if let Some(ref mut h) = *on_ability_create_app.event_loop.borrow_mut() {
-            h(Event::Create)
-        }
-        Ok(())
-    })?;
+    let on_ability_create: Function<'_, String, ()> =
+        env.create_function_from_closure("on_ability_create", move |ctx| {
+            let restored_state = ctx.first_arg::<String>().unwrap_or_default();
+            let _ = on_ability_create_app
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::AbilityCreated { restored_state });
+            if let Some(ref mut h) = *on_ability_create_app.event_loop.borrow_mut() {
+                h(Event::Create)
+            }
+            Ok(())
+        })?;
 
     let on_ability_destroy_app = app.clone();
     let on_ability_destroy =
         env.create_function_from_closure("on_ability_destroy", move |_ctx| {
+            let _ = on_ability_destroy_app
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::AbilityDestroyed);
             if let Some(ref mut h) = *on_ability_destroy_app.event_loop.borrow_mut() {
                 h(Event::Destroy)
             }
@@ -287,19 +328,38 @@ pub fn create_lifecycle_handle<'a>(
         })?;
 
     let on_new_want_app = app.clone();
-    let on_new_want =
-        env.create_function_from_closure("on_new_want", move |ctx| {
+    let on_new_want = env.create_function_from_closure("on_new_want", move |ctx| {
+        let data = ctx.first_arg::<Object>()?;
+        let uri = data.get_named_property::<String>("uri")?;
+        let parameters_json = data.get_named_property::<String>("parametersJson")?;
+        crate::app::store_want_parameters(&parameters_json);
+        // isContinuation is optional-with-fallback: missing or wrong type
+        // (older HAR payload) degrades to false rather than failing the callback.
+        let is_continuation = data.get_named_property::<bool>("isContinuation").unwrap_or(false);
+        crate::app::store_continuation(is_continuation, &parameters_json);
+        if let Some(ref mut h) = *on_new_want_app.event_loop.borrow_mut() {
+            h(Event::NewWant { uri })
+        }
+        Ok(())
+    })?;
+
+    let on_ability_create_with_want =
+        env.create_function_from_closure("on_ability_create_with_want", move |ctx| {
             let data = ctx.first_arg::<Object>()?;
             let uri = data.get_named_property::<String>("uri")?;
-            let parameters_json = data.get_named_property::<String>("parametersJson")?;
-            crate::app::store_want_parameters(&parameters_json);
-            if let Some(ref mut h) = *on_new_want_app.event_loop.borrow_mut() {
-                h(Event::NewWant { uri })
-            }
+            crate::app::store_initial_want_uri(&uri);
+            // Continuation fields are optional-with-fallback: missing or wrong
+            // type (older HAR payload) degrades to false / empty rather than
+            // failing the callback.
+            let is_continuation = data.get_named_property::<bool>("isContinuation").unwrap_or(false);
+            let parameters_json =
+                data.get_named_property::<String>("parametersJson").unwrap_or_default();
+            crate::app::store_continuation(is_continuation, &parameters_json);
             Ok(())
         })?;
 
     Ok(ApplicationLifecycle {
+        bridge_plugins,
         environment_callback: EnvironmentCallback {
             on_configuration_updated,
             on_memory_level,
@@ -316,6 +376,7 @@ pub fn create_lifecycle_handle<'a>(
             on_avoid_area_change: avoid_area_change,
             on_window_stage_event: window_stage_event,
             on_new_want,
+            on_ability_create_with_want,
         },
         keyboard_event_callback: KeyboardCallback {
             on_keyboard_height_change: keyboard_event_callback,
