@@ -406,17 +406,14 @@ class BridgeHost {
     };
     this.pendingComponent = pending;
 
-    console.debug(`[DBG- attachComponent ENTER mod=${this.moduleName} sess=${this.sessionId} ready=${this.windowStageReady} stageDefined=${this.windowStage !== undefined}`);
     return this.enqueueLifecycle("attach component", async (): Promise<void> => {
       if (this.pendingComponent === pending) {
         this.pendingComponent = undefined;
       }
       if (pending.cancelled) {
-        console.debug(`[DBG- attachComponent OP cancelled mod=${this.moduleName}`);
         return;
       }
       this.assertActive();
-      console.debug(`[DBG- attachComponent OP start mod=${this.moduleName} sess=${this.sessionId} ready=${this.windowStageReady} stageDefined=${this.windowStage !== undefined} stageGen=${this.windowStageGeneration} disposed=${this.disposed}`);
       if (!this.windowStageReady) {
         throw new Error(
           `DefaultXComponent cannot attach without an active WindowStage for '${this.moduleName}'`,
@@ -598,13 +595,22 @@ class BridgeHost {
         // Phase 3 (design.md D2/D3): route through per-window(0) throttle. This is the
         // main-window component window's second windowSizeChange registration (the first
         // is in NativeAbility.ets) — the throttle merges both sources for windowId=0.
-        const wrapped: WindowSizeEventWrap = { windowId: 0, width: size.width, height: size.height };
-        WindowManager.getInstance().throttledRectDispatch(0, wrapped, (w: object) => {
-          if (this.component !== state || this.closing || this.disposed) {
-            return;
-          }
-          this.applicationLifecycle?.windowStageEventCallback.onWindowSizeChange(w);
-        }, 'size');
+        const wrapped: WindowSizeEventWrap = {
+          windowId: 0,
+          width: size.width,
+          height: size.height,
+        };
+        WindowManager.getInstance().throttledRectDispatch(
+          0,
+          wrapped,
+          (w: object) => {
+            if (this.component !== state || this.closing || this.disposed) {
+              return;
+            }
+            this.applicationLifecycle?.windowStageEventCallback.onWindowSizeChange(w);
+          },
+          "size",
+        );
       } catch {}
     };
     const onRectChange = (options: window.RectChangeOptions): void => {
@@ -617,14 +623,24 @@ class BridgeHost {
         const wrapped: WindowRectEventWrap = {
           windowId: 0,
           reason: options.reason,
-          rect: { left: options.rect.left, top: options.rect.top, width: options.rect.width, height: options.rect.height }
+          rect: {
+            left: options.rect.left,
+            top: options.rect.top,
+            width: options.rect.width,
+            height: options.rect.height,
+          },
         };
-        WindowManager.getInstance().throttledRectDispatch(0, wrapped, (w: object) => {
-          if (this.component !== state || this.closing || this.disposed) {
-            return;
-          }
-          this.applicationLifecycle?.windowStageEventCallback.onWindowRectChange(w);
-        }, 'rect');
+        WindowManager.getInstance().throttledRectDispatch(
+          0,
+          wrapped,
+          (w: object) => {
+            if (this.component !== state || this.closing || this.disposed) {
+              return;
+            }
+            this.applicationLifecycle?.windowStageEventCallback.onWindowRectChange(w);
+          },
+          "rect",
+        );
       } catch {}
     };
     const onAvoidAreaChange = (options: window.AvoidAreaOptions): void => {
@@ -777,20 +793,15 @@ class BridgeHost {
   async setWindowStage(windowStage: window.WindowStage): Promise<void> {
     this.assertActive();
     const generation = ++this.windowStageGeneration;
-    console.debug(`[DBG- setWindowStage ENTER mod=${this.moduleName} sess=${this.sessionId} gen=${generation} prevReady=${this.windowStageReady}`);
     await this.enqueueLifecycle("window-stage-create", async (): Promise<void> => {
       this.assertActive();
-      console.debug(`[DBG- setWindowStage OP start mod=${this.moduleName} sess=${this.sessionId} gen=${generation} windowStageGeneration=${this.windowStageGeneration} prevReady=${this.windowStageReady}`);
       if (generation !== this.windowStageGeneration) {
-        console.debug(`[DBG- setWindowStage OP SKIP (gen mismatch) mod=${this.moduleName}`);
         return;
       }
       this.windowStage = windowStage;
       this.windowStageReady = true;
-      console.debug(`[DBG- setWindowStage OP done mod=${this.moduleName} sess=${this.sessionId} ready=true`);
       this.notifyContextChanged();
     });
-    console.debug(`[DBG- setWindowStage EXIT mod=${this.moduleName} sess=${this.sessionId} ready=${this.windowStageReady}`);
   }
 
   async clearWindowStage(): Promise<void> {
@@ -947,9 +958,7 @@ class BridgeHost {
             // A pending Promise would leak callState — removeActiveCall is bound
             // in operation's .finally, which never settles. Throwing causes
             // operation reject → .finally runs → cleanup proceeds normally.
-            throw new Error(
-              `Bridge call '${pluginId}.${action}' timed out after injected timeout`,
-            );
+            throw new Error(`Bridge call '${pluginId}.${action}' timed out after injected timeout`);
           }
         }
         const result = await asyncPlugin.invokeAsync(
@@ -1400,7 +1409,7 @@ class BridgeHost {
     base: BridgePluginContext,
     isActive: () => boolean,
     isCancelled: () => boolean,
-    onCancel: (listener: () => void) => (() => void),
+    onCancel: (listener: () => void) => () => void,
   ): BridgePluginHookContext {
     return {
       pluginId: base.pluginId,
@@ -1428,7 +1437,8 @@ class BridgeHost {
         requestTypeName: string,
         responseTypeName: string,
         value: ESObject,
-      ): ESObject[] => base.invokeNativeSyncProcessWide(event, requestTypeName, responseTypeName, value),
+      ): ESObject[] =>
+        base.invokeNativeSyncProcessWide(event, requestTypeName, responseTypeName, value),
     };
   }
 

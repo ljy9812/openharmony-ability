@@ -4,7 +4,7 @@ import webview from "@ohos.web.webview";
 import { image } from "@kit.ImageKit";
 import { buffer } from "@kit.ArkTS";
 import { fileIo, fileUri } from "@kit.CoreFileKit";
-import { hilog } from '@kit.PerformanceAnalysisKit';
+import { hilog } from "@kit.PerformanceAnalysisKit";
 import { BusinessError, print } from "@kit.BasicServicesKit";
 import { abilityAccessCtrl, common } from "@kit.AbilityKit";
 import { unifiedDataChannel, uniformTypeDescriptor, uniformDataStruct } from "@kit.ArkData";
@@ -132,6 +132,7 @@ interface WebviewCreatePayload {
   html?: string | null;
   style?: WebviewStyle | null;
   javascriptEnabled?: boolean | null;
+  domStorageAccess?: boolean | null;
   devtools?: boolean | null;
   userAgent?: string | null;
   autoplay?: boolean | null;
@@ -1021,23 +1022,28 @@ const activePrintTasks = new Map<string, ESObject>();
  * `WebResourceResponse` from the returned body bytes, and returns it. On no match, handler
  * decline, or bridge dispatch failure: returns null so ArkWeb uses its default network stack.
  */
-function handleHttpsIntercept(
-  data: ManagedWebview,
-  url: string,
-): WebResourceResponse | null {
+function handleHttpsIntercept(data: ManagedWebview, url: string): WebResourceResponse | null {
   if (!url || !url.startsWith("https://")) {
     if (url) {
-      hilog.info(0x1999, 'WebviewSurface',
-        '[https-intercept] handleHttpsIntercept skip (not https): id=%{public}s url=%{public}s',
-        String(data.id), url);
+      hilog.info(
+        0x1999,
+        "WebviewSurface",
+        "[https-intercept] handleHttpsIntercept skip (not https): id=%{public}s url=%{public}s",
+        String(data.id),
+        url,
+      );
     }
     return null;
   }
   const protocols = data.httpsInterceptProtocols;
   if (!protocols || protocols.size === 0) {
-    hilog.info(0x1999, 'WebviewSurface',
-      '[https-intercept] handleHttpsIntercept skip (no protocols): id=%{public}s url=%{public}s',
-      String(data.id), url);
+    hilog.info(
+      0x1999,
+      "WebviewSurface",
+      "[https-intercept] handleHttpsIntercept skip (no protocols): id=%{public}s url=%{public}s",
+      String(data.id),
+      url,
+    );
     return null;
   }
   const rest = url.substring("https://".length);
@@ -1045,24 +1051,44 @@ function handleHttpsIntercept(
   if (dotIdx <= 0) return null;
   const protocol = rest.substring(0, dotIdx);
   if (!protocols.has(protocol)) {
-    hilog.info(0x1999, 'WebviewSurface',
-      '[https-intercept] handleHttpsIntercept skip (protocol not in set): id=%{public}s url=%{public}s protocol=%{public}s',
-      String(data.id), url, protocol);
+    hilog.info(
+      0x1999,
+      "WebviewSurface",
+      "[https-intercept] handleHttpsIntercept skip (protocol not in set): id=%{public}s url=%{public}s protocol=%{public}s",
+      String(data.id),
+      url,
+      protocol,
+    );
     return null;
   }
-  hilog.info(0x1999, 'WebviewSurface',
-    '[https-intercept] handleHttpsIntercept match: id=%{public}s url=%{public}s protocol=%{public}s — dispatching to bridge',
-    String(data.id), url, protocol);
+  hilog.info(
+    0x1999,
+    "WebviewSurface",
+    "[https-intercept] handleHttpsIntercept match: id=%{public}s url=%{public}s protocol=%{public}s — dispatching to bridge",
+    String(data.id),
+    url,
+    protocol,
+  );
   try {
     const response = data.onHttpsInterceptRequest(url);
-    hilog.info(0x1999, 'WebviewSurface',
-      '[https-intercept] handleHttpsIntercept result: id=%{public}s handled=%{public}s response_is_null=%{public}s',
-      String(data.id), response !== null ? 'true' : 'false', response === null ? 'true' : 'false');
+    hilog.info(
+      0x1999,
+      "WebviewSurface",
+      "[https-intercept] handleHttpsIntercept result: id=%{public}s handled=%{public}s response_is_null=%{public}s",
+      String(data.id),
+      response !== null ? "true" : "false",
+      response === null ? "true" : "false",
+    );
     return response;
   } catch (error) {
-    hilog.error(0x1999, 'WebviewSurface',
-      '[https-intercept] handleHttpsIntercept exception: id=%{public}s url=%{public}s error=%{public}s',
-      String(data.id), url, String(error));
+    hilog.error(
+      0x1999,
+      "WebviewSurface",
+      "[https-intercept] handleHttpsIntercept exception: id=%{public}s url=%{public}s error=%{public}s",
+      String(data.id),
+      url,
+      String(error),
+    );
     return null;
   }
 }
@@ -1085,11 +1111,7 @@ function invokeNativeBool(
       responseTypeName,
       value,
     ) as WebviewNewWindowResponse;
-    if (
-      response === null ||
-      typeof response !== "object" ||
-      typeof response.allow !== "boolean"
-    ) {
+    if (response === null || typeof response !== "object" || typeof response.allow !== "boolean") {
       return fallback;
     }
     return response.allow;
@@ -1284,11 +1306,17 @@ function BuildWebview(data: ManagedWebview) {
   if (data.eventOptions.dragDrop === true && data.dragDropOverlay === true) {
     // Overlay mode: Web does not receive drag events; transparent Stack above it does.
     Stack() {
-      Web({ src: "", controller: data.controller as webview.WebviewController, renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER })
+      Web({
+        src: "",
+        controller: data.controller as webview.WebviewController,
+        renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
+      })
         .width("100%")
         .height("100%")
         .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
-        .backgroundColor(data.transparent === true ? Color.Transparent : (data.style.backgroundColor ?? undefined))
+        .backgroundColor(
+          data.transparent === true ? Color.Transparent : (data.style.backgroundColor ?? undefined),
+        )
         .visibility(data.style.visible === false ? Visibility.Hidden : Visibility.Visible)
         // Vibrancy: backdropBlur for opaque sub-windows (see Direct mode comment)
         .backdropBlur(data.style.blurRadius ?? 0)
@@ -1298,7 +1326,7 @@ function BuildWebview(data: ManagedWebview) {
           handleWebviewAreaChange(data, oldArea, newArea);
         })
         .javaScriptAccess(data.javascriptEnabled ?? true)
-        .domStorageAccess(true)
+        .domStorageAccess(data.domStorageAccess ?? true)
         .mediaPlayGestureAccess(data.autoplay === true ? false : true)
         .javaScriptOnDocumentStart(keySynthesisScripts(data))
         .multiWindowAccess(data.eventOptions.newWindow === true)
@@ -1308,7 +1336,7 @@ function BuildWebview(data: ManagedWebview) {
         })
         .onLoadIntercept((event) => handleLoadIntercept(data, event.data.getRequestUrl()))
         .onInterceptRequest((event) => {
-          return handleWebviewInterceptRequest(data, event as WebInterceptRequestEvent, '');
+          return handleWebviewInterceptRequest(data, event as WebInterceptRequestEvent, "");
         })
         .onTitleReceive((event) => data.onTitleChange(event.title))
         .onPageBegin((e) => {
@@ -1320,7 +1348,6 @@ function BuildWebview(data: ManagedWebview) {
         .onWindowNew((e) => {
           handleWebviewWindowNew(data, e);
         })
-
       Stack()
         .width("100%")
         .height("100%")
@@ -1337,13 +1364,17 @@ function BuildWebview(data: ManagedWebview) {
         })
         .onDragLeave((dragEvent: DragEvent) => {
           dispatchWebviewDragLeave(data, dragEvent);
-        });
+        })
     }
     .width("100%")
     .height("100%");
   } else {
     // Direct mode: drag events bound directly on the Web component.
-    Web({ src: "", controller: data.controller as webview.WebviewController, renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER })
+    Web({
+      src: "",
+      controller: data.controller as webview.WebviewController,
+      renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
+    })
       // Always "100%": natural ArkUI layout so the Web follows its parent container on
       // window resize. set_bounds (BuilderNode.update) re-runs this builder but only
       // .position() below consumes style.{x,y} — sizing via fixed px here would pin the
@@ -1354,7 +1385,9 @@ function BuildWebview(data: ManagedWebview) {
       // Transparent windows: force Web background to transparent so vibrancy/blur
       // effects are visible through the Web component. Without this, the Web renders
       // with its default opaque background, hiding any blur effect.
-      .backgroundColor(data.transparent === true ? Color.Transparent : (data.style.backgroundColor ?? undefined))
+      .backgroundColor(
+        data.transparent === true ? Color.Transparent : (data.style.backgroundColor ?? undefined),
+      )
       .visibility(data.style.visible === false ? Visibility.Hidden : Visibility.Visible)
       // Vibrancy/frosted glass: backdropBlur blurs in-surface pixels of the Web component.
       // Works on opaque containers (Float sub-windows where setWindowContainerColor returns 1300004).
@@ -1366,7 +1399,7 @@ function BuildWebview(data: ManagedWebview) {
         handleWebviewAreaChange(data, oldArea, newArea);
       })
       .javaScriptAccess(data.javascriptEnabled ?? true)
-      .domStorageAccess(true)
+      .domStorageAccess(data.domStorageAccess ?? true)
       .mediaPlayGestureAccess(data.autoplay === true ? false : true)
       .javaScriptOnDocumentStart(keySynthesisScripts(data))
       .multiWindowAccess(data.eventOptions.newWindow === true)
@@ -1376,7 +1409,7 @@ function BuildWebview(data: ManagedWebview) {
       })
       .onLoadIntercept((event) => handleLoadIntercept(data, event.data.getRequestUrl()))
       .onInterceptRequest((event) => {
-        return handleWebviewInterceptRequest(data, event as WebInterceptRequestEvent, '(embedded)');
+        return handleWebviewInterceptRequest(data, event as WebInterceptRequestEvent, "(embedded)");
       })
       .onTitleReceive((event) => data.onTitleChange(event.title))
       .onPageBegin((e) => {
@@ -1432,9 +1465,12 @@ function keySynthesisScripts(data: ManagedWebview): WebviewInitializationScript[
     }
   }
   if (rules.size === 0) {
-    rules.add('*');
+    rules.add("*");
   }
-  const shim: WebviewInitializationScript = { script: KEY_SYNTHESIS_SHIM, scriptRules: Array.from(rules) };
+  const shim: WebviewInitializationScript = {
+    script: KEY_SYNTHESIS_SHIM,
+    scriptRules: Array.from(rules),
+  };
   return base.concat([shim]);
 }
 
@@ -1461,14 +1497,20 @@ function handleControllerAttached(data: ManagedWebview): void {
     // data.controller is the live attached controller at this point (onControllerAttached
     // just fired), so runJavaScript/getSelection work when Tray Copy later resolves it.
     const wid = data.windowId ?? 0;
-    hilog.info(0x1999, 'WebviewSurface',
-      '[TrayCopyDiag] T3 controllerAttached id=%{public}s data.windowId=%{public}s wid=%{public}d willRegister=%{public}s',
+    hilog.info(
+      0x1999,
+      "WebviewSurface",
+      "[TrayCopyDiag] T3 controllerAttached id=%{public}s data.windowId=%{public}s wid=%{public}d willRegister=%{public}s",
       String(data.id),
-      data.windowId === undefined ? 'undefined' : String(data.windowId),
+      data.windowId === undefined ? "undefined" : String(data.windowId),
       wid,
-      (wid > 0) ? 'true' : 'false');
+      wid > 0 ? "true" : "false",
+    );
     if (wid > 0) {
-      WindowManager.getInstance().registerWebviewController(wid, data.controller as webview.WebviewController);
+      WindowManager.getInstance().registerWebviewController(
+        wid,
+        data.controller as webview.WebviewController,
+      );
     }
 
     // ohos-webview-key-synthesis: register the controller (ALL windows incl.
@@ -1478,14 +1520,22 @@ function handleControllerAttached(data: ManagedWebview): void {
 
     data.didInitialLoad = true;
     if (data.url) {
-      hilog.info(0x1999, 'WebviewSurface',
-        '[https-intercept] handleControllerAttached loadUrl: id=%{public}s url=%{public}s protocols_size=%{public}d',
-        String(data.id), data.url, data.httpsInterceptProtocols?.size ?? 0);
+      hilog.info(
+        0x1999,
+        "WebviewSurface",
+        "[https-intercept] handleControllerAttached loadUrl: id=%{public}s url=%{public}s protocols_size=%{public}d",
+        String(data.id),
+        data.url,
+        data.httpsInterceptProtocols?.size ?? 0,
+      );
       data.controller.loadUrl(data.url, headersOf(data.headers));
     } else {
-      hilog.info(0x1999, 'WebviewSurface',
-        '[https-intercept] handleControllerAttached loadData (no url): id=%{public}s',
-        String(data.id));
+      hilog.info(
+        0x1999,
+        "WebviewSurface",
+        "[https-intercept] handleControllerAttached loadData (no url): id=%{public}s",
+        String(data.id),
+      );
       data.controller.loadData(data.html!, "text/html", "UTF-8", " ", " ");
     }
     data.markControllerReady();
@@ -1528,29 +1578,48 @@ function handleLoadIntercept(data: ManagedWebview, url: string): boolean {
  * legacy DefaultWebview.ets pattern (ASYNC_RENDER + dispatchEvent).
  */
 function handleWebviewAreaChange(data: ManagedWebview, oldArea: Area, newArea: Area): void {
-  hilog.info(0x1999, 'WebviewSurface',
-    'onAreaChange: oldW=%{public}s oldH=%{public}s newW=%{public}s newH=%{public}s',
-    String(oldArea.width), String(oldArea.height), String(newArea.width), String(newArea.height));
+  hilog.info(
+    0x1999,
+    "WebviewSurface",
+    "onAreaChange: oldW=%{public}s oldH=%{public}s newW=%{public}s newH=%{public}s",
+    String(oldArea.width),
+    String(oldArea.height),
+    String(newArea.width),
+    String(newArea.height),
+  );
   if (data.resizeDebounceTimer) {
     clearTimeout(data.resizeDebounceTimer);
   }
   data.resizeDebounceTimer = setTimeout(() => {
     data.resizeDebounceTimer = 0;
     try {
-      data.controller.runJavaScript('window.dispatchEvent(new Event("resize"));')
-        .catch(() => { /* fire-and-forget */ });
-    } catch (_e) { /* synchronous throw guard */ }
+      data.controller.runJavaScript('window.dispatchEvent(new Event("resize"));').catch(() => {
+        /* fire-and-forget */
+      });
+    } catch (_e) {
+      /* synchronous throw guard */
+    }
   }, 50);
 }
 
 /** https-intercept dispatch with the diagnostic log. `modeTag` keeps the two
  *  branches' log variants ('' vs '(embedded)') byte-identical to the former
  *  inline copies. */
-function handleWebviewInterceptRequest(data: ManagedWebview, event: WebInterceptRequestEvent, modeTag: string): WebResourceResponse | null {
+function handleWebviewInterceptRequest(
+  data: ManagedWebview,
+  event: WebInterceptRequestEvent,
+  modeTag: string,
+): WebResourceResponse | null {
   const interceptUrl = event.request.getRequestUrl();
-  hilog.info(0x1999, 'WebviewSurface',
-    '[https-intercept] onInterceptRequest%{public}s fired: id=%{public}s url=%{public}s protocols_size=%{public}d',
-    modeTag, String(data.id), interceptUrl ?? 'null', data.httpsInterceptProtocols?.size ?? 0);
+  hilog.info(
+    0x1999,
+    "WebviewSurface",
+    "[https-intercept] onInterceptRequest%{public}s fired: id=%{public}s url=%{public}s protocols_size=%{public}d",
+    modeTag,
+    String(data.id),
+    interceptUrl ?? "null",
+    data.httpsInterceptProtocols?.size ?? 0,
+  );
   return handleHttpsIntercept(data, interceptUrl);
 }
 
@@ -1586,19 +1655,20 @@ function handleWebviewWindowNew(data: ManagedWebview, e: OnWindowNewEvent): void
     e.handler.setWebController(null);
     return;
   }
-  const allow = data.onNewWindow(
-    e.targetUrl ?? "",
-    e.isAlert ?? false,
-    e.isUserTrigger ?? false,
-  );
+  const allow = data.onNewWindow(e.targetUrl ?? "", e.isAlert ?? false, e.isUserTrigger ?? false);
   if (!allow) {
     e.handler.setWebController(null);
   } else {
     e.handler.setWebController(null);
     try {
-      data.onShowNewWindow?.(new webview.WebviewController(), e.targetUrl ?? '');
+      data.onShowNewWindow?.(new webview.WebviewController(), e.targetUrl ?? "");
     } catch (err) {
-      hilog.warn(0x1999, 'WebviewSurface', 'Allow new-window dialog failed: %{public}s', String(err));
+      hilog.warn(
+        0x1999,
+        "WebviewSurface",
+        "Allow new-window dialog failed: %{public}s",
+        String(err),
+      );
     }
   }
 }
@@ -1658,8 +1728,13 @@ class WebviewSurface {
     // Injected at build time here; runtime refresh goes through blurRefreshCallbacks.
     const windowId = payload.windowId ?? 0;
     const pendingBlur = WindowManager.getInstance().getPendingBlur(windowId);
-    hilog.info(0x1999, 'WebviewSurface',
-      'create: pendingBlur read windowId=%{public}d pendingBlur=%{public}f (build-time blur injection)', windowId, pendingBlur);
+    hilog.info(
+      0x1999,
+      "WebviewSurface",
+      "create: pendingBlur read windowId=%{public}d pendingBlur=%{public}f (build-time blur injection)",
+      windowId,
+      pendingBlur,
+    );
     if (pendingBlur > 0 && (style.blurRadius === undefined || style.blurRadius === null)) {
       style.blurRadius = pendingBlur;
     }
@@ -1671,9 +1746,14 @@ class WebviewSurface {
       payload.clipboard ?? undefined,
       payload.zoomHotkeys ?? undefined,
     );
-    hilog.info(0x1999, 'WebviewSurface',
-      'create: setWebviewFlags windowId=%{public}d clipboard=%{public}s zoomHotkeys=%{public}s',
-      windowId, String(payload.clipboard), String(payload.zoomHotkeys));
+    hilog.info(
+      0x1999,
+      "WebviewSurface",
+      "create: setWebviewFlags windowId=%{public}d clipboard=%{public}s zoomHotkeys=%{public}s",
+      windowId,
+      String(payload.clipboard),
+      String(payload.zoomHotkeys),
+    );
     const eventOptions = normalizeEventOptions(payload.eventOptions);
     const parentHandle = payload.parentHandle ?? null;
     const instanceId = this.nextMountKey++;
@@ -1692,9 +1772,14 @@ class WebviewSurface {
       httpsInterceptProtocols: new Set<string>(payload.httpsInterceptProtocolList ?? []),
       resizeDebounceTimer: 0,
       onHttpsInterceptRequest: (url: string): WebResourceResponse | null => {
-        hilog.info(0x1999, 'WebviewSurface',
-          '[https-intercept] onHttpsInterceptRequest enter: id=%{public}s nativeTag=%{public}s url=%{public}s',
-          payload.id, nativeTag, url);
+        hilog.info(
+          0x1999,
+          "WebviewSurface",
+          "[https-intercept] onHttpsInterceptRequest enter: id=%{public}s nativeTag=%{public}s url=%{public}s",
+          payload.id,
+          nativeTag,
+          url,
+        );
         try {
           const response = this.pluginContext.invokeNativeSync(
             "https-intercept",
@@ -1702,20 +1787,23 @@ class WebviewSurface {
             HTTPS_INTERCEPT_RESPONSE_TYPE,
             new WebviewHttpsInterceptRequestPayload(payload.id, nativeTag, url) as ESObject,
           ) as WebviewHttpsInterceptResponse;
-          hilog.info(0x1999, 'WebviewSurface',
-            '[https-intercept] onHttpsInterceptRequest bridge returned: id=%{public}s handled=%{public}s status=%{public}d body_len=%{public}d',
+          hilog.info(
+            0x1999,
+            "WebviewSurface",
+            "[https-intercept] onHttpsInterceptRequest bridge returned: id=%{public}s handled=%{public}s status=%{public}d body_len=%{public}d",
             payload.id,
-            response?.handled === true ? 'true' : 'false',
+            response?.handled === true ? "true" : "false",
             response?.status ?? 0,
-            response?.body?.length ?? 0);
-          if (
-            response === null ||
-            typeof response !== "object" ||
-            response.handled !== true
-          ) {
-            hilog.warn(0x1999, 'WebviewSurface',
-              '[https-intercept] onHttpsInterceptRequest returning null (handled=false or invalid response): id=%{public}s url=%{public}s',
-              payload.id, url);
+            response?.body?.length ?? 0,
+          );
+          if (response === null || typeof response !== "object" || response.handled !== true) {
+            hilog.warn(
+              0x1999,
+              "WebviewSurface",
+              "[https-intercept] onHttpsInterceptRequest returning null (handled=false or invalid response): id=%{public}s url=%{public}s",
+              payload.id,
+              url,
+            );
             return null;
           }
           const webResponse = new WebResourceResponse();
@@ -1724,20 +1812,31 @@ class WebviewSurface {
           webResponse.setResponseMimeType(response.mimeType || "application/octet-stream");
           webResponse.setResponseCode(response.status || 200);
           webResponse.setResponseIsReady(true);
-          hilog.info(0x1999, 'WebviewSurface',
-            '[https-intercept] onHttpsInterceptRequest returning WebResourceResponse: id=%{public}s status=%{public}d mime=%{public}s',
-            payload.id, response.status || 200, response.mimeType || "application/octet-stream");
+          hilog.info(
+            0x1999,
+            "WebviewSurface",
+            "[https-intercept] onHttpsInterceptRequest returning WebResourceResponse: id=%{public}s status=%{public}d mime=%{public}s",
+            payload.id,
+            response.status || 200,
+            response.mimeType || "application/octet-stream",
+          );
           return webResponse;
         } catch (error) {
-          hilog.error(0x1999, 'WebviewSurface',
-            '[https-intercept] onHttpsInterceptRequest exception: id=%{public}s url=%{public}s error=%{public}s',
-            payload.id, url, String(error));
+          hilog.error(
+            0x1999,
+            "WebviewSurface",
+            "[https-intercept] onHttpsInterceptRequest exception: id=%{public}s url=%{public}s error=%{public}s",
+            payload.id,
+            url,
+            String(error),
+          );
           return null;
         }
       },
       url: payload.url,
       html: payload.html,
       javascriptEnabled: payload.javascriptEnabled,
+      domStorageAccess: payload.domStorageAccess,
       devtools: payload.devtools,
       userAgent: payload.userAgent,
       autoplay: payload.autoplay,
@@ -1902,13 +2001,25 @@ class WebviewSurface {
     // UIContext and component root from WindowManager instead of this module's host.
     // (windowId already declared above at blur injection)
     const isSubWindow = windowId > 0;
-    hilog.info(0x1999, 'WebviewSurface', 'create: id=%{public}s windowId=%{public}d isSubWindow=%{public}s', payload.id, windowId, isSubWindow ? 'true' : 'false');
+    hilog.info(
+      0x1999,
+      "WebviewSurface",
+      "create: id=%{public}s windowId=%{public}d isSubWindow=%{public}s",
+      payload.id,
+      windowId,
+      isSubWindow ? "true" : "false",
+    );
     const wm = isSubWindow ? WindowManager.getInstance() : null;
 
     // Timing guard: if sub-window's componentRoot is not yet registered (FloatPage
     // hasn't aboutToAppear), defer the entire create until registerComponentRoot fires.
     if (isSubWindow && wm !== null && wm.getComponentRoot(windowId) === undefined) {
-      hilog.info(0x1999, 'WebviewSurface', 'create: deferring for windowId=%{public}d (componentRoot not ready)', windowId);
+      hilog.info(
+        0x1999,
+        "WebviewSurface",
+        "create: deferring for windowId=%{public}d (componentRoot not ready)",
+        windowId,
+      );
       WindowManager.onComponentRootRegistered(windowId, (): void => {
         this.create(payload, callContext);
       });
@@ -1917,8 +2028,14 @@ class WebviewSurface {
 
     const subUiCtx = wm?.getUIContext(windowId);
     const subRoot = wm?.getComponentRoot(windowId);
-    hilog.info(0x1999, 'WebviewSurface', 'create: subUiCtx=%{public}s subRoot=%{public}s', subUiCtx !== undefined ? 'found' : 'undefined', subRoot !== undefined ? 'found' : 'undefined');
-    const builderUiCtx = (isSubWindow && subUiCtx) ? subUiCtx : this.pluginContext.getUIContext();
+    hilog.info(
+      0x1999,
+      "WebviewSurface",
+      "create: subUiCtx=%{public}s subRoot=%{public}s",
+      subUiCtx !== undefined ? "found" : "undefined",
+      subRoot !== undefined ? "found" : "undefined",
+    );
+    const builderUiCtx = isSubWindow && subUiCtx ? subUiCtx : this.pluginContext.getUIContext();
     const node = new BuilderNode<[ManagedWebview]>(builderUiCtx);
     const entry = new WebviewEntry(data, node);
     // Wire up close-window callback: when the webview navigates to close-window.invalid,
@@ -1928,14 +2045,25 @@ class WebviewSurface {
     // same-label window can never be rebuilt (manual_tests §二十八 close lifecycle defect).
     if (windowId > 0) {
       data.onCloseWindow = (): void => {
-        hilog.info(0x1999, 'WebviewSurface', 'onCloseWindow: destroying windowId=%{public}d', windowId);
+        hilog.info(
+          0x1999,
+          "WebviewSurface",
+          "onCloseWindow: destroying windowId=%{public}d",
+          windowId,
+        );
         try {
-          const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
-          if (nativeModule && typeof nativeModule.notifyWindowClose === 'function') {
+          const nativeModule: Module | undefined =
+            AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+          if (nativeModule && typeof nativeModule.notifyWindowClose === "function") {
             nativeModule.notifyWindowClose(windowId);
           }
         } catch (e) {
-          hilog.warn(0x1999, 'WebviewSurface', 'onCloseWindow notifyWindowClose failed: %{public}s', String(e));
+          hilog.warn(
+            0x1999,
+            "WebviewSurface",
+            "onCloseWindow notifyWindowClose failed: %{public}s",
+            String(e),
+          );
         }
         WindowManager.getInstance().destroyWindow(windowId);
       };
@@ -1962,18 +2090,28 @@ class WebviewSurface {
       }
       if (parentHandle !== null) {
         this.pluginContext.getFrameNode(parentHandle).appendChild(frameNode);
-        hilog.info(0x1999, 'WebviewSurface', 'create: mounted to parentHandle=%{public}s', parentHandle);
+        hilog.info(
+          0x1999,
+          "WebviewSurface",
+          "create: mounted to parentHandle=%{public}s",
+          parentHandle,
+        );
       } else if (isSubWindow && subRoot) {
         // Mount into the Float sub-window's component root
         subRoot.appendChild(frameNode);
-        hilog.info(0x1999, 'WebviewSurface', 'create: mounted to subRoot for windowId=%{public}d', windowId);
+        hilog.info(
+          0x1999,
+          "WebviewSurface",
+          "create: mounted to subRoot for windowId=%{public}d",
+          windowId,
+        );
       } else {
         this.pluginContext.appendChild(data.mountKey, frameNode, (): void => {
           try {
             frameNode.dispose();
           } catch {}
         });
-        hilog.info(0x1999, 'WebviewSurface', 'create: mounted to main window (pluginContext)');
+        hilog.info(0x1999, "WebviewSurface", "create: mounted to main window (pluginContext)");
       }
     } catch (error) {
       if (registered) {
@@ -1994,7 +2132,14 @@ class WebviewSurface {
       WindowManager.getInstance().registerBlurRefreshCallback(windowId, (radius: number): void => {
         entry.data.style.blurRadius = radius > 0 ? radius : null;
         entry.node.update(entry.data);
-        hilog.info(0x1999, 'WebviewSurface', 'blur refresh: id=%{public}s windowId=%{public}d radius=%{public}d', payload.id, windowId, radius);
+        hilog.info(
+          0x1999,
+          "WebviewSurface",
+          "blur refresh: id=%{public}s windowId=%{public}d radius=%{public}d",
+          payload.id,
+          windowId,
+          radius,
+        );
       });
     }
   }
@@ -2179,15 +2324,18 @@ class WebviewSurface {
         marginRight: 0,
         shouldPrintBackground: true,
       };
-      const cfg: webview.PdfConfiguration = pdfConfig ? {
-        width: pdfConfig.width ?? DEFAULT_PDF_CONFIG.width,
-        height: pdfConfig.height ?? DEFAULT_PDF_CONFIG.height,
-        marginTop: pdfConfig.marginTop ?? DEFAULT_PDF_CONFIG.marginTop,
-        marginBottom: pdfConfig.marginBottom ?? DEFAULT_PDF_CONFIG.marginBottom,
-        marginLeft: pdfConfig.marginLeft ?? DEFAULT_PDF_CONFIG.marginLeft,
-        marginRight: pdfConfig.marginRight ?? DEFAULT_PDF_CONFIG.marginRight,
-        shouldPrintBackground: pdfConfig.shouldPrintBackground ?? DEFAULT_PDF_CONFIG.shouldPrintBackground,
-      } : DEFAULT_PDF_CONFIG;
+      const cfg: webview.PdfConfiguration = pdfConfig
+        ? {
+            width: pdfConfig.width ?? DEFAULT_PDF_CONFIG.width,
+            height: pdfConfig.height ?? DEFAULT_PDF_CONFIG.height,
+            marginTop: pdfConfig.marginTop ?? DEFAULT_PDF_CONFIG.marginTop,
+            marginBottom: pdfConfig.marginBottom ?? DEFAULT_PDF_CONFIG.marginBottom,
+            marginLeft: pdfConfig.marginLeft ?? DEFAULT_PDF_CONFIG.marginLeft,
+            marginRight: pdfConfig.marginRight ?? DEFAULT_PDF_CONFIG.marginRight,
+            shouldPrintBackground:
+              pdfConfig.shouldPrintBackground ?? DEFAULT_PDF_CONFIG.shouldPrintBackground,
+          }
+        : DEFAULT_PDF_CONFIG;
       const pdfData = await controller.createPdf(cfg);
       const buffer = pdfData.pdfArrayBuffer().buffer;
       if (!buffer || buffer.byteLength === 0) {
@@ -2278,7 +2426,7 @@ class WebviewSurface {
       if (x < 0 || y < 0 || x >= info.size.width || y >= info.size.height) {
         throw new Error(
           `pick-color coordinates (${x}, ${y}) out of captured bounds ` +
-            `${info.size.width}x${info.size.height}`
+            `${info.size.width}x${info.size.height}`,
         );
       }
       // readPixels always writes BGRA_8888 bytes regardless of the PixelMap's own format.
@@ -2339,15 +2487,15 @@ class WebviewSurface {
               if (error) {
                 if (retriesLeft > 0) {
                   console.warn(
-                    `[WebviewPlugin] webPageSnapshot retry (${retriesLeft} left): ${error.message}`
+                    `[WebviewPlugin] webPageSnapshot retry (${retriesLeft} left): ${error.message}`,
                   );
                   setTimeout(() => attempt(retriesLeft - 1), 500);
                 } else {
                   console.error(
-                    `[WebviewPlugin] webPageSnapshot failed: ${error.code} - ${error.message}`
+                    `[WebviewPlugin] webPageSnapshot failed: ${error.code} - ${error.message}`,
                   );
                   done(() =>
-                    reject(new Error(`webPageSnapshot failed: ${error.code} - ${error.message}`))
+                    reject(new Error(`webPageSnapshot failed: ${error.code} - ${error.message}`)),
                   );
                 }
                 return;
@@ -2364,12 +2512,12 @@ class WebviewSurface {
                 return;
               }
               done(() => resolve(result.imagePixelMap));
-            }
+            },
           );
         } catch (e) {
           if (retriesLeft > 0) {
             console.warn(
-              `[WebviewPlugin] webPageSnapshot exception (${retriesLeft} left): ${String(e)}`
+              `[WebviewPlugin] webPageSnapshot exception (${retriesLeft} left): ${String(e)}`,
             );
             setTimeout(() => attempt(retriesLeft - 1), 500);
           } else {
@@ -2386,11 +2534,7 @@ class WebviewSurface {
     return snapshotPromise;
   }
 
-  async setUserAgent(
-    id: string,
-    userAgent: string,
-    callContext: BridgeCallContext,
-  ): Promise<void> {
+  async setUserAgent(id: string, userAgent: string, callContext: BridgeCallContext): Promise<void> {
     const entry = await this.controllerEntry(id, callContext);
     try {
       entry.data.controller.setCustomUserAgent(userAgent);
@@ -2447,7 +2591,11 @@ class WebviewSurface {
     // DefaultWebview.ets printPage cleanup). 'succeed' delays deletion because the
     // spooler reads the file asynchronously after the dialog resolves.
     const cleanup = (): void => {
-      try { fileIo.unlinkSync(path); } catch (_e) { /* temp PDF cleanup; ignore if already gone */ }
+      try {
+        fileIo.unlinkSync(path);
+      } catch (_e) {
+        /* temp PDF cleanup; ignore if already gone */
+      }
     };
     const ctx = callContext.abilityContext;
     if (!ctx) {
@@ -2459,9 +2607,10 @@ class WebviewSurface {
       // 1) Dynamically request PRINT permission (user_grant; undgranted → print fails).
       const atManager = abilityAccessCtrl.createAtManager();
       const permResult = await atManager.requestPermissionsFromUser(ctx, ["ohos.permission.PRINT"]);
-      const granted = Array.isArray(permResult.authResults)
-        && permResult.authResults.length > 0
-        && permResult.authResults[0] === 0;
+      const granted =
+        Array.isArray(permResult.authResults) &&
+        permResult.authResults.length > 0 &&
+        permResult.authResults[0] === 0;
       if (!granted) {
         hilog.warn(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "printPdf: PRINT permission denied");
         cleanup();
@@ -2471,7 +2620,12 @@ class WebviewSurface {
       // 2) Bare sandbox path → file:// URI (print files overload requires a file URI array).
       const fileUriStr = fileUri.getUriFromPath(path);
       if (!fileUriStr) {
-        hilog.error(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "printPdf: getUriFromPath returned empty for %{public}s", path);
+        hilog.error(
+          PRINT_LOG_DOMAIN,
+          PRINT_LOG_TAG,
+          "printPdf: getUriFromPath returned empty for %{public}s",
+          path,
+        );
         cleanup();
         return false;
       }
@@ -2480,7 +2634,7 @@ class WebviewSurface {
       // Static named import from @kit.BasicServicesKit (API 12 / SDK 5.0.0, 2in1 supported).
       // The prior dynamic import("@ohos.print") resolved printMod.print to a non-function —
       // the kit-level named export `print` is the correct entrypoint per Huawei docs.
-      const task = await print.print([fileUriStr], ctx) as ESObject;
+      const task = (await print.print([fileUriStr], ctx)) as ESObject;
       if (!task) {
         hilog.error(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "printPdf: print() returned no PrintTask");
         cleanup();
@@ -2498,40 +2652,82 @@ class WebviewSurface {
       // GC after printPdf returns would unregister the framework callback and no
       // terminal event would ever be delivered.
       if (typeof task.on === "function") {
-        try { task.on("succeed", () => {
-          hilog.info(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "PrintTask 'succeed': job submitted");
-          notifyPrintState(this.pluginContext, id, "succeed");
-          activePrintTasks.delete(id);
-          // The spooler reads the temp PDF asynchronously after job submission; deleting
-          // immediately would abort the print. Delay cleanup so the file survives the read.
-          setTimeout(cleanup, 10000);
-        }); } catch (e) {
-          hilog.warn(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "PrintTask 'succeed' registration failed: %{public}s", String(e));
+        try {
+          task.on("succeed", () => {
+            hilog.info(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "PrintTask 'succeed': job submitted");
+            notifyPrintState(this.pluginContext, id, "succeed");
+            activePrintTasks.delete(id);
+            // The spooler reads the temp PDF asynchronously after job submission; deleting
+            // immediately would abort the print. Delay cleanup so the file survives the read.
+            setTimeout(cleanup, 10000);
+          });
+        } catch (e) {
+          hilog.warn(
+            PRINT_LOG_DOMAIN,
+            PRINT_LOG_TAG,
+            "PrintTask 'succeed' registration failed: %{public}s",
+            String(e),
+          );
         }
-        try { task.on("fail", (err: BusinessError) => {
-          hilog.error(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "PrintTask 'fail': %{public}s", String(err?.message ?? err));
-          notifyPrintState(this.pluginContext, id, "fail", String(err?.message ?? err) || undefined);
-          activePrintTasks.delete(id);
-          cleanup();
-        }); } catch (e) {
-          hilog.warn(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "PrintTask 'fail' registration failed: %{public}s", String(e));
+        try {
+          task.on("fail", (err: BusinessError) => {
+            hilog.error(
+              PRINT_LOG_DOMAIN,
+              PRINT_LOG_TAG,
+              "PrintTask 'fail': %{public}s",
+              String(err?.message ?? err),
+            );
+            notifyPrintState(
+              this.pluginContext,
+              id,
+              "fail",
+              String(err?.message ?? err) || undefined,
+            );
+            activePrintTasks.delete(id);
+            cleanup();
+          });
+        } catch (e) {
+          hilog.warn(
+            PRINT_LOG_DOMAIN,
+            PRINT_LOG_TAG,
+            "PrintTask 'fail' registration failed: %{public}s",
+            String(e),
+          );
         }
-        try { task.on("cancel", () => {
-          hilog.info(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "PrintTask 'cancel': user cancelled");
-          notifyPrintState(this.pluginContext, id, "cancel");
-          activePrintTasks.delete(id);
-          cleanup();
-        }); } catch (e) {
-          hilog.warn(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "PrintTask 'cancel' registration failed: %{public}s", String(e));
+        try {
+          task.on("cancel", () => {
+            hilog.info(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "PrintTask 'cancel': user cancelled");
+            notifyPrintState(this.pluginContext, id, "cancel");
+            activePrintTasks.delete(id);
+            cleanup();
+          });
+        } catch (e) {
+          hilog.warn(
+            PRINT_LOG_DOMAIN,
+            PRINT_LOG_TAG,
+            "PrintTask 'cancel' registration failed: %{public}s",
+            String(e),
+          );
         }
-        try { task.on("block", () => {
-          hilog.info(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "PrintTask 'block': printer blocked");
-          notifyPrintState(this.pluginContext, id, "block");
-        }); } catch (e) {
-          hilog.warn(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "PrintTask 'block' registration failed: %{public}s", String(e));
+        try {
+          task.on("block", () => {
+            hilog.info(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "PrintTask 'block': printer blocked");
+            notifyPrintState(this.pluginContext, id, "block");
+          });
+        } catch (e) {
+          hilog.warn(
+            PRINT_LOG_DOMAIN,
+            PRINT_LOG_TAG,
+            "PrintTask 'block' registration failed: %{public}s",
+            String(e),
+          );
         }
         activePrintTasks.set(id, task);
-        hilog.info(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "PrintTask listeners registered (succeed/fail/cancel/block), task held");
+        hilog.info(
+          PRINT_LOG_DOMAIN,
+          PRINT_LOG_TAG,
+          "PrintTask listeners registered (succeed/fail/cancel/block), task held",
+        );
       } else {
         hilog.warn(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "printPdf: PrintTask has no .on method");
       }
@@ -2650,7 +2846,12 @@ export class WebviewPlugin extends AsyncPluginBase {
 
     if (action === "create-pdf") {
       const request = parsePrintRequest(payload);
-      const success = await surface.createPdf(request.id, request.path, request.pdfConfig ?? null, context);
+      const success = await surface.createPdf(
+        request.id,
+        request.path,
+        request.pdfConfig ?? null,
+        context,
+      );
       return {
         typeName: PRINT_RESPONSE_TYPE,
         value: new WebviewPrintResponse(success),
@@ -2705,9 +2906,7 @@ export class WebviewPlugin extends AsyncPluginBase {
         payload.value === null ||
         typeof payload.value !== "object"
       ) {
-        throw new Error(
-          `ohos.webview.set-cookie requires bridge type ${SET_COOKIE_REQUEST_TYPE}`,
-        );
+        throw new Error(`ohos.webview.set-cookie requires bridge type ${SET_COOKIE_REQUEST_TYPE}`);
       }
       const request = payload.value as { id: string; url: string; value: string };
       if (!request?.id?.trim()) {
@@ -2751,8 +2950,12 @@ export class WebviewPlugin extends AsyncPluginBase {
         value: await surface.captureWebview(controllerPayload.id, context),
       };
     } else if (action === "pick-color") {
-      if (typeof controllerPayload.x !== "number" || typeof controllerPayload.y !== "number" ||
-          !Number.isInteger(controllerPayload.x) || !Number.isInteger(controllerPayload.y)) {
+      if (
+        typeof controllerPayload.x !== "number" ||
+        typeof controllerPayload.y !== "number" ||
+        !Number.isInteger(controllerPayload.x) ||
+        !Number.isInteger(controllerPayload.y)
+      ) {
         throw new Error("pick-color requires x and y as integers");
       }
       return {
@@ -2816,12 +3019,21 @@ export class WebviewPlugin extends AsyncPluginBase {
       }
       accepted = surface.setBackgroundColor(controllerPayload.id, controllerPayload.color);
     } else if (action === "set-bounds") {
-      if (typeof controllerPayload.x !== "number" || typeof controllerPayload.y !== "number" ||
-          typeof controllerPayload.width !== "number" || typeof controllerPayload.height !== "number") {
+      if (
+        typeof controllerPayload.x !== "number" ||
+        typeof controllerPayload.y !== "number" ||
+        typeof controllerPayload.width !== "number" ||
+        typeof controllerPayload.height !== "number"
+      ) {
         throw new Error("set-bounds requires x, y, width, and height as numbers");
       }
-      accepted = surface.setBounds(controllerPayload.id, controllerPayload.x, controllerPayload.y,
-        controllerPayload.width, controllerPayload.height);
+      accepted = surface.setBounds(
+        controllerPayload.id,
+        controllerPayload.x,
+        controllerPayload.y,
+        controllerPayload.width,
+        controllerPayload.height,
+      );
     } else if (action === "set-web-debugging-access") {
       if (typeof controllerPayload.visible !== "boolean") {
         throw new Error("set-web-debugging-access.visible must be a boolean");

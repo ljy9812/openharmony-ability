@@ -1,7 +1,7 @@
 import { NodeContent } from "@kit.ArkUI";
 import { FrameNode, NodeController } from "@ohos.arkui.node";
 import { UIContext } from "@ohos.arkui.UIContext";
-import { hilog } from '@kit.PerformanceAnalysisKit';
+import { hilog } from "@kit.PerformanceAnalysisKit";
 import { Module } from "../ability/type";
 import { BridgeHostRegistry } from "../bridge/BridgeHost";
 import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
@@ -45,7 +45,6 @@ export function notifyPrimaryWebviewController(controller: ESObject): void {
   }
 }
 
-
 interface ComponentAttachment {
   sessionId: string;
   moduleName: string;
@@ -84,7 +83,13 @@ export struct DefaultXComponent {
       return;
     }
     const moduleName = this.moduleName.trim();
-    hilog.info(0xA01999, 'DefaultXComponent', 'aboutToAppear: moduleName="%{public}s" windowId=%{public}d', moduleName, this.windowId);
+    hilog.info(
+      0xa01999,
+      "DefaultXComponent",
+      'aboutToAppear: moduleName="%{public}s" windowId=%{public}d',
+      moduleName,
+      this.windowId,
+    );
 
     // Sub-window mode: no moduleName, but windowId > 0.
     // Create a root FrameNode for webviews to mount into, register with WindowManager.
@@ -92,7 +97,12 @@ export struct DefaultXComponent {
     if (!moduleName && this.windowId > 0) {
       const root = this.nodeController.makeNode(this.getUIContext());
       WindowManager.getInstance().registerComponentRoot(this.windowId, root);
-      hilog.info(0xA01999, 'DefaultXComponent', 'sub-window mode: root registered for windowId=%{public}d', this.windowId);
+      hilog.info(
+        0xa01999,
+        "DefaultXComponent",
+        "sub-window mode: root registered for windowId=%{public}d",
+        this.windowId,
+      );
       return;
     }
 
@@ -110,7 +120,12 @@ export struct DefaultXComponent {
     // (the old aboutToAppear called it, but the new one didn't). Without this,
     // backgroundBlurStyle on transparent windows has no visible effect because
     // the container remains opaque.
-    hilog.debug(0xA01999, 'DefaultXComponent', 'aboutToAppear: calling applyTransparentBackground(windowId=%{public}d)', this.windowId);
+    hilog.debug(
+      0xa01999,
+      "DefaultXComponent",
+      "aboutToAppear: calling applyTransparentBackground(windowId=%{public}d)",
+      this.windowId,
+    );
     WindowManager.getInstance().applyTransparentBackground(this.windowId);
 
     const sessionId = this.bridgeSessionId;
@@ -119,6 +134,8 @@ export struct DefaultXComponent {
         "DefaultXComponent cannot render before NativeAbility finishes creating its bridge session",
       );
     }
+    // NativeAbility owns the module/session sinks from ability-create onward. The component only
+    // supplies the render surface and UI root; ability-only plugins never depend on appearance.
     const renderOwner = `${sessionId}:${moduleName}:${nextRenderOwnerId++}`;
     nativeModule.render(this.rootSlot, renderOwner);
 
@@ -135,6 +152,9 @@ export struct DefaultXComponent {
     };
     this.attachment = attachment;
     try {
+      // Create this module's root eagerly (NodeContainer asks the controller lazily) so it exists
+      // before `ui-context-ready`. Keep it inside the render transaction: FrameNode construction
+      // failure must release the native RootNode/render owner as well.
       const root = this.nodeController.makeNode(this.getUIContext());
       await BridgeHostRegistry.attachComponent(
         sessionId,
@@ -179,6 +199,8 @@ export struct DefaultXComponent {
       this.nodeController.disposeRoot();
       return Promise.resolve();
     }
+    // RootNode owns the ContentSlot handle and must be dropped synchronously while this component
+    // still owns a live NodeContent. Host/plugin cleanup may continue asynchronously afterwards.
     attachment.nativeModule.disposeRender(attachment.renderOwner);
     return BridgeHostRegistry.detachComponent(
       attachment.sessionId,
@@ -208,8 +230,7 @@ export struct DefaultXComponent {
       }
       .height("100%")
       .backgroundColor(Color.Transparent)
-    }
-    .backgroundColor(Color.Transparent);
+    }.backgroundColor(Color.Transparent);
   }
 }
 

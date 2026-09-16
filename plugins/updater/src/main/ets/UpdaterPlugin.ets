@@ -143,12 +143,7 @@ export class UpdaterPlugin extends AsyncPluginBase {
         );
         currentVersion = bundleInfo.versionName || "unknown";
       } catch (err) {
-        hilog.error(
-          DOMAIN,
-          TAG,
-          "Failed to get bundle info: %{public}s",
-          JSON.stringify(err),
-        );
+        hilog.error(DOMAIN, TAG, "Failed to get bundle info: %{public}s", JSON.stringify(err));
       }
 
       // On API 20+, versionName is available in CheckUpdateResult. On API 12

@@ -88,4 +88,7 @@ export {
 // from "@ohos-rs/ability" instead (pack-plugins.ps1 rewrites that specifier
 // to the internal path when assembling the published HAR).
 export { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "./src/main/ets/helper/constants";
-export { expectBridgeRequestType, BridgeAcknowledgement } from "./src/main/ets/helper/bridge_plugin_utils";
+export {
+  expectBridgeRequestType,
+  BridgeAcknowledgement,
+} from "./src/main/ets/helper/bridge_plugin_utils";

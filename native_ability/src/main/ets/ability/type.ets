@@ -1,10 +1,15 @@
-import { NodeContent, SymbolGlyphModifier } from "@kit.ArkUI";
+import { NodeContent } from "@kit.ArkUI";
 import common from "@ohos.app.ability.common";
 import { FrameNode } from "@ohos.arkui.node";
 import { UIContext } from "@ohos.arkui.UIContext";
 import resourceManager from "@ohos.resourceManager";
 import window from "@ohos.window";
-import { MenuItemData, MenuCreateOptions, MenuItemCreateOptions, SubmenuCreateOptions } from "../helper/menu_types";
+import {
+  MenuItemData,
+  MenuCreateOptions,
+  MenuItemCreateOptions,
+  SubmenuCreateOptions,
+} from "../helper/menu_types";
 import { image } from "@kit.ImageKit";
 import { emitter } from "@kit.BasicServicesKit";
 
@@ -155,14 +160,10 @@ export interface Module {
   /**
    * Opens this native module's Ability-session bridge before any component is rendered. The
    * owner is unique per Ability session and guards a later session from stale cleanup.
-   *
-   * Back-compat: legacy native modules (built before the pluginize refactor) expose
-   * `init(context?: AbilityInitContext): ApplicationLifecycle`. Callers that bridge both
-   * shapes (ProcessInitializer) type the module as ESObject before invoking.
    */
   init: (
-    bindings: BridgeBindings | ESObject,
-    bridgeOwner?: string,
+    bindings: BridgeBindings,
+    bridgeOwner: string,
     context?: AbilityInitContext,
   ) => ApplicationLifecycle;
   /** Releases only the matching Ability-session bridge; stale owners are ignored. */
@@ -197,9 +198,7 @@ export interface Module {
   /** `update_cursor_position` — MainPage onMouse cursor tracking. */
   updateCursorPosition?: (x: number, y: number) => void;
   /** `register_create_sub_window_tsfn` — legacy create_os_window path hookup. */
-  registerCreateSubWindowTsfn?: (
-    createSubWindow: (config: ESObject) => Promise<number>,
-  ) => void;
+  registerCreateSubWindowTsfn?: (createSubWindow: (config: ESObject) => Promise<number>) => void;
   /**
    * Synchronous ArkTS platform callback -> Rust plugin decision. The value is a named N-API
    * object and must be returned before the platform callback resumes.
@@ -234,9 +233,9 @@ export interface WindowConfig {
   height?: number;
   x?: number;
   y?: number;
-  decorations?: boolean;     // Phase 2: show/hide title bar, default true
-  transparent?: boolean;     // Phase 3: window background transparent, default false
-  backgroundColor?: number;  // Phase 3: window background color in 0xAARRGGBB format
+  decorations?: boolean; // Phase 2: show/hide title bar, default true
+  transparent?: boolean; // Phase 3: window background transparent, default false
+  backgroundColor?: number; // Phase 3: window background color in 0xAARRGGBB format
 }
 
 /**

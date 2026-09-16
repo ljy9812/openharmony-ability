@@ -1,7 +1,7 @@
-import web_webview from '@ohos.web.webview';
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { ComponentContent } from '@kit.ArkUI';
-import { BusinessError } from '@kit.BasicServicesKit';
+import web_webview from "@ohos.web.webview";
+import { hilog } from "@kit.PerformanceAnalysisKit";
+import { ComponentContent } from "@kit.ArkUI";
+import { BusinessError } from "@kit.BasicServicesKit";
 import { DOMAIN } from "@ohos-rs/ability";
 
 // Module-level single-instance dialog references.
@@ -17,29 +17,32 @@ let currentNode: ComponentContent<Record<string, ESObject>> | null = null;
  * multiWindowAccess is disabled to prevent infinite nesting.
  */
 @Builder
-export function newWindowDialogBuilder(params: { controller: web_webview.WebviewController, url: string }) {
+export function newWindowDialogBuilder(params: {
+  controller: web_webview.WebviewController;
+  url: string;
+}) {
   Column() {
     // Title bar with close button
     Row() {
       Text(params.url)
         .fontSize(12)
-        .fontColor('#666666')
+        .fontColor("#666666")
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .layoutWeight(1)
-      Text('✕')
+      Text("✕")
         .fontSize(16)
-        .fontColor('#333333')
+        .fontColor("#333333")
         .fontWeight(FontWeight.Bold)
         .onClick(() => {
-          hilog.info(DOMAIN, 'NewWindowDialog', 'Close button clicked');
+          hilog.info(DOMAIN, "NewWindowDialog", "Close button clicked");
           closeDialog();
         })
     }
-    .width('100%')
+    .width("100%")
     .height(36)
     .padding({ left: 12, right: 12 })
-    .backgroundColor('#F5F5F5')
+    .backgroundColor("#F5F5F5")
 
     // Web content — loads the target URL directly. ArkWeb's own popup is
     // cancelled (`setWebController(null)` in onWindowNew) to avoid deadlocking the
@@ -48,21 +51,22 @@ export function newWindowDialogBuilder(params: { controller: web_webview.Webview
     // "open in a new in-page window" (Allow). multiWindowAccess is disabled to
     // prevent infinite nesting.
     Web({ src: params.url, controller: params.controller })
-      .width('100%')
+      .width("100%")
       .layoutWeight(1)
       .javaScriptAccess(true)
       .domStorageAccess(true)
-      .multiWindowAccess(false) // Prevent infinite nesting
+      .multiWindowAccess(false)
+      // Prevent infinite nesting
       .onWindowExit(() => {
-        hilog.info(DOMAIN, 'NewWindowDialog', 'onWindowExit fired, closing dialog');
+        hilog.info(DOMAIN, "NewWindowDialog", "onWindowExit fired, closing dialog");
         closeDialog();
       })
   }
-  .width('90%')
-  .height('80%')
+  .width("90%")
+  .height("80%")
   .backgroundColor(Color.White)
   .borderRadius(12)
-  .clip(true)
+  .clip(true);
 }
 
 function closeDialog(): void {
@@ -70,7 +74,7 @@ function closeDialog(): void {
     try {
       (currentPrompt as ESObject).closeCustomDialog(currentNode);
     } catch (e) {
-      hilog.warn(DOMAIN, 'NewWindowDialog', 'closeCustomDialog failed: %{public}s', String(e));
+      hilog.warn(DOMAIN, "NewWindowDialog", "closeCustomDialog failed: %{public}s", String(e));
     }
   }
   currentPrompt = null;
@@ -91,15 +95,14 @@ function closeDialog(): void {
 export function buildNewWindowContent(
   uiContext: UIContext,
   controller: web_webview.WebviewController,
-  url: string
+  url: string,
 ): ComponentContent<Record<string, ESObject>> {
   // Close any existing dialog first.
   closeDialog();
-  return new ComponentContent(
-    uiContext,
-    wrapBuilder(newWindowDialogBuilder),
-    { controller: controller, url: url }
-  );
+  return new ComponentContent(uiContext, wrapBuilder(newWindowDialogBuilder), {
+    controller: controller,
+    url: url,
+  });
 }
 
 /**
@@ -109,26 +112,39 @@ export function buildNewWindowContent(
  */
 export function showNewWindowDialog(
   uiContext: UIContext,
-  contentNode: ComponentContent<Record<string, ESObject>>
+  contentNode: ComponentContent<Record<string, ESObject>>,
 ): void {
   try {
     const prompt = uiContext.getPromptAction();
     currentPrompt = prompt;
     currentNode = contentNode;
 
-    prompt.openCustomDialog(contentNode, {
-      isModal: false,
-      autoCancel: true,
-      alignment: DialogAlignment.Center,
-    }).then(() => {
-      hilog.info(DOMAIN, 'NewWindowDialog', 'Dialog opened successfully');
-    }).catch((err: BusinessError) => {
-      currentPrompt = null;
-      currentNode = null;
-      hilog.error(DOMAIN, 'NewWindowDialog', 'Failed to open dialog: %{public}s', JSON.stringify(err));
-    });
+    prompt
+      .openCustomDialog(contentNode, {
+        isModal: false,
+        autoCancel: true,
+        alignment: DialogAlignment.Center,
+      })
+      .then(() => {
+        hilog.info(DOMAIN, "NewWindowDialog", "Dialog opened successfully");
+      })
+      .catch((err: BusinessError) => {
+        currentPrompt = null;
+        currentNode = null;
+        hilog.error(
+          DOMAIN,
+          "NewWindowDialog",
+          "Failed to open dialog: %{public}s",
+          JSON.stringify(err),
+        );
+      });
   } catch (e) {
-    hilog.error(DOMAIN, 'NewWindowDialog', 'Exception opening dialog: %{public}s', JSON.stringify(e));
+    hilog.error(
+      DOMAIN,
+      "NewWindowDialog",
+      "Exception opening dialog: %{public}s",
+      JSON.stringify(e),
+    );
   }
 }
 
@@ -141,7 +157,7 @@ export function showNewWindowDialog(
 export function openNewWindowDialog(
   uiContext: UIContext,
   controller: web_webview.WebviewController,
-  url: string
+  url: string,
 ): void {
   const contentNode = buildNewWindowContent(uiContext, controller, url);
   showNewWindowDialog(uiContext, contentNode);

@@ -93,7 +93,12 @@ export class StatusbarPlugin extends AsyncPluginBase {
     }
 
     if (action === "add") {
-      const request = expectBridgeRequestType(payload, "ohos.statusbar", action, ADD_REQUEST_TYPE) as AddRequest;
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.statusbar",
+        action,
+        ADD_REQUEST_TYPE,
+      ) as AddRequest;
       if (!Number.isInteger(request.iconSize) || request.iconSize <= 0) {
         throw new Error("add.iconSize must be a positive integer");
       }
@@ -151,7 +156,12 @@ export class StatusbarPlugin extends AsyncPluginBase {
         try {
           statusBarGroupMenu = JSON.parse(request.menuJson) as ESObject[][];
         } catch (e) {
-          hilog.warn(DOMAIN, "StatusbarPlugin", "add: failed to parse menuJson: %{public}s", String(e));
+          hilog.warn(
+            DOMAIN,
+            "StatusbarPlugin",
+            "add: failed to parse menuJson: %{public}s",
+            String(e),
+          );
         }
       }
 
@@ -174,7 +184,11 @@ export class StatusbarPlugin extends AsyncPluginBase {
       // 401 "parameter check failed" (SDK @hms.pcService.statusBarManager.d.ts:248)
       // fires on type/value validation of required QuickOperation fields
       // (title:string, height:number, abilityName:string, moduleName?:string).
-      hilog.info(DOMAIN, "StatusbarPlugin", `add: quickOperation abilityName="${quickOperation.abilityName}" title="${quickOperation.title}" height=${quickOperation.height} moduleName=${quickOperation.moduleName} loadingStatus=${quickOperation.loadingStatus} menuLen=${statusBarGroupMenu.length}`);
+      hilog.info(
+        DOMAIN,
+        "StatusbarPlugin",
+        `add: quickOperation abilityName="${quickOperation.abilityName}" title="${quickOperation.title}" height=${quickOperation.height} moduleName=${quickOperation.moduleName} loadingStatus=${quickOperation.loadingStatus} menuLen=${statusBarGroupMenu.length}`,
+      );
 
       try {
         // Use the AsyncCallback overload (API 14+) AND await it before
@@ -195,7 +209,13 @@ export class StatusbarPlugin extends AsyncPluginBase {
         await new Promise<void>((resolve, reject) => {
           statusBarManager.addToStatusBar(abilityContext, opts, (err: BusinessError) => {
             if (err) {
-              hilog.error(DOMAIN, "StatusbarPlugin", "addToStatusBar callback err: %{public}d %{public}s", err.code, err.message);
+              hilog.error(
+                DOMAIN,
+                "StatusbarPlugin",
+                "addToStatusBar callback err: %{public}d %{public}s",
+                err.code,
+                err.message,
+              );
               reject(err);
               return;
             }
@@ -206,7 +226,13 @@ export class StatusbarPlugin extends AsyncPluginBase {
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
       } catch (e) {
         const err = e as BusinessError;
-        hilog.error(DOMAIN, "StatusbarPlugin", "add failed: %{public}d %{public}s", err.code, err.message);
+        hilog.error(
+          DOMAIN,
+          "StatusbarPlugin",
+          "add failed: %{public}d %{public}s",
+          err.code,
+          err.message,
+        );
         throw new Error(`addToStatusBar failed: code=${err.code} msg=${err.message}`);
       }
     }
@@ -224,7 +250,13 @@ export class StatusbarPlugin extends AsyncPluginBase {
         await new Promise<void>((resolve, reject) => {
           statusBarManager.removeFromStatusBar(abilityContext, (err: BusinessError) => {
             if (err) {
-              hilog.error(DOMAIN, "StatusbarPlugin", "remove callback err: %{public}d %{public}s", err.code, err.message);
+              hilog.error(
+                DOMAIN,
+                "StatusbarPlugin",
+                "remove callback err: %{public}d %{public}s",
+                err.code,
+                err.message,
+              );
               reject(err);
               return;
             }
@@ -234,13 +266,24 @@ export class StatusbarPlugin extends AsyncPluginBase {
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
       } catch (e) {
         const err = e as BusinessError;
-        hilog.error(DOMAIN, "StatusbarPlugin", "remove failed: %{public}d %{public}s", err.code, err.message);
+        hilog.error(
+          DOMAIN,
+          "StatusbarPlugin",
+          "remove failed: %{public}d %{public}s",
+          err.code,
+          err.message,
+        );
         throw new Error(`removeFromStatusBar failed: code=${err.code} msg=${err.message}`);
       }
     }
 
     if (action === "update-icon") {
-      const request = expectBridgeRequestType(payload, "ohos.statusbar", action, UPDATE_ICON_REQUEST_TYPE) as UpdateIconRequest;
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.statusbar",
+        action,
+        UPDATE_ICON_REQUEST_TYPE,
+      ) as UpdateIconRequest;
       if (!Number.isInteger(request.iconSize) || request.iconSize <= 0) {
         throw new Error("update-icon.iconSize must be a positive integer");
       }
@@ -262,13 +305,24 @@ export class StatusbarPlugin extends AsyncPluginBase {
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
       } catch (e) {
         const err = e as BusinessError;
-        hilog.error(DOMAIN, "StatusbarPlugin", "update-icon failed: %{public}d %{public}s", err.code, err.message);
+        hilog.error(
+          DOMAIN,
+          "StatusbarPlugin",
+          "update-icon failed: %{public}d %{public}s",
+          err.code,
+          err.message,
+        );
         throw new Error(`updateStatusBarIcon failed: code=${err.code} msg=${err.message}`);
       }
     }
 
     if (action === "update-menu") {
-      const request = expectBridgeRequestType(payload, "ohos.statusbar", action, UPDATE_MENU_REQUEST_TYPE) as UpdateMenuRequest;
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.statusbar",
+        action,
+        UPDATE_MENU_REQUEST_TYPE,
+      ) as UpdateMenuRequest;
       if (typeof request.menuJson !== "string" || request.menuJson.length === 0) {
         throw new Error("update-menu.menuJson must be a non-empty string");
       }
@@ -286,13 +340,24 @@ export class StatusbarPlugin extends AsyncPluginBase {
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
       } catch (e) {
         const err = e as BusinessError;
-        hilog.error(DOMAIN, "StatusbarPlugin", "update-menu failed: %{public}d %{public}s", err.code, err.message);
+        hilog.error(
+          DOMAIN,
+          "StatusbarPlugin",
+          "update-menu failed: %{public}d %{public}s",
+          err.code,
+          err.message,
+        );
         throw new Error(`updateStatusBarMenu failed: code=${err.code} msg=${err.message}`);
       }
     }
 
     if (action === "update-tips") {
-      const request = expectBridgeRequestType(payload, "ohos.statusbar", action, UPDATE_TIPS_REQUEST_TYPE) as UpdateTipsRequest;
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.statusbar",
+        action,
+        UPDATE_TIPS_REQUEST_TYPE,
+      ) as UpdateTipsRequest;
       if (typeof request.tips !== "string") {
         throw new Error("update-tips.tips must be a string");
       }
@@ -302,7 +367,13 @@ export class StatusbarPlugin extends AsyncPluginBase {
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
       } catch (e) {
         const err = e as BusinessError;
-        hilog.error(DOMAIN, "StatusbarPlugin", "update-tips failed: %{public}d %{public}s", err.code, err.message);
+        hilog.error(
+          DOMAIN,
+          "StatusbarPlugin",
+          "update-tips failed: %{public}d %{public}s",
+          err.code,
+          err.message,
+        );
         throw new Error(`updateStatusBarHoverTips failed: code=${err.code} msg=${err.message}`);
       }
     }
@@ -313,13 +384,23 @@ export class StatusbarPlugin extends AsyncPluginBase {
     // silently dropped (Rust side map_err→warn swallowed it). MenuPlugin.ets has the same
     // handler for ohos.menu; mirror it here so tray predefined items run the same executor.
     if (action === "execute-predefined") {
-      const request = expectBridgeRequestType(payload, "ohos.statusbar", action, PREDEFINED_REQUEST_TYPE) as PredefinedRequest;
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.statusbar",
+        action,
+        PREDEFINED_REQUEST_TYPE,
+      ) as PredefinedRequest;
       if (typeof request.action !== "string" || !request.action) {
         throw new Error("execute-predefined.action must be a non-empty string");
       }
       const executor = getPredefinedActionExecutor();
       if (!executor) {
-        hilog.warn(DOMAIN, "StatusbarPlugin", "execute-predefined: PredefinedActionExecutor not initialized, action: %{public}s", request.action);
+        hilog.warn(
+          DOMAIN,
+          "StatusbarPlugin",
+          "execute-predefined: PredefinedActionExecutor not initialized, action: %{public}s",
+          request.action,
+        );
         throw new Error("PredefinedActionExecutor not initialized");
       }
       const actionType = request.action as PredefinedType;

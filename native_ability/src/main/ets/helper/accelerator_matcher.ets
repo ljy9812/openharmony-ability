@@ -1,24 +1,24 @@
-import { MenuItemData } from './menu_types';
+import { MenuItemData } from "./menu_types";
 
 const SPECIAL_KEY_MAP: Map<string, string> = new Map([
-  ['Escape', 'Esc'],
-  ['KEYCODE_ESCAPE', 'Esc'],
-  ['Delete', 'Del'],
-  ['KEYCODE_DELETE', 'Del'],
-  ['Insert', 'Ins'],
-  ['KEYCODE_INSERT', 'Ins'],
-  ['PageUp', 'PgUp'],
-  ['KEYCODE_PAGE_UP', 'PgUp'],
-  ['PageDown', 'PgDn'],
-  ['KEYCODE_PAGE_DOWN', 'PgDn'],
-  ['Enter', 'Enter'],
-  ['KEYCODE_ENTER', 'Enter'],
-  ['Space', 'Space'],
-  ['KEYCODE_SPACE', 'Space'],
-  ['Tab', 'Tab'],
-  ['KEYCODE_TAB', 'Tab'],
-  ['Backquote', '`'],
-  ['KEYCODE_BACKQUOTE', '`'],
+  ["Escape", "Esc"],
+  ["KEYCODE_ESCAPE", "Esc"],
+  ["Delete", "Del"],
+  ["KEYCODE_DELETE", "Del"],
+  ["Insert", "Ins"],
+  ["KEYCODE_INSERT", "Ins"],
+  ["PageUp", "PgUp"],
+  ["KEYCODE_PAGE_UP", "PgUp"],
+  ["PageDown", "PgDn"],
+  ["KEYCODE_PAGE_DOWN", "PgDn"],
+  ["Enter", "Enter"],
+  ["KEYCODE_ENTER", "Enter"],
+  ["Space", "Space"],
+  ["KEYCODE_SPACE", "Space"],
+  ["Tab", "Tab"],
+  ["KEYCODE_TAB", "Tab"],
+  ["Backquote", "`"],
+  ["KEYCODE_BACKQUOTE", "`"],
 ]);
 
 // OHOS modifier keyCode constants — these arrive as separate key events
@@ -36,12 +36,12 @@ const MODIFIER_KEYCODES: Set<number> = new Set([
 
 // Clipboard accelerators handled natively by webview — intercepting them breaks paste/copy/cut
 const CLIPBOARD_ACCELERATORS: Set<string> = new Set([
-  'ctrl+c',   // copy
-  'ctrl+x',   // cut
-  'ctrl+v',   // paste
-  'ctrl+a',   // selectAll
-  'ctrl+z',   // undo
-  'ctrl+y',   // redo
+  "ctrl+c", // copy
+  "ctrl+x", // cut
+  "ctrl+v", // paste
+  "ctrl+a", // selectAll
+  "ctrl+z", // undo
+  "ctrl+y", // redo
 ]);
 
 export class AcceleratorMatcher {
@@ -79,16 +79,18 @@ export class AcceleratorMatcher {
     if (!keyText) {
       return false;
     }
-    let combo = '';
-    if (this.isModifierPressed(event, 'Ctrl')) combo += 'ctrl+';
-    if (this.isModifierPressed(event, 'Shift')) combo += 'shift+';
-    if (this.isModifierPressed(event, 'Alt')) combo += 'alt+';
+    let combo = "";
+    if (this.isModifierPressed(event, "Ctrl")) combo += "ctrl+";
+    if (this.isModifierPressed(event, "Shift")) combo += "shift+";
+    if (this.isModifierPressed(event, "Alt")) combo += "alt+";
     combo += keyText.toLowerCase();
     // Clipboard shortcuts handled natively by webview — don't intercept
     if (CLIPBOARD_ACCELERATORS.has(combo)) {
       return false;
     }
-    console.info(`[Accelerator] combo="${combo}", available=[${Array.from(this.accelerators.keys()).join(',')}]`);
+    console.info(
+      `[Accelerator] combo="${combo}", available=[${Array.from(this.accelerators.keys()).join(",")}]`,
+    );
     if (this.accelerators.has(combo)) {
       this.matchedItem = this.accelerators.get(combo)!;
       return true;
@@ -101,10 +103,10 @@ export class AcceleratorMatcher {
       return false;
     }
     const result = event.getModifierKeyState([modifier]);
-    if (typeof result === 'boolean') {
+    if (typeof result === "boolean") {
       return result;
     }
-    if (result && typeof result === 'object') {
+    if (result && typeof result === "object") {
       return !!result[modifier];
     }
     return false;
@@ -131,8 +133,8 @@ export class AcceleratorMatcher {
     if (!keyText) {
       return false;
     }
-    let combo = '';
-    if (this.isModifierPressed(event, 'Ctrl')) combo += 'ctrl+';
+    let combo = "";
+    if (this.isModifierPressed(event, "Ctrl")) combo += "ctrl+";
     combo += keyText.toLowerCase();
     return CLIPBOARD_ACCELERATORS.has(combo);
   }
@@ -149,7 +151,7 @@ export class AcceleratorMatcher {
     if (MODIFIER_KEYCODES.has(event.keyCode)) {
       return false;
     }
-    if (!this.isModifierPressed(event, 'Ctrl')) {
+    if (!this.isModifierPressed(event, "Ctrl")) {
       return false;
     }
     const keyText = this.getKeyText(event);
@@ -157,7 +159,7 @@ export class AcceleratorMatcher {
       return false;
     }
     const k = keyText.toLowerCase();
-    return k === '=' || k === '0' || k === '-' || k === 'equals' || k === 'minus';
+    return k === "=" || k === "0" || k === "-" || k === "equals" || k === "minus";
   }
 
   private getKeyText(event: KeyEvent): string | null {
@@ -170,8 +172,8 @@ export class AcceleratorMatcher {
     }
     // OHOS returns keyText as KEYCODE_* format (e.g. "KEYCODE_O")
     // Strip prefix and normalize to simple key letter
-    if (text.startsWith('KEYCODE_')) {
-      const raw = text.substring('KEYCODE_'.length);
+    if (text.startsWith("KEYCODE_")) {
+      const raw = text.substring("KEYCODE_".length);
       // Single letter keys (A-Z, 0-9) → just the letter
       if (raw.length === 1) {
         return raw;

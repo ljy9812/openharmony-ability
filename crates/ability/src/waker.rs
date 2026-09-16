@@ -50,6 +50,12 @@ pub struct OpenHarmonyWaker;
 unsafe impl Send for OpenHarmonyWaker {}
 unsafe impl Sync for OpenHarmonyWaker {}
 
+impl Default for OpenHarmonyWaker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OpenHarmonyWaker {
     pub fn new() -> Self {
         Self

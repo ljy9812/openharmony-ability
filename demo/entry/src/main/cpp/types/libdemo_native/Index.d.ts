@@ -54,11 +54,22 @@ export interface WebviewCreateRequest {
    * module's DefaultXComponent root.
    */
   parentHandle?: number;
+  /**
+   * OHOS window ID for sub-window webview mounting. When non-zero, the webview's FrameNode
+   * is mounted into the specified window's component root (from WindowManager) instead of
+   * this module's DefaultXComponent root.
+   */
+  windowId?: number;
   url?: string;
   html?: string;
   style: WebviewStyle;
   javascriptEnabled?: boolean;
   devtools?: boolean;
+  /**
+   * Enables ArkWeb DOM storage (localStorage/sessionStorage). ArkWeb disables it by
+   * default; when unset, DOM storage stays disabled, so callers opt in with `true`.
+   */
+  domStorageAccess?: boolean;
   userAgent?: string;
   autoplay?: boolean;
   initializationScripts?: Array<WebviewInitializationScript>;
@@ -68,6 +79,17 @@ export interface WebviewCreateRequest {
    * background color takes precedence.
    */
   transparent?: boolean;
+  /** Enable ArkWeb native clipboard (Ctrl+C/V/X/A/Z/Y). Defaults to true (ArkWeb default). */
+  clipboard?: boolean;
+  /** Enable zoom hotkeys (Ctrl+/-/0). Defaults to false. */
+  zoomHotkeys?: boolean;
+  /**
+   * Use a transparent Stack overlay to receive drag events (instead of binding directly on the
+   * Web component). Defaults to false. Use when ArkWeb drag events are unreliable.
+   */
+  dragDropOverlay?: boolean;
+  /** https-scheme protocols to intercept at create time. */
+  httpsInterceptProtocolList?: Array<string>;
   eventOptions: WebviewCallbackOptions;
 }
 

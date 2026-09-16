@@ -1,12 +1,12 @@
 import { AbilityConstant, Want } from "@kit.AbilityKit";
 import common from "@ohos.app.ability.common";
 import webview from "@ohos.web.webview";
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { deviceInfo } from '@kit.BasicServicesKit';
+import { hilog } from "@kit.PerformanceAnalysisKit";
+import { deviceInfo } from "@kit.BasicServicesKit";
 import { Module, AbilityInitContext } from "./type";
 import { Loadable } from "../helper/loadable";
 import { WindowManager } from "../window/WindowManager";
-import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from '../helper/constants';
+import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "../helper/constants";
 
 /**
  * ProcessInitializer — process-level initialization, executed only once.
@@ -43,7 +43,10 @@ export class ProcessInitializer {
     return this.loadedModuleNames;
   }
 
-  static createInitContext(context: common.UIAbilityContext, moduleName: string): AbilityInitContext {
+  static createInitContext(
+    context: common.UIAbilityContext,
+    moduleName: string,
+  ): AbilityInitContext {
     return {
       basePath: context?.filesDir ?? "",
       prefPath: context?.filesDir ?? "",
@@ -66,7 +69,7 @@ export class ProcessInitializer {
     want: Want,
   ): Promise<void> {
     if (this.initialized) {
-      hilog.info(DOMAIN, 'ProcessInitializer', 'Already initialized, skipping');
+      hilog.info(DOMAIN, "ProcessInitializer", "Already initialized, skipping");
       return;
     }
 
@@ -103,9 +106,9 @@ export class ProcessInitializer {
     for (const module of this.nativeModules) {
       if (typeof module.registerCreateSubWindowTsfn === "function") {
         module.registerCreateSubWindowTsfn(
-          (config: ESObject): Promise<number> => wm.createSubWindow(config)
+          (config: ESObject): Promise<number> => wm.createSubWindow(config),
         );
-        hilog.info(DOMAIN, 'ProcessInitializer', 'Registered createSubWindow TSFN');
+        hilog.info(DOMAIN, "ProcessInitializer", "Registered createSubWindow TSFN");
         break;
       }
     }
@@ -125,6 +128,6 @@ export class ProcessInitializer {
     }
 
     this.initialized = true;
-    hilog.info(DOMAIN, 'ProcessInitializer', 'Process initialization complete');
+    hilog.info(DOMAIN, "ProcessInitializer", "Process initialization complete");
   }
 }

@@ -1,4 +1,4 @@
-import { BridgeTypedValue } from '../ability/type';
+import { BridgeTypedValue } from "../ability/type";
 
 /**
  * Shared request-type validation for bridge plugins (issue #87 minor-6).
@@ -36,7 +36,11 @@ export function expectBridgeRequestType(
   action: string,
   typeName: string,
 ): ESObject {
-  if (payload.typeName !== typeName || payload.value === null || typeof payload.value !== "object") {
+  if (
+    payload.typeName !== typeName ||
+    payload.value === null ||
+    typeof payload.value !== "object"
+  ) {
     throw new Error(`${pluginId}.${action} requires bridge type ${typeName}`);
   }
   return payload.value as ESObject;

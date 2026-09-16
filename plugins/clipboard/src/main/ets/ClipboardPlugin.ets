@@ -99,7 +99,12 @@ export class ClipboardPlugin extends AsyncPluginBase {
         // getPrimaryText is typed string|null but returns `undefined` on an empty board
         // (e.g. when READ_PASTEBOARD permission is missing — getData silently returns an
         // empty PasteData). Guard all three: null, undefined, and non-string.
-        if (primaryText !== null && primaryText !== undefined && typeof primaryText === "string" && primaryText.length > 0) {
+        if (
+          primaryText !== null &&
+          primaryText !== undefined &&
+          typeof primaryText === "string" &&
+          primaryText.length > 0
+        ) {
           text = primaryText;
         }
       } catch {
@@ -112,7 +117,12 @@ export class ClipboardPlugin extends AsyncPluginBase {
     }
 
     if (action === "write-text") {
-      const request = expectBridgeRequestType(payload, "ohos.clipboard", action, WRITE_TEXT_REQUEST_TYPE) as WriteTextRequest;
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.clipboard",
+        action,
+        WRITE_TEXT_REQUEST_TYPE,
+      ) as WriteTextRequest;
       if (typeof request.text !== "string") {
         throw new Error("write-text.text must be a string");
       }
@@ -131,7 +141,12 @@ export class ClipboardPlugin extends AsyncPluginBase {
     }
 
     if (action === "write-image") {
-      const request = expectBridgeRequestType(payload, "ohos.clipboard", action, WRITE_IMAGE_REQUEST_TYPE) as WriteImageRequest;
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.clipboard",
+        action,
+        WRITE_IMAGE_REQUEST_TYPE,
+      ) as WriteImageRequest;
       // NAPI Vec<u8> inside #[napi(object)] arrives as Array<number>, not Uint8Array — convert
       let rgbaData: Uint8Array;
       if (request.rgba instanceof Uint8Array) {
@@ -158,7 +173,12 @@ export class ClipboardPlugin extends AsyncPluginBase {
     }
 
     if (action === "write-html") {
-      const request = expectBridgeRequestType(payload, "ohos.clipboard", action, WRITE_HTML_REQUEST_TYPE) as WriteHtmlRequest;
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.clipboard",
+        action,
+        WRITE_HTML_REQUEST_TYPE,
+      ) as WriteHtmlRequest;
       if (typeof request.html !== "string") {
         throw new Error("write-html.html must be a string");
       }

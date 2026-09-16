@@ -1,21 +1,26 @@
-import { window, UIContext } from '@kit.ArkUI';
-import { FrameNode } from '@ohos.arkui.node';
-import { common } from '@kit.AbilityKit';
-import pointer from '@ohos.multimodalInput.pointer';
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { deviceInfo } from '@kit.BasicServicesKit';
-import display from '@ohos.display';
-import * as FloatPage from '../components/FloatPage';
-import { getMenuDataCallback, windowKeyForId } from '../components/MenuBarComponent';
-import { DOMAIN } from '../helper/constants';
-import { clearClipboardEnabled, clearZoomHotkeysEnabled, setClipboardEnabled, setZoomHotkeysEnabled } from '../helper/accelerator_matcher';
-import web_webview from '@ohos.web.webview';
-import { RectThrottle, WindowRectEventWrap, WindowSizeEventWrap } from './RectThrottle';
-import { WindowAttachmentRegistry } from './WindowAttachmentRegistry';
+import { window, UIContext } from "@kit.ArkUI";
+import { FrameNode } from "@ohos.arkui.node";
+import { common } from "@kit.AbilityKit";
+import pointer from "@ohos.multimodalInput.pointer";
+import { hilog } from "@kit.PerformanceAnalysisKit";
+import { deviceInfo } from "@kit.BasicServicesKit";
+import display from "@ohos.display";
+import * as FloatPage from "../components/FloatPage";
+import { getMenuDataCallback, windowKeyForId } from "../components/MenuBarComponent";
+import { DOMAIN } from "../helper/constants";
+import {
+  clearClipboardEnabled,
+  clearZoomHotkeysEnabled,
+  setClipboardEnabled,
+  setZoomHotkeysEnabled,
+} from "../helper/accelerator_matcher";
+import web_webview from "@ohos.web.webview";
+import { RectThrottle, WindowRectEventWrap, WindowSizeEventWrap } from "./RectThrottle";
+import { WindowAttachmentRegistry } from "./WindowAttachmentRegistry";
 
 // Event payload types moved to RectThrottle (issue #87 major-5); re-exported here so
 // existing importers (`import {...} from "../window/WindowManager"`) keep working.
-export { WindowRectEventWrap, WindowSizeEventWrap } from './RectThrottle';
+export { WindowRectEventWrap, WindowSizeEventWrap } from "./RectThrottle";
 
 interface WindowEntry {
   window: window.Window;
@@ -45,8 +50,8 @@ export interface SubWindowOptions {
 
 // Enum of window kinds. All UIAbility windows are equal, no primary/subordinate distinction.
 export enum WindowKind {
-  UIAbility,  // All UIAbility main windows (id=0 or id>0, equivalent)
-  Float,      // Float sub-window created by windowStage.createSubWindow
+  UIAbility, // All UIAbility main windows (id=0 or id>0, equivalent)
+  Float, // Float sub-window created by windowStage.createSubWindow
 }
 
 export class WindowManager {
@@ -129,14 +134,14 @@ export class WindowManager {
 
   static init(context: common.UIAbilityContext): void {
     if (!WindowManager.instance) {
-      hilog.info(DOMAIN, 'WindowManager', 'WindowManager initialized');
+      hilog.info(DOMAIN, "WindowManager", "WindowManager initialized");
       WindowManager.instance = new WindowManager(context);
     }
   }
 
   static getInstance(): WindowManager {
     if (!WindowManager.instance) {
-      hilog.error(DOMAIN, 'WindowManager', 'WindowManager not initialized');
+      hilog.error(DOMAIN, "WindowManager", "WindowManager not initialized");
       throw new Error("WindowManager not initialized");
     }
     return WindowManager.instance;
@@ -153,20 +158,37 @@ export class WindowManager {
   // Unified registration for all UIAbility WindowStages (id=0 first instance
   // or id>0 subsequent instances — equal, no primary/subordinate distinction).
   // Stores stage in uiAbilityStages, sets windowKinds, and registers focus tracking.
-  registerUIAbilityStage(windowId: number, windowStage: window.WindowStage, context: common.UIAbilityContext, transparent: boolean = false): void {
+  registerUIAbilityStage(
+    windowId: number,
+    windowStage: window.WindowStage,
+    context: common.UIAbilityContext,
+    transparent: boolean = false,
+  ): void {
     const wid = Number(windowId);
     this.uiAbilityStages.set(wid, windowStage);
     this.uiAbilityContexts.set(wid, context);
     this.windowKinds.set(wid, WindowKind.UIAbility);
     this.transparentFlags.set(wid, transparent);
-    hilog.info(DOMAIN, 'WindowManager', 'UIAbility stage registered: id=%{public}d transparent=%{public}s', wid, String(transparent));
+    hilog.info(
+      DOMAIN,
+      "WindowManager",
+      "UIAbility stage registered: id=%{public}d transparent=%{public}s",
+      wid,
+      String(transparent),
+    );
 
     // Register focus tracking for this window
     try {
       const mainWindow = windowStage.getMainWindowSync();
       this.registerFocusTracking(mainWindow, wid);
     } catch (e) {
-      hilog.warn(DOMAIN, 'WindowManager', 'Failed to register focus tracking for id=%{public}d: %{public}s', wid, String(e));
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "Failed to register focus tracking for id=%{public}d: %{public}s",
+        wid,
+        String(e),
+      );
     }
 
     // Transparency is applied in createWebview (when data.transparent=true),
@@ -179,7 +201,7 @@ export class WindowManager {
     const wid = Number(windowId);
     this.uiAbilityStages.delete(wid);
     this.clearWindowState(wid);
-    hilog.info(DOMAIN, 'WindowManager', 'UIAbility stage unregistered: id=%{public}d', wid);
+    hilog.info(DOMAIN, "WindowManager", "UIAbility stage unregistered: id=%{public}d", wid);
   }
 
   // Single source of truth for per-window state cleanup (issue #87 major-5): both
@@ -220,9 +242,21 @@ export class WindowManager {
   private serializeOp(windowId: number, op: () => Promise<void>): void {
     const wid = Number(windowId);
     const prev = this.windowOpQueues.get(wid) ?? Promise.resolve();
-    hilog.debug(DOMAIN, 'WindowManager', 'serializeOp: window %{public}d queued (had prior=%{public}s)', wid, String(prev !== Promise.resolve()));
+    hilog.debug(
+      DOMAIN,
+      "WindowManager",
+      "serializeOp: window %{public}d queued (had prior=%{public}s)",
+      wid,
+      String(prev !== Promise.resolve()),
+    );
     const next = prev.then(op).catch((err: ESObject) => {
-      hilog.warn(DOMAIN, 'WindowManager', 'serializeOp: window %{public}d op failed: %{public}s', wid, String(err?.message ?? err));
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "serializeOp: window %{public}d op failed: %{public}s",
+        wid,
+        String(err?.message ?? err),
+      );
     });
     this.windowOpQueues.set(wid, next);
   }
@@ -233,56 +267,93 @@ export class WindowManager {
   async applyTransparentBackground(windowId: number): Promise<void> {
     const wid = Number(windowId);
     const isTrans = this.isTransparent(wid);
-    hilog.debug(DOMAIN, 'WindowManager', 'applyTransparentBackground: windowId=%{public}d isTransparent=%{public}s', wid, String(isTrans));
+    hilog.debug(
+      DOMAIN,
+      "WindowManager",
+      "applyTransparentBackground: windowId=%{public}d isTransparent=%{public}s",
+      wid,
+      String(isTrans),
+    );
     if (!isTrans) {
       return;
     }
     const stage = this.uiAbilityStages.get(wid);
     if (!stage) {
-      hilog.warn(DOMAIN, 'WindowManager', 'applyTransparentBackground: no stage for id=%{public}d', wid);
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "applyTransparentBackground: no stage for id=%{public}d",
+        wid,
+      );
       return;
     }
     try {
       const mainWindow = await stage.getMainWindow();
-      mainWindow.setWindowBackgroundColor('#00000000');
-      hilog.info(DOMAIN, 'WindowManager', 'applyTransparentBackground: windowId=%{public}d setWindowBackgroundColor transparent OK', wid);
+      mainWindow.setWindowBackgroundColor("#00000000");
+      hilog.info(
+        DOMAIN,
+        "WindowManager",
+        "applyTransparentBackground: windowId=%{public}d setWindowBackgroundColor transparent OK",
+        wid,
+      );
       if (deviceInfo.sdkApiVersion >= 20) {
         try {
-          mainWindow.setWindowContainerColor('#00000000', '#FFFFFFFF');
-          hilog.info(DOMAIN, 'WindowManager', 'applyTransparentBackground: windowId=%{public}d setWindowContainerColor transparent OK (active=transparent inactive=white)', wid);
+          mainWindow.setWindowContainerColor("#00000000", "#FFFFFFFF");
+          hilog.info(
+            DOMAIN,
+            "WindowManager",
+            "applyTransparentBackground: windowId=%{public}d setWindowContainerColor transparent OK (active=transparent inactive=white)",
+            wid,
+          );
         } catch (containerErr: any) {
-          hilog.warn(DOMAIN, 'WindowManager', 'applyTransparentBackground: windowId=%{public}d setWindowContainerColor failed: code=%{public}d', wid, containerErr.code);
+          hilog.warn(
+            DOMAIN,
+            "WindowManager",
+            "applyTransparentBackground: windowId=%{public}d setWindowContainerColor failed: code=%{public}d",
+            wid,
+            containerErr.code,
+          );
         }
       }
     } catch (e) {
-      hilog.warn(DOMAIN, 'WindowManager', 'applyTransparentBackground: windowId=%{public}d failed: %{public}s', wid, String(e));
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "applyTransparentBackground: windowId=%{public}d failed: %{public}s",
+        wid,
+        String(e),
+      );
     }
   }
 
   // Register WINDOW_ACTIVE listener for focus tracking
   // Also listens for RESUMED/WINDOW_ACTIVE to consume pending actions
   private registerFocusTracking(win: window.Window, windowId: number): void {
-    win.on('windowEvent', (eventType: window.WindowEventType) => {
+    win.on("windowEvent", (eventType: window.WindowEventType) => {
       // Track last focused window
       if (eventType === window.WindowEventType.WINDOW_ACTIVE) {
         this.lastFocusedWindow = win;
         this.lastFocusedWindowId = windowId;
-        hilog.info(DOMAIN, 'WindowManager', 'Last focused window updated: id=%{public}d', windowId);
+        hilog.info(DOMAIN, "WindowManager", "Last focused window updated: id=%{public}d", windowId);
       }
 
       // Consume pending action when system foreground transition completes
       // WINDOW_ACTIVE: window gained focus (marks end of foreground transition)
       // WINDOW_SHOWN: window is visible (alternative trigger)
-      if (eventType === window.WindowEventType.WINDOW_ACTIVE ||
-          eventType === window.WindowEventType.WINDOW_SHOWN) {
+      if (
+        eventType === window.WindowEventType.WINDOW_ACTIVE ||
+        eventType === window.WindowEventType.WINDOW_SHOWN
+      ) {
         if (this.hasPendingAction()) {
-          hilog.info(DOMAIN, 'WindowManager',
-            'System foreground transition complete (event: %{public}s), executing pending action',
-            eventType === window.WindowEventType.WINDOW_ACTIVE ? 'WINDOW_ACTIVE' : 'WINDOW_SHOWN');
+          hilog.info(
+            DOMAIN,
+            "WindowManager",
+            "System foreground transition complete (event: %{public}s), executing pending action",
+            eventType === window.WindowEventType.WINDOW_ACTIVE ? "WINDOW_ACTIVE" : "WINDOW_SHOWN",
+          );
           this.consumePendingAction();
         }
       }
-
     });
   }
 
@@ -303,7 +374,7 @@ export class WindowManager {
   // Used by tray menu to determine which window to operate on.
   setUserInteractedWindow(windowId: number): void {
     this.lastUserInteractedWindowId = windowId;
-    hilog.info(DOMAIN, 'WindowManager', 'User interacted with window: id=%{public}d', windowId);
+    hilog.info(DOMAIN, "WindowManager", "User interacted with window: id=%{public}d", windowId);
   }
 
   // Get the window the user last physically touched (for Tray menu path)
@@ -346,43 +417,70 @@ export class WindowManager {
   private minimizeWithRestoreGuard(win: window.Window): Promise<void> {
     return new Promise<void>((resolve) => {
       let consumed = false;
-      const finish = () => { try { win.off('windowEvent', onWindowEvent); } catch (_) {} };
+      const finish = () => {
+        try {
+          win.off("windowEvent", onWindowEvent);
+        } catch (_) {}
+      };
       const doMinimize = () => {
         if (consumed) return;
         consumed = true;
         finish();
-        hilog.info(DOMAIN, 'WindowManager', 'minimizeWithRestoreGuard: minimizing (settled)');
-        win.minimize().then(() => resolve())
+        hilog.info(DOMAIN, "WindowManager", "minimizeWithRestoreGuard: minimizing (settled)");
+        win
+          .minimize()
+          .then(() => resolve())
           .catch((err: ESObject) => {
-            hilog.warn(DOMAIN, 'WindowManager', 'minimizeWithRestoreGuard minimize failed: %{public}s', JSON.stringify(err));
+            hilog.warn(
+              DOMAIN,
+              "WindowManager",
+              "minimizeWithRestoreGuard minimize failed: %{public}s",
+              JSON.stringify(err),
+            );
             resolve();
           });
       };
       const onWindowEvent = (eventType: window.WindowEventType) => {
         if (!consumed && eventType === window.WindowEventType.WINDOW_ACTIVE) {
-          hilog.info(DOMAIN, 'WindowManager', 'minimizeWithRestoreGuard: WINDOW_ACTIVE fired');
+          hilog.info(DOMAIN, "WindowManager", "minimizeWithRestoreGuard: WINDOW_ACTIVE fired");
           doMinimize();
         }
       };
       try {
-        win.on('windowEvent', onWindowEvent);
+        win.on("windowEvent", onWindowEvent);
       } catch (_) {
-        hilog.warn(DOMAIN, 'WindowManager', 'minimizeWithRestoreGuard: windowEvent unsupported, direct minimize');
-        win.minimize().then(() => resolve()).catch(() => resolve());
+        hilog.warn(
+          DOMAIN,
+          "WindowManager",
+          "minimizeWithRestoreGuard: windowEvent unsupported, direct minimize",
+        );
+        win
+          .minimize()
+          .then(() => resolve())
+          .catch(() => resolve());
         return;
       }
-      hilog.info(DOMAIN, 'WindowManager', 'minimizeWithRestoreGuard: waiting for WINDOW_ACTIVE (50ms fallback)');
+      hilog.info(
+        DOMAIN,
+        "WindowManager",
+        "minimizeWithRestoreGuard: waiting for WINDOW_ACTIVE (50ms fallback)",
+      );
       setTimeout(doMinimize, 50);
     });
   }
 
   minimizeWindow(windowId: number): void {
     // 拦截:FLAG_MINIMIZABLE 为 0 时,不允许最小化(问题四:语义错位修复)
-    if (!this.getDecorationFlag(windowId, 'minimizable')) {
-      hilog.warn(DOMAIN, 'WindowManager', 'minimizeWindow blocked: minimizable flag not set (window %{public}d)', windowId);
+    if (!this.getDecorationFlag(windowId, "minimizable")) {
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "minimizeWindow blocked: minimizable flag not set (window %{public}d)",
+        windowId,
+      );
       return;
     }
-    this.withWindow(windowId, 'minimizeWindow', (win: window.Window) => {
+    this.withWindow(windowId, "minimizeWindow", (win: window.Window) => {
       // Serialize: minimize can race with maximize/recover/fullscreen. The guard's
       // Promise keeps the serialization slot held until the deferred minimize
       // settles, preserving op ordering.
@@ -392,23 +490,34 @@ export class WindowManager {
           if (this.lastUserInteractedWindowId === windowId) {
             this.resetUserInteractionTracking();
           }
-        })
+        }),
       );
     });
   }
 
   focusWindow(windowId: number): void {
-    this.withWindow(windowId, 'focusWindow', (win: window.Window) => {
-      this.fireAndForget(win.raiseToAppTop(), 'focusWindow', windowId, () => {
-        hilog.debug(DOMAIN, 'WindowManager', 'focusWindow: window %{public}d raised to top', windowId);
+    this.withWindow(windowId, "focusWindow", (win: window.Window) => {
+      this.fireAndForget(win.raiseToAppTop(), "focusWindow", windowId, () => {
+        hilog.debug(
+          DOMAIN,
+          "WindowManager",
+          "focusWindow: window %{public}d raised to top",
+          windowId,
+        );
       });
     });
   }
 
   setWindowFocusable(windowId: number, focusable: boolean): void {
-    this.withWindow(windowId, 'setWindowFocusable', (win: window.Window) => {
-      this.fireAndForget(win.setWindowFocusable(focusable), 'setWindowFocusable', windowId, () => {
-        hilog.debug(DOMAIN, 'WindowManager', 'setWindowFocusable: window %{public}d focusable=%{public}s', windowId, String(focusable));
+    this.withWindow(windowId, "setWindowFocusable", (win: window.Window) => {
+      this.fireAndForget(win.setWindowFocusable(focusable), "setWindowFocusable", windowId, () => {
+        hilog.debug(
+          DOMAIN,
+          "WindowManager",
+          "setWindowFocusable: window %{public}d focusable=%{public}s",
+          windowId,
+          String(focusable),
+        );
       });
     });
   }
@@ -417,9 +526,15 @@ export class WindowManager {
     // setWindowTouchable returns a Promise; 401/1300002/1300003 reject asynchronously;
     // the unified fireAndForget catch prevents the unhandled-reject crash (Rust does
     // not perceive the failure — TSFN fire-and-forget, see set_window_touchable docs).
-    this.withWindow(windowId, 'setWindowTouchable', (win: window.Window) => {
-      this.fireAndForget(win.setWindowTouchable(touchable), 'setWindowTouchable', windowId, () => {
-        hilog.debug(DOMAIN, 'WindowManager', 'setWindowTouchable: window %{public}d touchable=%{public}s', windowId, String(touchable));
+    this.withWindow(windowId, "setWindowTouchable", (win: window.Window) => {
+      this.fireAndForget(win.setWindowTouchable(touchable), "setWindowTouchable", windowId, () => {
+        hilog.debug(
+          DOMAIN,
+          "WindowManager",
+          "setWindowTouchable: window %{public}d touchable=%{public}s",
+          windowId,
+          String(touchable),
+        );
       });
     });
   }
@@ -427,14 +542,14 @@ export class WindowManager {
   // ─── Window operations (ohos-window-ops) ───
 
   moveWindowTo(windowId: number, x: number, y: number): void {
-    this.withWindow(windowId, 'moveWindowTo', (win: window.Window) => {
-      this.fireAndForget(win.moveWindowTo(x, y), 'moveWindowTo', Number(windowId));
+    this.withWindow(windowId, "moveWindowTo", (win: window.Window) => {
+      this.fireAndForget(win.moveWindowTo(x, y), "moveWindowTo", Number(windowId));
     });
   }
 
   resizeWindow(windowId: number, width: number, height: number): void {
-    this.withWindow(windowId, 'resizeWindow', (win: window.Window) => {
-      this.fireAndForget(win.resize(width, height), 'resizeWindow', Number(windowId));
+    this.withWindow(windowId, "resizeWindow", (win: window.Window) => {
+      this.fireAndForget(win.resize(width, height), "resizeWindow", Number(windowId));
     });
   }
 
@@ -456,24 +571,37 @@ export class WindowManager {
   async restorePreMaximizeRect(windowId: number, win: window.Window): Promise<void> {
     const wid = Number(windowId);
     const saved = this.preMaximizeRects.get(wid);
-    if (!saved) { return; }
+    if (!saved) {
+      return;
+    }
     this.preMaximizeRects.delete(wid);
     try {
       await win.moveTo(saved.left, saved.top);
     } catch (err) {
       // Position restore is best-effort: the caller's recover() already succeeded —
       // a moveTo failure must not surface as a recover failure.
-      hilog.warn(DOMAIN, 'WindowManager', 'restorePreMaximizeRect %{public}d moveTo failed: %{public}s', wid, JSON.stringify(err));
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "restorePreMaximizeRect %{public}d moveTo failed: %{public}s",
+        wid,
+        JSON.stringify(err),
+      );
     }
   }
 
   maximizeWindow(windowId: number): void {
     // 拦截:FLAG_MAXIMIZABLE 为 0 时,不允许最大化(问题四:语义错位修复)
-    if (!this.getDecorationFlag(windowId, 'maximizable')) {
-      hilog.warn(DOMAIN, 'WindowManager', 'maximizeWindow blocked: maximizable flag not set (window %{public}d)', windowId);
+    if (!this.getDecorationFlag(windowId, "maximizable")) {
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "maximizeWindow blocked: maximizable flag not set (window %{public}d)",
+        windowId,
+      );
       return;
     }
-    this.withWindow(windowId, 'maximizeWindow', (win: window.Window) => {
+    this.withWindow(windowId, "maximizeWindow", (win: window.Window) => {
       // Serialize: maximize can race with fullscreen-exit (recover) or minimize.
       this.serializeOp(windowId, () => {
         // Snapshot the floating rect BEFORE maximizing (see snapshotPreMaximizeRect).
@@ -483,7 +611,7 @@ export class WindowManager {
         // exits it on recover, causing a layout gap (white bar at bottom where navigation bar was).
         // FOLLOW_APP_IMMERSIVE_SETTING preserves setWindowLayoutFullScreen(true) set at init.
         return win.maximize(window.MaximizePresentation.FOLLOW_APP_IMMERSIVE_SETTING).then(() => {
-          hilog.info(DOMAIN, 'WindowManager', 'maximizeWindow %{public}d OK', windowId);
+          hilog.info(DOMAIN, "WindowManager", "maximizeWindow %{public}d OK", windowId);
         });
       });
     });
@@ -495,13 +623,24 @@ export class WindowManager {
     // will error (non-fatal). Only effective in freeform window mode; returns 801
     // on devices without freeform support (phone/tablet).
     if (deviceInfo.sdkApiVersion < 14) {
-      hilog.warn(DOMAIN, 'WindowManager', 'setWindowTopmost: API14+ required, current %{public}d; no-op', deviceInfo.sdkApiVersion);
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "setWindowTopmost: API14+ required, current %{public}d; no-op",
+        deviceInfo.sdkApiVersion,
+      );
       return;
     }
-    this.withWindow(windowId, 'setWindowTopmost', (win: window.Window) => {
+    this.withWindow(windowId, "setWindowTopmost", (win: window.Window) => {
       // 801: non-freeform device/state; sub-window call; 1300002: window state abnormal — non-fatal
-      this.fireAndForget(win.setWindowTopmost(topmost), 'setWindowTopmost', windowId, () => {
-        hilog.info(DOMAIN, 'WindowManager', 'setWindowTopmost %{public}d topmost=%{public}s OK', windowId, String(topmost));
+      this.fireAndForget(win.setWindowTopmost(topmost), "setWindowTopmost", windowId, () => {
+        hilog.info(
+          DOMAIN,
+          "WindowManager",
+          "setWindowTopmost %{public}d topmost=%{public}s OK",
+          windowId,
+          String(topmost),
+        );
       });
     });
   }
@@ -510,14 +649,20 @@ export class WindowManager {
     // win.setWindowTitle(title) is Promise form (1 arg). Main window + Float sub-windows
     // both support title text (icon is NOT changeable at runtime). No extra permission
     // for main window. Only visible when window decorations are enabled (decorEnabled=true).
-    this.withWindow(windowId, 'setWindowTitle', (win: window.Window) => {
+    this.withWindow(windowId, "setWindowTitle", (win: window.Window) => {
       // Also update LocalStorage 'title' so FloatPage @LocalStorageProp('title') refreshes the title bar text.
       const entry = this.windows.get(windowId);
       if (entry?.storage) {
-        entry.storage.setOrCreate('title', title);
+        entry.storage.setOrCreate("title", title);
       }
-      this.fireAndForget(win.setWindowTitle(title), 'setWindowTitle', windowId, () => {
-        hilog.info(DOMAIN, 'WindowManager', 'setWindowTitle %{public}d title="%{public}s" OK', windowId, title);
+      this.fireAndForget(win.setWindowTitle(title), "setWindowTitle", windowId, () => {
+        hilog.info(
+          DOMAIN,
+          "WindowManager",
+          'setWindowTitle %{public}d title="%{public}s" OK',
+          windowId,
+          title,
+        );
       });
     });
   }
@@ -526,17 +671,30 @@ export class WindowManager {
     // win.setWindowLimits() is API11+. Params are px (0 = no limit / system default).
     // WindowLimits fields: minWidth/minHeight/maxWidth/maxHeight (NOT minWindowWidth etc.)
     // ⚠️ Triggers OnSizeChange — caller must not invoke frequently on main window (appfreeze risk).
-    this.withWindow(windowId, 'setWindowLimits', (win: window.Window) => {
+    this.withWindow(windowId, "setWindowLimits", (win: window.Window) => {
       const limits: window.WindowLimits = {
         minWidth: minW,
         minHeight: minH,
         maxWidth: maxW,
         maxHeight: maxH,
       };
-      this.fireAndForget(win.setWindowLimits(limits), 'setWindowLimits', windowId, (actual: window.WindowLimits) => {
-        hilog.info(DOMAIN, 'WindowManager', 'setWindowLimits %{public}d OK: min=%{public}dx%{public}d max=%{public}dx%{public}d',
-          windowId, actual.minWidth, actual.minHeight, actual.maxWidth, actual.maxHeight);
-      });
+      this.fireAndForget(
+        win.setWindowLimits(limits),
+        "setWindowLimits",
+        windowId,
+        (actual: window.WindowLimits) => {
+          hilog.info(
+            DOMAIN,
+            "WindowManager",
+            "setWindowLimits %{public}d OK: min=%{public}dx%{public}d max=%{public}dx%{public}d",
+            windowId,
+            actual.minWidth,
+            actual.minHeight,
+            actual.maxWidth,
+            actual.maxHeight,
+          );
+        },
+      );
     });
   }
 
@@ -545,23 +703,28 @@ export class WindowManager {
     // (restore_window) already guards, so this is defense-in-depth for any direct
     // ArkTS caller; on API<14 it is a no-op+warn instead of throwing.
     if (deviceInfo.sdkApiVersion < 14) {
-      hilog.warn(DOMAIN, 'WindowManager', 'restoreWindow: win.restore() requires API14+, current %{public}d; no-op', deviceInfo.sdkApiVersion);
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "restoreWindow: win.restore() requires API14+, current %{public}d; no-op",
+        deviceInfo.sdkApiVersion,
+      );
       return;
     }
-    this.withWindow(windowId, 'restoreWindow', (win: window.Window) => {
+    this.withWindow(windowId, "restoreWindow", (win: window.Window) => {
       // Serialize: restore can race with maximize/recover/fullscreen.
       this.serializeOp(windowId, () =>
         // FOLLOW_APP_IMMERSIVE_SETTING preserves the existing fullscreen layout,
         // so no setWindowLayoutFullScreen(true) needed after restore.
         win.restore().then(() => {
-          hilog.info(DOMAIN, 'WindowManager', 'restoreWindow %{public}d OK', windowId);
-        })
+          hilog.info(DOMAIN, "WindowManager", "restoreWindow %{public}d OK", windowId);
+        }),
       );
     });
   }
 
   recoverWindow(windowId: number): void {
-    this.withWindow(windowId, 'recoverWindow', (win: window.Window) => {
+    this.withWindow(windowId, "recoverWindow", (win: window.Window) => {
       // Serialize: recover can race with a pending maximize or fullscreen-enter.
       this.serializeOp(windowId, () =>
         // FOLLOW_APP_IMMERSIVE_SETTING preserves the existing fullscreen layout,
@@ -576,11 +739,21 @@ export class WindowManager {
           // re-applied: GetFullScreenToFloatingRect preserves the floating w/h.
           if (this.preMaximizeRects.has(Number(windowId))) {
             await this.restorePreMaximizeRect(windowId, win);
-            hilog.info(DOMAIN, 'WindowManager', 'recoverWindow %{public}d OK (restored pre-maximize rect)', windowId);
+            hilog.info(
+              DOMAIN,
+              "WindowManager",
+              "recoverWindow %{public}d OK (restored pre-maximize rect)",
+              windowId,
+            );
           } else {
-            hilog.info(DOMAIN, 'WindowManager', 'recoverWindow %{public}d OK (no pre-maximize rect; WMS default position)', windowId);
+            hilog.info(
+              DOMAIN,
+              "WindowManager",
+              "recoverWindow %{public}d OK (no pre-maximize rect; WMS default position)",
+              windowId,
+            );
           }
-        })
+        }),
       );
     });
   }
@@ -603,9 +776,9 @@ export class WindowManager {
       return;
     }
     // Sub-window: showWindow() restores from minimize (symmetric with hideWindow's minimize).
-    this.withWindow(windowId, 'showWindowMethod', (win: window.Window) => {
-      this.fireAndForget(win.showWindow(), 'showWindowMethod', windowId, () => {
-        hilog.info(DOMAIN, 'WindowManager', 'showWindowMethod %{public}d OK', windowId);
+    this.withWindow(windowId, "showWindowMethod", (win: window.Window) => {
+      this.fireAndForget(win.showWindow(), "showWindowMethod", windowId, () => {
+        hilog.info(DOMAIN, "WindowManager", "showWindowMethod %{public}d OK", windowId);
       });
     });
   }
@@ -614,9 +787,9 @@ export class WindowManager {
   // show: main window uses restore() — the documented inverse of minimize() (see showWindowMethod).
   // Sub-window: minimize + showWindow (symmetric, works).
   hideWindow(windowId: number): void {
-    this.withWindow(windowId, 'hideWindow', (win: window.Window) => {
-      this.fireAndForget(win.minimize(), 'hideWindow', windowId, () => {
-        hilog.info(DOMAIN, 'WindowManager', 'hideWindow(minimize) %{public}d OK', windowId);
+    this.withWindow(windowId, "hideWindow", (win: window.Window) => {
+      this.fireAndForget(win.minimize(), "hideWindow", windowId, () => {
+        hilog.info(DOMAIN, "WindowManager", "hideWindow(minimize) %{public}d OK", windowId);
       });
     });
   }
@@ -634,8 +807,14 @@ export class WindowManager {
   // The predefined menu fullscreen (menu.ets PredefinedActionExecutor) and the
   // Esc exit path (NativeAbility menubar recoverFn) both delegate here.
   setFullscreen(windowId: number, on: boolean): void {
-    this.withWindow(windowId, 'setFullscreen', (win: window.Window) => {
-      hilog.info(DOMAIN, 'WindowManager', 'setFullscreen %{public}d on=%{public}s ENTER', windowId, String(on));
+    this.withWindow(windowId, "setFullscreen", (win: window.Window) => {
+      hilog.info(
+        DOMAIN,
+        "WindowManager",
+        "setFullscreen %{public}d on=%{public}s ENTER",
+        windowId,
+        String(on),
+      );
 
       // Menubar follows fullscreen state (macOS semantics, design.md MW-5/D3):
       // hide on entry, restore on exit. Centralized here so ALL fullscreen
@@ -660,16 +839,36 @@ export class WindowManager {
           if (isDesktop) {
             // Desktop / 2in1: maximize(ENTER_IMMERSIVE) → hide title bar + Dock hover
             await win.maximize(window.MaximizePresentation.ENTER_IMMERSIVE);
-            hilog.info(DOMAIN, 'WindowManager', 'setFullscreen %{public}d maximize(ENTER_IMMERSIVE) OK', windowId);
+            hilog.info(
+              DOMAIN,
+              "WindowManager",
+              "setFullscreen %{public}d maximize(ENTER_IMMERSIVE) OK",
+              windowId,
+            );
             await win.setTitleAndDockHoverShown(false, false);
-            hilog.info(DOMAIN, 'WindowManager', 'setFullscreen %{public}d setTitleAndDockHoverShown(false,false) OK', windowId);
+            hilog.info(
+              DOMAIN,
+              "WindowManager",
+              "setFullscreen %{public}d setTitleAndDockHoverShown(false,false) OK",
+              windowId,
+            );
           } else {
             // Mobile: setWindowLayoutFullScreen(true) → hide status + nav bars
             try {
               await win.setWindowLayoutFullScreen(true);
-              hilog.info(DOMAIN, 'WindowManager', 'setFullscreen %{public}d setWindowLayoutFullScreen(true) OK', windowId);
+              hilog.info(
+                DOMAIN,
+                "WindowManager",
+                "setFullscreen %{public}d setWindowLayoutFullScreen(true) OK",
+                windowId,
+              );
               await win.setWindowSystemBarEnable([]);
-              hilog.info(DOMAIN, 'WindowManager', 'setFullscreen %{public}d setWindowSystemBarEnable([]) OK', windowId);
+              hilog.info(
+                DOMAIN,
+                "WindowManager",
+                "setFullscreen %{public}d setWindowSystemBarEnable([]) OK",
+                windowId,
+              );
             } catch (_err) {
               // Fallback to desktop immersive maximize
               await win.maximize(window.MaximizePresentation.ENTER_IMMERSIVE);
@@ -679,16 +878,31 @@ export class WindowManager {
           if (isDesktop) {
             // Desktop / 2in1: recover() → show title bar + Dock hover
             await win.recover();
-            hilog.info(DOMAIN, 'WindowManager', 'setFullscreen %{public}d recover() OK', windowId);
+            hilog.info(DOMAIN, "WindowManager", "setFullscreen %{public}d recover() OK", windowId);
             await win.setTitleAndDockHoverShown(true, true);
-            hilog.info(DOMAIN, 'WindowManager', 'setFullscreen %{public}d setTitleAndDockHoverShown(true,true) OK', windowId);
+            hilog.info(
+              DOMAIN,
+              "WindowManager",
+              "setFullscreen %{public}d setTitleAndDockHoverShown(true,true) OK",
+              windowId,
+            );
           } else {
             // Mobile: setWindowLayoutFullScreen(false) → restore status + nav bars
             try {
               await win.setWindowLayoutFullScreen(false);
-              hilog.info(DOMAIN, 'WindowManager', 'setFullscreen %{public}d setWindowLayoutFullScreen(false) OK', windowId);
-              await win.setWindowSystemBarEnable(['status', 'navigation']);
-              hilog.info(DOMAIN, 'WindowManager', 'setFullscreen %{public}d setWindowSystemBarEnable([status,navigation]) OK', windowId);
+              hilog.info(
+                DOMAIN,
+                "WindowManager",
+                "setFullscreen %{public}d setWindowLayoutFullScreen(false) OK",
+                windowId,
+              );
+              await win.setWindowSystemBarEnable(["status", "navigation"]);
+              hilog.info(
+                DOMAIN,
+                "WindowManager",
+                "setFullscreen %{public}d setWindowSystemBarEnable([status,navigation]) OK",
+                windowId,
+              );
             } catch (_err) {
               // Fallback to desktop recover
               await win.recover();
@@ -708,7 +922,7 @@ export class WindowManager {
   getDecorationFlag(windowId: number, key: string): boolean {
     const entry = this.windows.get(windowId);
     if (!entry || !entry.storage) {
-      return true;  // default: allowed (no storage = main window or not yet initialized)
+      return true; // default: allowed (no storage = main window or not yet initialized)
     }
     const val = entry.storage.get<boolean>(key);
     return val === undefined ? true : val;
@@ -716,24 +930,42 @@ export class WindowManager {
 
   setDecorationFlags(windowId: number, flags: number): void {
     if (this.isUIAbilityMainWindow(windowId)) {
-      hilog.info(DOMAIN, 'WindowManager', 'setDecorationFlags: UIAbility main window (id=%{public}d) no-op', windowId);
+      hilog.info(
+        DOMAIN,
+        "WindowManager",
+        "setDecorationFlags: UIAbility main window (id=%{public}d) no-op",
+        windowId,
+      );
       return;
     }
     const entry = this.windows.get(windowId);
     if (!entry || !entry.storage) {
-      hilog.warn(DOMAIN, 'WindowManager', 'setDecorationFlags: window %{public}d not found', windowId);
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "setDecorationFlags: window %{public}d not found",
+        windowId,
+      );
       return;
     }
-    entry.storage.setOrCreate('closable', (flags & 1) !== 0);
-    entry.storage.setOrCreate('maximizable', (flags & 2) !== 0);
-    entry.storage.setOrCreate('minimizable', (flags & 4) !== 0);
-    entry.storage.setOrCreate('resizable', (flags & 8) !== 0);
+    entry.storage.setOrCreate("closable", (flags & 1) !== 0);
+    entry.storage.setOrCreate("maximizable", (flags & 2) !== 0);
+    entry.storage.setOrCreate("minimizable", (flags & 4) !== 0);
+    entry.storage.setOrCreate("resizable", (flags & 8) !== 0);
   }
 
   // Group E cursor: @ohos.multimodalInput.pointer
   setPointerVisible(visible: boolean): void {
-    try { pointer.setPointerVisible(visible); }
-    catch (err) { hilog.warn(DOMAIN, 'WindowManager', 'setPointerVisible failed: %{public}s', JSON.stringify(err)); }
+    try {
+      pointer.setPointerVisible(visible);
+    } catch (err) {
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "setPointerVisible failed: %{public}s",
+        JSON.stringify(err),
+      );
+    }
   }
 
   setPointerStyle(windowId: number, style: number): void {
@@ -744,12 +976,19 @@ export class WindowManager {
     // turn a success into a reported failure, and the catch log would swallow the original err.
     // Use console fallback (same escape hatch as safeLogError / getRealWindowId below).
     const win = this.getWindow(windowId);
-    if (!win) { console.warn(`[WindowManager] setPointerStyle: window ${windowId} not found`); return; }
+    if (!win) {
+      console.warn(`[WindowManager] setPointerStyle: window ${windowId} not found`);
+      return;
+    }
     try {
       const realWindowId = win.getWindowProperties().id;
       pointer.setPointerStyleSync(realWindowId, style as pointer.PointerStyle);
-      console.info(`[WindowManager] setPointerStyle taoId=${windowId} realId=${realWindowId} style=${style} OK`);
-    } catch (err) { console.error(`[WindowManager] setPointerStyle ${windowId} failed: ${JSON.stringify(err)}`); }
+      console.info(
+        `[WindowManager] setPointerStyle taoId=${windowId} realId=${realWindowId} style=${style} OK`,
+      );
+    } catch (err) {
+      console.error(`[WindowManager] setPointerStyle ${windowId} failed: ${JSON.stringify(err)}`);
+    }
   }
 
   // Resolve tao's windowId (0 = main window placeholder) to the REAL OHOS window ID
@@ -759,9 +998,11 @@ export class WindowManager {
   getRealWindowId(windowId: number): number {
     try {
       const win = this.getWindow(windowId);
-      if (!win) { return -1; }
+      if (!win) {
+        return -1;
+      }
       const id = win.getWindowProperties().id;
-      return (typeof id === 'number') ? id : -1;
+      return typeof id === "number" ? id : -1;
     } catch (_err) {
       return -1;
     }
@@ -769,13 +1010,17 @@ export class WindowManager {
 
   isMaximized(windowId: number): boolean {
     const win = this.getWindow(windowId);
-    if (!win) { return false; }
+    if (!win) {
+      return false;
+    }
     return win.getWindowStatus() === window.WindowStatusType.MAXIMIZE;
   }
 
   isMinimized(windowId: number): boolean {
     const win = this.getWindow(windowId);
-    if (!win) { return false; }
+    if (!win) {
+      return false;
+    }
     return win.getWindowStatus() === window.WindowStatusType.MINIMIZE;
   }
 
@@ -783,13 +1028,18 @@ export class WindowManager {
   // Works for both main window (id=0) and sub-windows.
   async destroyWindow(windowId: number): Promise<void> {
     // 拦截:FLAG_CLOSABLE 为 0 时,不允许关闭(问题四:语义错位修复)
-    if (!this.getDecorationFlag(windowId, 'closable')) {
-      hilog.warn(DOMAIN, 'WindowManager', 'destroyWindow blocked: closable flag not set (window %{public}d)', windowId);
+    if (!this.getDecorationFlag(windowId, "closable")) {
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "destroyWindow blocked: closable flag not set (window %{public}d)",
+        windowId,
+      );
       return;
     }
     const win = this.getWindow(windowId);
     if (!win) {
-      hilog.warn(DOMAIN, 'WindowManager', 'destroyWindow: window %{public}d not found', windowId);
+      hilog.warn(DOMAIN, "WindowManager", "destroyWindow: window %{public}d not found", windowId);
       return;
     }
     // Phase 3 (design.md D4): set destroying=true before win.destroyWindow() so
@@ -801,7 +1051,13 @@ export class WindowManager {
     try {
       await win.destroyWindow();
     } catch (e) {
-      hilog.warn(DOMAIN, 'WindowManager', 'destroyWindow failed for %{public}d: %{public}s', windowId, String(e));
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "destroyWindow failed for %{public}d: %{public}s",
+        windowId,
+        String(e),
+      );
     }
     this.removeWindow(windowId);
   }
@@ -817,21 +1073,37 @@ export class WindowManager {
     if (this.isUIAbilityMainWindow(windowId)) {
       const ctx = this.uiAbilityContexts.get(Number(windowId));
       if (ctx) {
-        hilog.info(DOMAIN, 'WindowManager', 'closeWindow: terminateSelf for UIAbility id=%{public}d', windowId);
+        hilog.info(
+          DOMAIN,
+          "WindowManager",
+          "closeWindow: terminateSelf for UIAbility id=%{public}d",
+          windowId,
+        );
         try {
           await ctx.terminateSelf();
         } catch (e) {
-          hilog.warn(DOMAIN, 'WindowManager', 'closeWindow: terminateSelf failed for id=%{public}d: %{public}s', windowId, String(e));
+          hilog.warn(
+            DOMAIN,
+            "WindowManager",
+            "closeWindow: terminateSelf failed for id=%{public}d: %{public}s",
+            windowId,
+            String(e),
+          );
         }
       } else {
-        hilog.warn(DOMAIN, 'WindowManager', 'closeWindow: no context for UIAbility id=%{public}d (not registered?), falling back to hideAbility', windowId);
+        hilog.warn(
+          DOMAIN,
+          "WindowManager",
+          "closeWindow: no context for UIAbility id=%{public}d (not registered?), falling back to hideAbility",
+          windowId,
+        );
         await this.hideAbility();
       }
       return;
     }
     const win = this.getWindow(windowId);
     if (!win) {
-      hilog.warn(DOMAIN, 'WindowManager', 'closeWindow: window %{public}d not found', windowId);
+      hilog.warn(DOMAIN, "WindowManager", "closeWindow: window %{public}d not found", windowId);
       return;
     }
     // Phase 3 (design.md D4): set destroying=true before win.destroyWindow() (Float path).
@@ -842,14 +1114,20 @@ export class WindowManager {
     try {
       await win.destroyWindow();
     } catch (e) {
-      hilog.warn(DOMAIN, 'WindowManager', 'closeWindow destroy failed for %{public}d: %{public}s', windowId, String(e));
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "closeWindow destroy failed for %{public}d: %{public}s",
+        windowId,
+        String(e),
+      );
     }
     // removeWindow handles conditional resetUserInteractionTracking
     this.removeWindow(windowId);
   }
 
   private logNotFound(op: string, windowId: number): void {
-    hilog.warn(DOMAIN, 'WindowManager', `%{public}s: window %{public}d not found`, op, windowId);
+    hilog.warn(DOMAIN, "WindowManager", `%{public}s: window %{public}d not found`, op, windowId);
   }
 
   // ─── Boilerplate helpers (issue #87 major-5) ───
@@ -873,13 +1151,25 @@ export class WindowManager {
   // warn. The .catch runs in a Promise async callback (NOT a NAPI-reentrant call
   // stack), so hilog is safe here. The catch prevents unhandled-reject crashes;
   // Rust does not perceive the failure (TSFN fire-and-forget).
-  private fireAndForget<T>(p: Promise<T>, op: string, windowId: number, onSuccess?: (v: T) => void): void {
+  private fireAndForget<T>(
+    p: Promise<T>,
+    op: string,
+    windowId: number,
+    onSuccess?: (v: T) => void,
+  ): void {
     p.then((v: T) => {
       if (onSuccess) {
         onSuccess(v);
       }
     }).catch((err: ESObject) => {
-      hilog.warn(DOMAIN, 'WindowManager', '%{public}s %{public}d failed: %{public}s', op, windowId, JSON.stringify(err));
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "%{public}s %{public}d failed: %{public}s",
+        op,
+        windowId,
+        JSON.stringify(err),
+      );
     });
   }
 
@@ -907,47 +1197,69 @@ export class WindowManager {
     return new Promise<void>((resolve) => {
       const win = this.getWindow(0);
       if (!win) {
-        hilog.warn(DOMAIN, 'WindowManager', 'hideWithRestoreGuard: main window not found, direct hide');
-        this.doHideAbility().then(() => resolve()).catch(() => resolve());
+        hilog.warn(
+          DOMAIN,
+          "WindowManager",
+          "hideWithRestoreGuard: main window not found, direct hide",
+        );
+        this.doHideAbility()
+          .then(() => resolve())
+          .catch(() => resolve());
         return;
       }
       let consumed = false;
-      const finish = () => { try { win.off('windowEvent', onWindowEvent); } catch (_) {} };
+      const finish = () => {
+        try {
+          win.off("windowEvent", onWindowEvent);
+        } catch (_) {}
+      };
       const doHide = () => {
         if (consumed) return;
         consumed = true;
         finish();
-        hilog.info(DOMAIN, 'WindowManager', 'hideWithRestoreGuard: hiding (settled)');
-        this.doHideAbility().then(() => resolve()).catch(() => resolve());
+        hilog.info(DOMAIN, "WindowManager", "hideWithRestoreGuard: hiding (settled)");
+        this.doHideAbility()
+          .then(() => resolve())
+          .catch(() => resolve());
       };
       const onWindowEvent = (eventType: window.WindowEventType) => {
         if (!consumed && eventType === window.WindowEventType.WINDOW_ACTIVE) {
-          hilog.info(DOMAIN, 'WindowManager', 'hideWithRestoreGuard: WINDOW_ACTIVE fired');
+          hilog.info(DOMAIN, "WindowManager", "hideWithRestoreGuard: WINDOW_ACTIVE fired");
           doHide();
         }
       };
       try {
-        win.on('windowEvent', onWindowEvent);
+        win.on("windowEvent", onWindowEvent);
       } catch (_) {
-        hilog.warn(DOMAIN, 'WindowManager', 'hideWithRestoreGuard: windowEvent unsupported, direct hide');
-        this.doHideAbility().then(() => resolve()).catch(() => resolve());
+        hilog.warn(
+          DOMAIN,
+          "WindowManager",
+          "hideWithRestoreGuard: windowEvent unsupported, direct hide",
+        );
+        this.doHideAbility()
+          .then(() => resolve())
+          .catch(() => resolve());
         return;
       }
-      hilog.info(DOMAIN, 'WindowManager', 'hideWithRestoreGuard: waiting for WINDOW_ACTIVE (50ms fallback)');
+      hilog.info(
+        DOMAIN,
+        "WindowManager",
+        "hideWithRestoreGuard: waiting for WINDOW_ACTIVE (50ms fallback)",
+      );
       setTimeout(doHide, 50);
     });
   }
 
   private async doHideAbility(): Promise<void> {
     if (!this.context) {
-      hilog.warn(DOMAIN, 'WindowManager', 'hideAbility: context not set');
+      hilog.warn(DOMAIN, "WindowManager", "hideAbility: context not set");
       return;
     }
     try {
       await this.context.hideAbility();
       this.resetUserInteractionTracking();
     } catch (e) {
-      hilog.warn(DOMAIN, 'WindowManager', 'hideAbility failed: %{public}s', String(e));
+      hilog.warn(DOMAIN, "WindowManager", "hideAbility failed: %{public}s", String(e));
     }
   }
 
@@ -970,13 +1282,16 @@ export class WindowManager {
     this.clearPendingAction();
 
     this.pendingAction = action;
-    hilog.info(DOMAIN, 'WindowManager',
-      'Pending action set, waiting for system foreground transition');
+    hilog.info(
+      DOMAIN,
+      "WindowManager",
+      "Pending action set, waiting for system foreground transition",
+    );
 
     // Start safety net cleanup timer (2s)
     this.cleanupTimer = setTimeout(() => {
       if (this.pendingAction) {
-        hilog.warn(DOMAIN, 'WindowManager', 'Pending action timeout (2s), cleaning up stale state');
+        hilog.warn(DOMAIN, "WindowManager", "Pending action timeout (2s), cleaning up stale state");
         this.pendingAction = null;
       }
       this.cleanupTimer = null;
@@ -994,12 +1309,21 @@ export class WindowManager {
     // Cancel cleanup timer since we're executing the action
     this.cancelCleanupTimer();
 
-    hilog.info(DOMAIN, 'WindowManager', 'Consuming pending action after system foreground transition');
+    hilog.info(
+      DOMAIN,
+      "WindowManager",
+      "Consuming pending action after system foreground transition",
+    );
     try {
       action();
       return true;
     } catch (e) {
-      hilog.error(DOMAIN, 'WindowManager', 'Failed to execute pending action: %{public}s', String(e));
+      hilog.error(
+        DOMAIN,
+        "WindowManager",
+        "Failed to execute pending action: %{public}s",
+        String(e),
+      );
       return false;
     }
   }
@@ -1012,35 +1336,55 @@ export class WindowManager {
     if (this.cleanupTimer !== null) {
       clearTimeout(this.cleanupTimer);
       this.cleanupTimer = null;
-      hilog.info(DOMAIN, 'WindowManager', 'Cleanup timer cancelled');
+      hilog.info(DOMAIN, "WindowManager", "Cleanup timer cancelled");
     }
   }
 
   clearPendingAction(): void {
     if (this.pendingAction) {
-      hilog.info(DOMAIN, 'WindowManager', 'Clearing pending action without execution');
+      hilog.info(DOMAIN, "WindowManager", "Clearing pending action without execution");
       this.pendingAction = null;
     }
     this.cancelCleanupTimer();
   }
 
   async createSubWindow(opts: SubWindowOptions): Promise<number> {
-    const { name, windowId, width = 800, height = 600, x = 100, y = 100,
-            decorations = true, transparent = false, backgroundColor } = opts;
+    const {
+      name,
+      windowId,
+      width = 800,
+      height = 600,
+      x = 100,
+      y = 100,
+      decorations = true,
+      transparent = false,
+      backgroundColor,
+    } = opts;
 
     // Validate windowId: sub-window ID must be greater than 0
     if (windowId <= 0) {
-      hilog.error(DOMAIN, 'WindowManager', `Invalid windowId: %{public}d. Sub-window creation requires windowId > 0.`, windowId);
+      hilog.error(
+        DOMAIN,
+        "WindowManager",
+        `Invalid windowId: %{public}d. Sub-window creation requires windowId > 0.`,
+        windowId,
+      );
       throw new Error(`Invalid windowId: ${windowId}. Must be greater than 0.`);
     }
 
     // Check if windowStage has been set
     if (!this.uiAbilityStages.has(0)) {
-      hilog.error(DOMAIN, 'WindowManager', 'WindowStage not set. Call setWindowStage() first.');
-      throw new Error('WindowStage not set');
+      hilog.error(DOMAIN, "WindowManager", "WindowStage not set. Call setWindowStage() first.");
+      throw new Error("WindowStage not set");
     }
 
-    hilog.info(DOMAIN, 'WindowManager', `Creating sub-window via windowStage: %{public}s, id: %{public}d`, name, windowId);
+    hilog.info(
+      DOMAIN,
+      "WindowManager",
+      `Creating sub-window via windowStage: %{public}s, id: %{public}d`,
+      name,
+      windowId,
+    );
 
     let win: window.Window;
     try {
@@ -1056,7 +1400,7 @@ export class WindowManager {
       // setFullscreen's maximize(ENTER_IMMERSIVE) on sub-windows (same WMS gate).
       if (deviceInfo.sdkApiVersion >= 19) {
         const opts: window.SubWindowOptions = {
-          title: '',
+          title: "",
           decorEnabled: false,
           maximizeSupported: true,
         };
@@ -1065,23 +1409,28 @@ export class WindowManager {
         // API<19: maximizeSupported does not exist in the SDK typings — plain path.
         win = await this.uiAbilityStages.get(0)?.createSubWindow(name);
       }
-      hilog.info(DOMAIN, 'WindowManager', `Sub-window created successfully: %{public}d`, windowId);
+      hilog.info(DOMAIN, "WindowManager", `Sub-window created successfully: %{public}d`, windowId);
     } catch (err) {
-      hilog.error(DOMAIN, 'WindowManager', `Failed to create sub-window: %{public}s`, JSON.stringify(err));
+      hilog.error(
+        DOMAIN,
+        "WindowManager",
+        `Failed to create sub-window: %{public}s`,
+        JSON.stringify(err),
+      );
       throw err;
     }
-    
+
     // Use LocalStorage to pass windowId and decorations, ensuring isolation between windows
     let storage = new LocalStorage();
-    storage.setOrCreate('windowId', windowId);
-    storage.setOrCreate('decorations', decorations);
+    storage.setOrCreate("windowId", windowId);
+    storage.setOrCreate("decorations", decorations);
     // D group decoration flags default (all available; setDecorationFlags updates them)
-    storage.setOrCreate('closable', true);
-    storage.setOrCreate('maximizable', true);
-    storage.setOrCreate('minimizable', true);
-    storage.setOrCreate('resizable', true);
+    storage.setOrCreate("closable", true);
+    storage.setOrCreate("maximizable", true);
+    storage.setOrCreate("minimizable", true);
+    storage.setOrCreate("resizable", true);
     // Title (set by setWindowTitle → updates this via setWindowTitle impl)
-    storage.setOrCreate('title', '');
+    storage.setOrCreate("title", "");
     this.windows.set(windowId, { window: win, storage, destroying: false });
 
     // Phase 2 (design.md D3): register this sub-window's windowRectChange handler.
@@ -1093,27 +1442,50 @@ export class WindowManager {
     // loadContentByName so early rect changes (resize to target size) are captured.
     // The handler reference is stored in the WindowEntry so destroyWindow/removeWindow
     // can win.off("windowRectChange", handler) to avoid leaking the listener.
-    let rectChangeHandler: ((options: window.RectChangeOptions) => void) | undefined =
-      (options: window.RectChangeOptions): void => {
-        try {
-          // Phase 3 (design.md D5): deep-copy rect fields — do not store system object ref.
-          // Phase 3 (design.md D3): route through per-window throttle (leading+trailing 16ms).
-          const wrapped: WindowRectEventWrap = {
-            windowId,
-            reason: options.reason,
-            rect: { left: options.rect.left, top: options.rect.top, width: options.rect.width, height: options.rect.height }
-          };
-          this.throttledRectDispatch(windowId, wrapped, (w: object) => {
+    let rectChangeHandler: ((options: window.RectChangeOptions) => void) | undefined = (
+      options: window.RectChangeOptions,
+    ): void => {
+      try {
+        // Phase 3 (design.md D5): deep-copy rect fields — do not store system object ref.
+        // Phase 3 (design.md D3): route through per-window throttle (leading+trailing 16ms).
+        const wrapped: WindowRectEventWrap = {
+          windowId,
+          reason: options.reason,
+          rect: {
+            left: options.rect.left,
+            top: options.rect.top,
+            width: options.rect.width,
+            height: options.rect.height,
+          },
+        };
+        this.throttledRectDispatch(
+          windowId,
+          wrapped,
+          (w: object) => {
             this.rectChangeCallback?.(w as WindowRectEventWrap);
-          }, 'rect');
-        } catch (e) {
-          hilog.warn(DOMAIN, 'WindowManager', `Sub-window rectChange handler failed for %{public}d: %{public}s`, windowId, String(e));
-        }
-      };
+          },
+          "rect",
+        );
+      } catch (e) {
+        hilog.warn(
+          DOMAIN,
+          "WindowManager",
+          `Sub-window rectChange handler failed for %{public}d: %{public}s`,
+          windowId,
+          String(e),
+        );
+      }
+    };
     try {
       win.on("windowRectChange", rectChangeHandler);
     } catch (e) {
-      hilog.warn(DOMAIN, 'WindowManager', `Failed to register windowRectChange for sub-window %{public}d: %{public}s`, windowId, String(e));
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        `Failed to register windowRectChange for sub-window %{public}d: %{public}s`,
+        windowId,
+        String(e),
+      );
       rectChangeHandler = undefined;
     }
     if (rectChangeHandler) {
@@ -1127,30 +1499,62 @@ export class WindowManager {
     this.registerFocusTracking(win, windowId);
 
     try {
-      hilog.info(DOMAIN, 'WindowManager', `Loading content: FloatPage for window %{public}d`, windowId);
+      hilog.info(
+        DOMAIN,
+        "WindowManager",
+        `Loading content: FloatPage for window %{public}d`,
+        windowId,
+      );
       await win.loadContentByName(FloatPage.RouteName, storage);
-      hilog.info(DOMAIN, 'WindowManager', `UI content loaded successfully for window: %{public}d`, windowId);
-      
+      hilog.info(
+        DOMAIN,
+        "WindowManager",
+        `UI content loaded successfully for window: %{public}d`,
+        windowId,
+      );
+
       // Register sub-window's UIContext
       try {
         const uiCtx = win.getUIContext();
         if (uiCtx) {
           this.registerUIContext(windowId, uiCtx);
-          hilog.info(DOMAIN, 'WindowManager', `Sub-window UIContext registered for window: %{public}d`, windowId);
+          hilog.info(
+            DOMAIN,
+            "WindowManager",
+            `Sub-window UIContext registered for window: %{public}d`,
+            windowId,
+          );
         }
       } catch (e) {
-        hilog.warn(DOMAIN, 'WindowManager', `Failed to get UIContext for window %{public}d: %{public}s`, windowId, JSON.stringify(e));
+        hilog.warn(
+          DOMAIN,
+          "WindowManager",
+          `Failed to get UIContext for window %{public}d: %{public}s`,
+          windowId,
+          JSON.stringify(e),
+        );
       }
     } catch (err) {
-      hilog.error(DOMAIN, 'WindowManager', `Failed to load content for window %{public}d: %{public}s`, windowId, JSON.stringify(err));
+      hilog.error(
+        DOMAIN,
+        "WindowManager",
+        `Failed to load content for window %{public}d: %{public}s`,
+        windowId,
+        JSON.stringify(err),
+      );
       throw err;
     }
-    
+
     try {
       // Apply transparent/backgroundColor settings
       if (transparent) {
-        hilog.info(DOMAIN, 'WindowManager', `Setting Float window %{public}d to transparent`, windowId);
-        await win.setWindowBackgroundColor('#00000000');
+        hilog.info(
+          DOMAIN,
+          "WindowManager",
+          `Setting Float window %{public}d to transparent`,
+          windowId,
+        );
+        await win.setWindowBackgroundColor("#00000000");
         // Float sub-windows ALSO have a window container layer. Without setting
         // it transparent, an opaque container sits between the window background
         // and ArkUI content — blocking backdropBlur from sampling through the
@@ -1159,38 +1563,82 @@ export class WindowManager {
         // sub-windows have no container); restoring the original behavior.
         if (deviceInfo.sdkApiVersion >= 20) {
           try {
-            await win.setWindowContainerColor('#00000000', '#00000000');
-            hilog.info(DOMAIN, 'WindowManager', `Float window %{public}d container color set to transparent (API %{public}d)`, windowId, deviceInfo.sdkApiVersion);
+            await win.setWindowContainerColor("#00000000", "#00000000");
+            hilog.info(
+              DOMAIN,
+              "WindowManager",
+              `Float window %{public}d container color set to transparent (API %{public}d)`,
+              windowId,
+              deviceInfo.sdkApiVersion,
+            );
           } catch (containerErr: any) {
             if (containerErr.code === 801) {
-              hilog.debug(DOMAIN, 'WindowManager', 'setWindowContainerColor not supported (error 801)');
+              hilog.debug(
+                DOMAIN,
+                "WindowManager",
+                "setWindowContainerColor not supported (error 801)",
+              );
             } else if (containerErr.code === 201) {
-              hilog.error(DOMAIN, 'WindowManager', 'setWindowContainerColor permission denied (error 201): missing ohos.permission.SET_WINDOW_TRANSPARENT');
+              hilog.error(
+                DOMAIN,
+                "WindowManager",
+                "setWindowContainerColor permission denied (error 201): missing ohos.permission.SET_WINDOW_TRANSPARENT",
+              );
             } else {
-              hilog.warn(DOMAIN, 'WindowManager', `Float window container color failed: code=%{public}d`, containerErr.code);
+              hilog.warn(
+                DOMAIN,
+                "WindowManager",
+                `Float window container color failed: code=%{public}d`,
+                containerErr.code,
+              );
             }
           }
         }
       } else if (backgroundColor !== undefined) {
-        const colorStr = '#' + backgroundColor.toString(16).padStart(8, '0');
-        hilog.info(DOMAIN, 'WindowManager', `Setting window %{public}d background color to %{public}s`, windowId, colorStr);
+        const colorStr = "#" + backgroundColor.toString(16).padStart(8, "0");
+        hilog.info(
+          DOMAIN,
+          "WindowManager",
+          `Setting window %{public}d background color to %{public}s`,
+          windowId,
+          colorStr,
+        );
         await win.setWindowBackgroundColor(colorStr);
       }
 
-      hilog.info(DOMAIN, 'WindowManager', `Resizing window %{public}d to %{public}dx%{public}d`, windowId, width, height);
+      hilog.info(
+        DOMAIN,
+        "WindowManager",
+        `Resizing window %{public}d to %{public}dx%{public}d`,
+        windowId,
+        width,
+        height,
+      );
       await win.resize(width, height);
-      hilog.info(DOMAIN, 'WindowManager', `Moving window %{public}d to %{public}d,%{public}d`, windowId, x, y);
+      hilog.info(
+        DOMAIN,
+        "WindowManager",
+        `Moving window %{public}d to %{public}d,%{public}d`,
+        windowId,
+        x,
+        y,
+      );
       await win.moveWindowTo(x, y);
       await win.showWindow();
-      hilog.info(DOMAIN, 'WindowManager', `Window shown: %{public}d`, windowId);
+      hilog.info(DOMAIN, "WindowManager", `Window shown: %{public}d`, windowId);
     } catch (err) {
-      hilog.error(DOMAIN, 'WindowManager', `Failed to resize/move/show window: %{public}s`, JSON.stringify(err));
+      hilog.error(
+        DOMAIN,
+        "WindowManager",
+        `Failed to resize/move/show window: %{public}s`,
+        JSON.stringify(err),
+      );
       throw err;
     }
 
     return windowId;
   }
-  
+
   getWindow(id: number): window.Window | undefined {
     // Normalize i64→BigInt marshalling from Rust NAPI: Number() is a no-op when id
     // arrives as a number, but fixes the main-window (id=0) lookup when id arrives as
@@ -1202,7 +1650,7 @@ export class WindowManager {
       try {
         return this.uiAbilityStages.get(0)?.getMainWindowSync();
       } catch (e) {
-        hilog.warn(DOMAIN, 'WindowManager', 'Failed to get main window: %{public}s', String(e));
+        hilog.warn(DOMAIN, "WindowManager", "Failed to get main window: %{public}s", String(e));
         return undefined;
       }
     }
@@ -1212,7 +1660,13 @@ export class WindowManager {
       try {
         return secStage.getMainWindowSync();
       } catch (e) {
-        hilog.warn(DOMAIN, 'WindowManager', 'Failed to get subsequent main window %{public}d: %{public}s', wid, String(e));
+        hilog.warn(
+          DOMAIN,
+          "WindowManager",
+          "Failed to get subsequent main window %{public}d: %{public}s",
+          wid,
+          String(e),
+        );
         return undefined;
       }
     }
@@ -1243,39 +1697,79 @@ export class WindowManager {
   //   May be unsupported on phones (throws 801); the catch fallback does not affect other logic.
   // Float sub-window: LocalStorage setOrCreate('decorations') — FloatPage @LocalStorageProp reactively re-renders.
   setDecorations(windowId: number, decorations: boolean): void {
-    hilog.info(DOMAIN, 'WindowManager', 'setDecorations %{public}d decorations=%{public}s ENTER', windowId, String(decorations));
+    hilog.info(
+      DOMAIN,
+      "WindowManager",
+      "setDecorations %{public}d decorations=%{public}s ENTER",
+      windowId,
+      String(decorations),
+    );
     // Float sub-window: write LocalStorage to drive FloatPage title bar show/hide
     const entry = this.windows.get(windowId);
     if (entry && entry.storage) {
-      entry.storage.setOrCreate('decorations', decorations);
-      hilog.info(DOMAIN, 'WindowManager', `Decorations set to %{public}s for Float window %{public}d (LocalStorage)`, String(decorations), windowId);
+      entry.storage.setOrCreate("decorations", decorations);
+      hilog.info(
+        DOMAIN,
+        "WindowManager",
+        `Decorations set to %{public}s for Float window %{public}d (LocalStorage)`,
+        String(decorations),
+        windowId,
+      );
     }
     // UIAbility main window: call setWindowDecorVisible directly to control the system title bar
     if (this.isUIAbilityMainWindow(windowId)) {
       const win = this.getWindow(windowId);
       if (!win) {
-        hilog.warn(DOMAIN, 'WindowManager', 'setDecorations: main window %{public}d not found', windowId);
+        hilog.warn(
+          DOMAIN,
+          "WindowManager",
+          "setDecorations: main window %{public}d not found",
+          windowId,
+        );
         return;
       }
       try {
         win.setWindowDecorVisible(decorations);
-        hilog.info(DOMAIN, 'WindowManager', 'setDecorations %{public}d setWindowDecorVisible(%{public}s) OK', windowId, String(decorations));
+        hilog.info(
+          DOMAIN,
+          "WindowManager",
+          "setDecorations %{public}d setWindowDecorVisible(%{public}s) OK",
+          windowId,
+          String(decorations),
+        );
       } catch (err) {
         // 801: device not supported (phones); 1300002: abnormal window state. Does not affect other logic.
-        hilog.warn(DOMAIN, 'WindowManager', 'setDecorations %{public}d setWindowDecorVisible failed: %{public}s', windowId, JSON.stringify(err));
+        hilog.warn(
+          DOMAIN,
+          "WindowManager",
+          "setDecorations %{public}d setWindowDecorVisible failed: %{public}s",
+          windowId,
+          JSON.stringify(err),
+        );
       }
     }
   }
 
   setWindowBackgroundColor(windowId: number, color: number): void {
-    const colorStr = '#' + color.toString(16).padStart(8, '0');
-    hilog.info(DOMAIN, 'WindowManager', `setWindowBackgroundColor: windowId=%{public}d, color=%{public}s`, windowId, colorStr);
+    const colorStr = "#" + color.toString(16).padStart(8, "0");
+    hilog.info(
+      DOMAIN,
+      "WindowManager",
+      `setWindowBackgroundColor: windowId=%{public}d, color=%{public}s`,
+      windowId,
+      colorStr,
+    );
     // UIAbility main windows (first id=0 or subsequent id>0): set on the stage's main window
     if (this.isUIAbilityMainWindow(windowId)) {
       try {
         const mainWindow = this.getWindow(windowId);
         if (!mainWindow) {
-          hilog.warn(DOMAIN, 'WindowManager', `setWindowBackgroundColor: main window %{public}d not found`, windowId);
+          hilog.warn(
+            DOMAIN,
+            "WindowManager",
+            `setWindowBackgroundColor: main window %{public}d not found`,
+            windowId,
+          );
           return;
         }
         mainWindow.setWindowBackgroundColor(colorStr);
@@ -1285,7 +1779,12 @@ export class WindowManager {
         // for active+inactive overwrites the title bar. setWindowBackgroundColor
         // only affects the window background, not the container.
       } catch (e) {
-        hilog.error(DOMAIN, 'WindowManager', `Failed to set main window background: %{public}s`, String(e));
+        hilog.error(
+          DOMAIN,
+          "WindowManager",
+          `Failed to set main window background: %{public}s`,
+          String(e),
+        );
       }
     } else {
       const entry = this.windows.get(windowId);
@@ -1293,7 +1792,13 @@ export class WindowManager {
         try {
           entry.window.setWindowBackgroundColor(colorStr);
         } catch (err) {
-          hilog.error(DOMAIN, 'WindowManager', `Sub-window %{public}d background failed: %{public}s`, windowId, String(err));
+          hilog.error(
+            DOMAIN,
+            "WindowManager",
+            `Sub-window %{public}d background failed: %{public}s`,
+            windowId,
+            String(err),
+          );
         }
       }
     }
@@ -1309,9 +1814,15 @@ export class WindowManager {
     // windowId arrives from Rust NAPI as i64 → BigInt (1n). Normalize to number
     // so it matches the ArkTS number keys used by the per-window Maps.
     const id = Number(windowId);
-    hilog.info(DOMAIN, 'WindowManager',
-      'applyWindowBlur: ENTER rawWindowId=%{public}s id=%{public}d radius=%{public}f blurCbSize=%{public}d',
-      String(windowId), id, radius, this.attachments.blurRefreshCallbackCount);
+    hilog.info(
+      DOMAIN,
+      "WindowManager",
+      "applyWindowBlur: ENTER rawWindowId=%{public}s id=%{public}d radius=%{public}f blurCbSize=%{public}d",
+      String(windowId),
+      id,
+      radius,
+      this.attachments.blurRefreshCallbackCount,
+    );
     this.attachments.setBlurRadius(id, radius);
     this.attachments.fireBlurRefresh(id, radius);
   }
@@ -1409,7 +1920,12 @@ export class WindowManager {
   // Does not remove from windows Map (managed by FloatPage's destroyWindow path)
   removeControllerAndUIContext(windowId: number): void {
     this.attachments.removeControllerAndUIContext(windowId);
-    hilog.info(DOMAIN, 'WindowManager', 'Controller and UIContext removed for windowId: %{public}d', windowId);
+    hilog.info(
+      DOMAIN,
+      "WindowManager",
+      "Controller and UIContext removed for windowId: %{public}d",
+      windowId,
+    );
   }
 
   // Apply per-webview clipboard / zoom-hotkey intercept flags for a window.
@@ -1435,7 +1951,7 @@ export class WindowManager {
   // unregisterUIAbilityStage); this method additionally detaches the
   // window-registry-specific pieces (rect listener, entry, accelerator flags).
   removeWindow(windowId: number): void {
-    hilog.info(DOMAIN, 'WindowManager', `Removing window %{public}d from all maps`, windowId);
+    hilog.info(DOMAIN, "WindowManager", `Removing window %{public}d from all maps`, windowId);
     // Phase 2 (design.md D3): detach this window's windowRectChange listener before
     // dropping the Window reference so the native side stops delivering rect changes
     // for a window that no longer exists (prevents post-destroy callbacks / leaks).
@@ -1444,13 +1960,19 @@ export class WindowManager {
       try {
         entry.window.off("windowRectChange", entry.rectChangeHandler);
       } catch (e) {
-        hilog.warn(DOMAIN, 'WindowManager', `off windowRectChange failed for %{public}d: %{public}s`, windowId, String(e));
+        hilog.warn(
+          DOMAIN,
+          "WindowManager",
+          `off windowRectChange failed for %{public}d: %{public}s`,
+          windowId,
+          String(e),
+        );
       }
     }
     // Clear user interaction tracking if this window was the last interacted one
     if (this.lastUserInteractedWindowId === windowId) {
       this.lastUserInteractedWindowId = -1;
-      hilog.info(DOMAIN, 'WindowManager', 'Cleared lastUserInteractedWindowId (removed window)');
+      hilog.info(DOMAIN, "WindowManager", "Cleared lastUserInteractedWindowId (removed window)");
     }
     this.windows.delete(windowId);
     // Shared per-window state (kinds/attachments/op-queues/pre-maximize/throttle).

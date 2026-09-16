@@ -1,7 +1,10 @@
 import { DefaultXComponent } from "./DefaultXComponent";
 import { Module } from "../ability/type";
-import { Loadable } from "../helper/loadable";
-import { AcceleratorMatcher, isClipboardEnabled, isZoomHotkeysEnabled } from "../helper/accelerator_matcher";
+import {
+  AcceleratorMatcher,
+  isClipboardEnabled,
+  isZoomHotkeysEnabled,
+} from "../helper/accelerator_matcher";
 import {
   MenuBarComponent,
   getMenuClickHandler,
@@ -9,10 +12,10 @@ import {
   isMenubarVisible,
 } from "./MenuBarComponent";
 import { KeyCode } from "@kit.InputKit";
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { DOMAIN, MAIN_WINDOW_ID } from '../helper/constants';
-import { synthesizeDomKeyEvent } from '../helper/key_synthesis';
-import { WindowManager } from '../window/WindowManager';
+import { hilog } from "@kit.PerformanceAnalysisKit";
+import { DOMAIN, MAIN_WINDOW_ID } from "../helper/constants";
+import { synthesizeDomKeyEvent } from "../helper/key_synthesis";
+import { WindowManager } from "../window/WindowManager";
 import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
 import { invokeNativeBackPressInterceptor } from "../runtime/BackPress";
 
@@ -23,9 +26,9 @@ export const RouteName = "NativeAbility";
 struct MainPage {
   @StorageProp("moduleName") moduleNames: string | string[] = "";
   // Subsequent UIAbility instances receive their windowId via LocalStorage
-  @LocalStorageProp('windowId') windowId: number = MAIN_WINDOW_ID;
+  @LocalStorageProp("windowId") windowId: number = MAIN_WINDOW_ID;
 
-  private loadMode: "async" | "sync" = "async";
+  @StorageProp("loadMode") loadMode: "async" | "sync" = "async";
 
   @State private nativeModule: Module | null = null;
   @State private resolvedModuleName: string = "";
@@ -33,36 +36,25 @@ struct MainPage {
   private acceleratorMatcher: AcceleratorMatcher = new AcceleratorMatcher();
 
   async aboutToAppear(): Promise<void> {
-    hilog.info(DOMAIN, 'MainPage', '=== MainPage aboutToAppear START ===');
-    this.loadMode = (AppStorage.get<string>("loadMode") as "async" | "sync") ?? "async";
-    hilog.info(DOMAIN, 'MainPage', 'Initializing MAIN WINDOW');
+    hilog.info(DOMAIN, "MainPage", "=== MainPage aboutToAppear START ===");
+    hilog.info(DOMAIN, "MainPage", "Initializing MAIN WINDOW");
 
-    const moduleName = Loadable.resolvePrimaryModuleName(this.moduleNames);
+    const moduleName = NativeModuleLoader.resolveModuleNames(this.moduleNames)[0] ?? "";
     if (!moduleName) {
-      hilog.error(DOMAIN, 'MainPage', 'moduleName is empty, cannot initialize main window');
+      hilog.error(DOMAIN, "MainPage", "moduleName is empty, cannot initialize main window");
       throw new Error("MainPage.moduleName is required for main window");
     }
 
-    hilog.info(DOMAIN, 'MainPage', 'Resolved moduleName: %{public}s', moduleName);
+    hilog.info(DOMAIN, "MainPage", "Resolved moduleName: %{public}s", moduleName);
     this.resolvedModuleName = moduleName;
 
-    hilog.info(DOMAIN, 'MainPage', 'Loading native module: %{public}s', moduleName);
-    this.nativeModule = await Loadable.load(moduleName, this.loadMode);
-    hilog.info(DOMAIN, 'MainPage', 'Native module loaded successfully');
+    hilog.info(DOMAIN, "MainPage", "Loading native module: %{public}s", moduleName);
+    this.nativeModule = await NativeModuleLoader.load(moduleName, this.loadMode);
+    hilog.info(DOMAIN, "MainPage", "Native module loaded successfully");
   }
 
   onBackPress(): boolean {
-    try {
-      if (typeof this.nativeModule?.onBackPressIntercept === "function") {
-        return this.nativeModule.onBackPressIntercept();
-      }
-      if (typeof this.nativeModule?.on_back_press_intercept === "function") {
-        return this.nativeModule.on_back_press_intercept();
-      }
-    } catch (err) {
-      hilog.error(DOMAIN, 'MainPage', 'onBackPress failed: %{public}s', JSON.stringify(err));
-    }
-    return false;
+    return invokeNativeBackPressInterceptor(this.resolvedModuleName);
   }
 
   build() {
@@ -72,28 +64,44 @@ struct MainPage {
           windowId: this.windowId,
           acceleratorMatcher: this.acceleratorMatcher,
         })
-
         Row() {
           Column() {
             if (this.resolvedModuleName !== "") {
-              DefaultXComponent({ moduleName: this.resolvedModuleName, windowId: this.windowId })
+              DefaultXComponent({ moduleName: this.resolvedModuleName, windowId: this.windowId });
             } else {
-              Text("Loading Main Window...")
-                .fontSize(20)
-                .fontColor(Color.Gray)
+              Text("Loading Main Window...").fontSize(20).fontColor(Color.Gray);
             }
           }.width("100%")
-        }.layoutWeight(1).height("100%")
-
-      }.width("100%").height("100%")
+        }
+        .layoutWeight(1)
+        .height("100%")
+      }
+      .width("100%")
+      .height("100%")
       .backgroundColor(Color.Transparent)
       .onKeyPreIme((event: KeyEvent) => {
+        // acceptingLifecycle-style guard: main's queue skeleton gates its lifecycle
+        // fan-out on NativeAbility.acceptingLifecycle, which is private to the Ability
+        // and unreachable from this page. The equivalent readiness signal here is the
+        // loaded native module — never consume or forward key events before it exists,
+        // so startup/teardown input falls through to the system untouched.
+        if (this.nativeModule === null) {
+          return false;
+        }
         // Block native clipboard shortcuts when with_clipboard(false) (ohos-webview-flag-clipboard)
-        if (event.type === KeyType.Down && this.acceleratorMatcher.matchesClipboardShortcut(event) && !isClipboardEnabled(MAIN_WINDOW_ID)) {
+        if (
+          event.type === KeyType.Down &&
+          this.acceleratorMatcher.matchesClipboardShortcut(event) &&
+          !isClipboardEnabled(MAIN_WINDOW_ID)
+        ) {
           return true;
         }
         // Block native zoom hotkeys when with_zoom_hotkeys(false) (ohos-webview-flag-zoom-hotkeys)
-        if (event.type === KeyType.Down && this.acceleratorMatcher.matchesZoomShortcut(event) && !isZoomHotkeysEnabled(MAIN_WINDOW_ID)) {
+        if (
+          event.type === KeyType.Down &&
+          this.acceleratorMatcher.matchesZoomShortcut(event) &&
+          !isZoomHotkeysEnabled(MAIN_WINDOW_ID)
+        ) {
           return true;
         }
         // Accelerator matching (non-clipboard shortcuts)
@@ -111,7 +119,11 @@ struct MainPage {
         // (window-API set_fullscreen AND predefined menu fullscreen) hide the
         // menubar via WindowManager.setFullscreen (macOS semantics), so the
         // menubar-invisible condition alone covers every case.
-        if (event.type === KeyType.Down && event.keyCode === KeyCode.KEYCODE_ESCAPE && !isMenubarVisible(MAIN_WINDOW_ID)) {
+        if (
+          event.type === KeyType.Down &&
+          event.keyCode === KeyCode.KEYCODE_ESCAPE &&
+          !isMenubarVisible(MAIN_WINDOW_ID)
+        ) {
           const recoverFn = getMenuBarRecoverFn(MAIN_WINDOW_ID);
           if (recoverFn) {
             recoverFn();
@@ -136,8 +148,8 @@ struct MainPage {
         return false;
       })
     }
-    .width('100%')
-    .height('100%')
+    .width("100%")
+    .height("100%")
     // Extend content into system safe areas (status bar + navigation bar).
     // Without this, setWindowLayoutFullScreen(true) + white window background
     // causes a white bar at the bottom where the navigation bar area is not
@@ -153,7 +165,7 @@ struct MainPage {
         try {
           WindowManager.getInstance().setUserInteractedWindow(this.windowId);
         } catch (e) {
-          hilog.warn(DOMAIN, 'MainPage', 'onTouch: WindowManager not ready: %{public}s', String(e));
+          hilog.warn(DOMAIN, "MainPage", "onTouch: WindowManager not ready: %{public}s", String(e));
         }
       }
     })
@@ -170,6 +182,6 @@ struct MainPage {
           // Silently ignore — cursor tracking is best-effort
         }
       }
-    })
+    });
   }
 }

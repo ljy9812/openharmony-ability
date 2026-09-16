@@ -77,9 +77,7 @@ class AccountLogoutResponse {
 function logError(op: string, err: ESObject): void {
   const e = err as BusinessError;
   const msg =
-    e && e.code !== undefined && e.message !== undefined
-      ? `${e.code}:${e.message}`
-      : String(err);
+    e && e.code !== undefined && e.message !== undefined ? `${e.code}:${e.message}` : String(err);
   try {
     hilog.error(DOMAIN, TAG, "%{public}s failed: %{public}s", op, msg);
   } catch (_e) {
@@ -127,7 +125,9 @@ async function loginWithHuaweiID(
     request.state = util.generateRandomUUID();
 
     const controller = new authentication.AuthenticationController(context);
-    const response = await controller.executeRequest(request) as authentication.LoginWithHuaweiIDResponse;
+    const response = (await controller.executeRequest(
+      request,
+    )) as authentication.LoginWithHuaweiIDResponse;
 
     // CSRF state check (best-effort).
     if (response.state && request.state !== response.state) {

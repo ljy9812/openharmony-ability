@@ -4,9 +4,9 @@ import { Want } from "@kit.AbilityKit";
 import { image } from "@kit.ImageKit";
 import { statusBarManager } from "@kit.DeskTopExtensionKit";
 import { emitter, BusinessError } from "@kit.BasicServicesKit";
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { DOMAIN } from './constants';
-import { BridgeHostRegistry } from '../bridge/BridgeHost';
+import { hilog } from "@kit.PerformanceAnalysisKit";
+import { DOMAIN } from "./constants";
+import { BridgeHostRegistry } from "../bridge/BridgeHost";
 
 // Global state
 let abilityContext: common.UIAbilityContext | null = null;
@@ -28,7 +28,7 @@ const iconClickHandler = (event: emitter.EventData): void => {
   // [DIAG-A] unconditional entry log — confirms whether the ScbServerMessageReceiver
   // dispatches ANY status bar click event to this handler. If icon clicks fire but
   // menuClickHandler never does, the rightMenuClick path specifically is broken.
-  hilog.info(DOMAIN, 'StatusBar', 'iconClickHandler fired');
+  hilog.info(DOMAIN, "StatusBar", "iconClickHandler fired");
 
   // Auto-restore app from background when tray icon is clicked
   // Uses startAbility() to bring the hidden Ability back to front
@@ -37,13 +37,16 @@ const iconClickHandler = (event: emitter.EventData): void => {
       const bundleName = abilityContext.abilityInfo.bundleName;
       const abilityName = currentAbilityName;
       const want: Want = { bundleName, abilityName };
-      abilityContext.startAbility(want).then(() => {
-        hilog.info(DOMAIN, 'StatusBar', 'startAbility succeeded');
-      }).catch((e: Error) => {
-        hilog.warn(DOMAIN, 'StatusBar', 'startAbility failed: %{public}s', String(e));
-      });
+      abilityContext
+        .startAbility(want)
+        .then(() => {
+          hilog.info(DOMAIN, "StatusBar", "startAbility succeeded");
+        })
+        .catch((e: Error) => {
+          hilog.warn(DOMAIN, "StatusBar", "startAbility failed: %{public}s", String(e));
+        });
     } catch (e) {
-      hilog.warn(DOMAIN, 'StatusBar', 'startAbility error: %{public}s', String(e));
+      hilog.warn(DOMAIN, "StatusBar", "startAbility error: %{public}s", String(e));
     }
   }
 
@@ -55,46 +58,51 @@ const iconClickHandler = (event: emitter.EventData): void => {
   try {
     const data = event?.data as ESObject;
     let clickType = data?.iconClickType as string;
-    if (clickType === undefined || clickType === null || clickType === '') {
-      clickType = 'leftClick';
+    if (clickType === undefined || clickType === null || clickType === "") {
+      clickType = "leftClick";
     }
-    hilog.info(DOMAIN, 'StatusBar', 'iconClickHandler forwarding clickType=%{public}s', clickType);
+    hilog.info(DOMAIN, "StatusBar", "iconClickHandler forwarding clickType=%{public}s", clickType);
     BridgeHostRegistry.invokeNativeSyncProcessWide(
-      'ohos.statusbar',
-      'icon-click',
-      'ohos.statusbar.IconClickEvent',
-      'std.bool',
+      "ohos.statusbar",
+      "icon-click",
+      "ohos.statusbar.IconClickEvent",
+      "std.bool",
       { clickType },
     );
-    hilog.info(DOMAIN, 'StatusBar', 'iconClickHandler forwarded clickType=%{public}s ok', clickType);
+    hilog.info(
+      DOMAIN,
+      "StatusBar",
+      "iconClickHandler forwarded clickType=%{public}s ok",
+      clickType,
+    );
   } catch (e) {
-    hilog.warn(DOMAIN, 'StatusBar', 'iconClickHandler forward failed: %{public}s', String(e));
+    hilog.warn(DOMAIN, "StatusBar", "iconClickHandler forward failed: %{public}s", String(e));
   }
 };
 
 const menuClickHandler = (event: emitter.EventData): void => {
   // [DIAG-A] unconditional entry log — if this never fires, the system is not
   // dispatching rightMenuClick to this handler (receiver wiring / notifyOnly path).
-  hilog.info(DOMAIN, 'StatusBar', 'menuClickHandler ENTER');
+  hilog.info(DOMAIN, "StatusBar", "menuClickHandler ENTER");
   try {
     const data = event?.data as ESObject;
-    hilog.info(DOMAIN, 'StatusBar', 'menuClickHandler raw data: %{public}s', String(data));
+    hilog.info(DOMAIN, "StatusBar", "menuClickHandler raw data: %{public}s", String(data));
     const menuCode = data?.menuCode as string;
-    if (menuCode === undefined || menuCode === null || menuCode === '') {
-      hilog.warn(DOMAIN, 'StatusBar', 'menuClickHandler: no menuCode in event');
+    if (menuCode === undefined || menuCode === null || menuCode === "") {
+      hilog.warn(DOMAIN, "StatusBar", "menuClickHandler: no menuCode in event");
       return;
     }
-    hilog.info(DOMAIN, 'StatusBar', 'menuClickHandler forwarding menuCode=%{public}s', menuCode);
+    hilog.info(DOMAIN, "StatusBar", "menuClickHandler forwarding menuCode=%{public}s", menuCode);
     BridgeHostRegistry.invokeNativeSyncProcessWide(
-      'ohos.statusbar',
-      'menu-click',
-      'ohos.statusbar.MenuClickEvent',
-      'std.bool',
+      "ohos.statusbar",
+      "menu-click",
+      "ohos.statusbar.MenuClickEvent",
+      "std.bool",
       { menuCode },
     );
-    hilog.info(DOMAIN, 'StatusBar', 'menuClickHandler forwarded menuCode=%{public}s ok', menuCode);
+    hilog.info(DOMAIN, "StatusBar", "menuClickHandler forwarded menuCode=%{public}s ok", menuCode);
   } catch (e) {
-    hilog.warn(DOMAIN, 'StatusBar', 'menuClickHandler forward failed: %{public}s', String(e));
+    hilog.warn(DOMAIN, "StatusBar", "menuClickHandler forward failed: %{public}s", String(e));
   }
 };
 
@@ -104,25 +112,43 @@ const menuClickHandler = (event: emitter.EventData): void => {
 // previously registered handlers. Calling after addToStatusBar ensures the on()
 // binds to the freshly created receiver.
 export function reRegisterStatusBarClickHandlers(): void {
-  doRegisterStatusBarClickHandlers('rebind-to-current-receiver');
+  doRegisterStatusBarClickHandlers("rebind-to-current-receiver");
 }
 
 function doRegisterStatusBarClickHandlers(reason: string): void {
   try {
     // Remove any stale handlers first (safe to call even if none exist).
     try {
-      statusBarManager.off('statusBarIconClick' as 'statusBarIconClick', iconClickHandler as Callback<emitter.EventData>);
+      statusBarManager.off(
+        "statusBarIconClick" as "statusBarIconClick",
+        iconClickHandler as Callback<emitter.EventData>,
+      );
     } catch (_) {}
     try {
-      statusBarManager.off('rightMenuClick' as 'rightMenuClick', menuClickHandler as Callback<emitter.EventData>);
+      statusBarManager.off(
+        "rightMenuClick" as "rightMenuClick",
+        menuClickHandler as Callback<emitter.EventData>,
+      );
     } catch (_) {}
-    statusBarManager.on('statusBarIconClick' as 'statusBarIconClick', iconClickHandler as Callback<emitter.EventData>);
-    statusBarManager.on('rightMenuClick' as 'rightMenuClick', menuClickHandler as Callback<emitter.EventData>);
+    statusBarManager.on(
+      "statusBarIconClick" as "statusBarIconClick",
+      iconClickHandler as Callback<emitter.EventData>,
+    );
+    statusBarManager.on(
+      "rightMenuClick" as "rightMenuClick",
+      menuClickHandler as Callback<emitter.EventData>,
+    );
     // [DIAG-A] hilog (not console.info) — console is stripped in release builds.
-    hilog.info(DOMAIN, 'StatusBar', 'PROXY handlers registered (%{public}s)', reason);
+    hilog.info(DOMAIN, "StatusBar", "PROXY handlers registered (%{public}s)", reason);
   } catch (e) {
     const err = e as BusinessError;
-    hilog.error(DOMAIN, 'StatusBar', 'on() registration failed: %{public}d %{public}s', err.code, err.message);
+    hilog.error(
+      DOMAIN,
+      "StatusBar",
+      "on() registration failed: %{public}d %{public}s",
+      err.code,
+      err.message,
+    );
   }
 }
 
@@ -138,7 +164,9 @@ export function createPixelMapFromRgba(rgbaData: Uint8Array, size: number): imag
   try {
     const expectedLen = size * size * 4;
     if (rgbaData.length !== expectedLen) {
-      console.error(`[StatusBar] data length mismatch: got ${rgbaData.length}, expected ${expectedLen}`);
+      console.error(
+        `[StatusBar] data length mismatch: got ${rgbaData.length}, expected ${expectedLen}`,
+      );
       return null;
     }
     // Copy napi-provided Uint8Array into a standard JS-managed buffer.
@@ -151,7 +179,7 @@ export function createPixelMapFromRgba(rgbaData: Uint8Array, size: number): imag
     const opts: image.InitializationOptions = {
       editable: true,
       pixelFormat: image.PixelMapFormat.RGBA_8888,
-      size: { width: size, height: size }
+      size: { width: size, height: size },
     };
     const pm = image.createPixelMapSync(opts);
     pm.writeBufferToPixelsSync(jsArr.buffer);
@@ -170,19 +198,32 @@ export function createPixelMapFromRgba(rgbaData: Uint8Array, size: number): imag
       density = display.getDefaultDisplaySync().densityPixels;
       target = Math.round(24 * density);
     } catch (e) {
-      hilog.warn(DOMAIN, "StatusBarUtils", "createPixelMapFromRgba: density query failed, using src size: %{public}s", String(e));
+      hilog.warn(
+        DOMAIN,
+        "StatusBarUtils",
+        "createPixelMapFromRgba: density query failed, using src size: %{public}s",
+        String(e),
+      );
     }
     // Use template-string interpolation — hilog's %{public}f/%d positional
     // placeholders misbehave when a float arg precedes an int (observed
     // "density=}f target=1.900000"), making the actual scaleSync ratio
     // unverifiable. A plain string is unambiguous.
-    hilog.info(DOMAIN, "StatusBarUtils", `createPixelMapFromRgba: src=${size} density=${density} target=${target}`);
+    hilog.info(
+      DOMAIN,
+      "StatusBarUtils",
+      `createPixelMapFromRgba: src=${size} density=${density} target=${target}`,
+    );
     if (target > 0 && target !== size) {
       const ratio = target / size;
       pm.scaleSync(ratio, ratio);
       scaled = true;
     }
-    hilog.info(DOMAIN, "StatusBarUtils", `createPixelMapFromRgba: scaled=${scaled} (ratio=${scaled ? (target / size) : 1})`);
+    hilog.info(
+      DOMAIN,
+      "StatusBarUtils",
+      `createPixelMapFromRgba: scaled=${scaled} (ratio=${scaled ? target / size : 1})`,
+    );
     return pm;
   } catch (e) {
     const err = e as BusinessError;
@@ -191,11 +232,17 @@ export function createPixelMapFromRgba(rgbaData: Uint8Array, size: number): imag
   }
 }
 
-export function createPixelMapFromRgbaWH(rgbaData: Uint8Array, width: number, height: number): image.PixelMap | null {
+export function createPixelMapFromRgbaWH(
+  rgbaData: Uint8Array,
+  width: number,
+  height: number,
+): image.PixelMap | null {
   try {
     const expectedLen = width * height * 4;
     if (rgbaData.length !== expectedLen) {
-      console.error(`[StatusBar] createPixelMapFromRgbaWH: data length mismatch: got ${rgbaData.length}, expected ${expectedLen} (${width}x${height})`);
+      console.error(
+        `[StatusBar] createPixelMapFromRgbaWH: data length mismatch: got ${rgbaData.length}, expected ${expectedLen} (${width}x${height})`,
+      );
       return null;
     }
     // Copy napi-provided Uint8Array into a standard JS-managed buffer (see above).
@@ -204,7 +251,7 @@ export function createPixelMapFromRgbaWH(rgbaData: Uint8Array, width: number, he
     const opts: image.InitializationOptions = {
       editable: true,
       pixelFormat: image.PixelMapFormat.RGBA_8888,
-      size: { width: width, height: height }
+      size: { width: width, height: height },
     };
     const pm = image.createPixelMapSync(opts);
     pm.writeBufferToPixelsSync(jsArr.buffer);
@@ -219,7 +266,7 @@ export function createPixelMapFromRgbaWH(rgbaData: Uint8Array, width: number, he
 export function fillMenuItemAbilityName(groups: ESObject[][], abilityName: string): void {
   for (const group of groups) {
     for (const item of group) {
-      if (item.menuAction && (!item.menuAction.abilityName || item.menuAction.abilityName === '')) {
+      if (item.menuAction && (!item.menuAction.abilityName || item.menuAction.abilityName === "")) {
         // Always fill abilityName with the current ability name.
         // Empty abilityName causes system to show "暂无可用打开方式" toast.
         // When notifyOnly: true and menuCode is set, system fires rightMenuClick event
@@ -228,7 +275,10 @@ export function fillMenuItemAbilityName(groups: ESObject[][], abilityName: strin
       }
       if (item.subMenu) {
         for (const sub of item.subMenu) {
-          if (sub.menuAction && (!sub.menuAction.abilityName || sub.menuAction.abilityName === '')) {
+          if (
+            sub.menuAction &&
+            (!sub.menuAction.abilityName || sub.menuAction.abilityName === "")
+          ) {
             sub.menuAction.abilityName = abilityName;
           }
         }

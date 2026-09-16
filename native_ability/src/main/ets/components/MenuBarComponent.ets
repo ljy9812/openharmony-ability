@@ -1,23 +1,28 @@
-import { MenuItemData } from '../helper/menu_types';
-import { AcceleratorMatcher } from '../helper/accelerator_matcher';
-import { image } from '@kit.ImageKit';
-import { buffer } from '@kit.ArkTS';
-import { SymbolGlyphModifier } from '@kit.ArkUI';
-import { hilog } from '@kit.PerformanceAnalysisKit';
+import { MenuItemData } from "../helper/menu_types";
+import { AcceleratorMatcher } from "../helper/accelerator_matcher";
+import { image } from "@kit.ImageKit";
+import { buffer } from "@kit.ArkTS";
+import { SymbolGlyphModifier } from "@kit.ArkUI";
+import { hilog } from "@kit.PerformanceAnalysisKit";
 
 // --- Per-window click handler registry (MW-1) ---
 const windowMenuClickHandlers: Map<number, (item: MenuItemData) => void> = new Map();
 
 export function setMenuClickHandler(windowId: number, handler: (item: MenuItemData) => void): void {
-  hilog.info(0x1999, 'MenuBar', 'setMenuClickHandler registered for windowId=%{public}d', windowId);
+  hilog.info(0x1999, "MenuBar", "setMenuClickHandler registered for windowId=%{public}d", windowId);
   windowMenuClickHandlers.set(windowId, handler);
 }
 
 export function getMenuClickHandler(windowId: number): ((item: MenuItemData) => void) | null {
   const handler = windowMenuClickHandlers.get(windowId) ?? null;
   if (!handler) {
-    hilog.warn(0x1999, 'MenuBar', 'getMenuClickHandler NULL for windowId=%{public}d (map size=%{public}d)',
-      windowId, windowMenuClickHandlers.size);
+    hilog.warn(
+      0x1999,
+      "MenuBar",
+      "getMenuClickHandler NULL for windowId=%{public}d (map size=%{public}d)",
+      windowId,
+      windowMenuClickHandlers.size,
+    );
   }
   return handler;
 }
@@ -77,7 +82,6 @@ const menubarVisibilityTracker: Map<number, boolean> = new Map();
 export function isMenubarVisible(windowId: number): boolean {
   return menubarVisibilityTracker.get(windowId) ?? true;
 }
-
 @Component
 export struct MenuBarComponent {
   @Prop windowId: number = 0;
@@ -88,19 +92,19 @@ export struct MenuBarComponent {
   acceleratorMatcher: AcceleratorMatcher = new AcceleratorMatcher();
 
   // --- Callback-driven state (replaces @StorageProp, MW-5) ---
-  @State @Watch('onMenuJsonChange') menuJson: string = '[]';
+  @State @Watch("onMenuJsonChange") menuJson: string = "[]";
   @State menuShown: boolean = false;
   @State menuX: number = 0;
   @State menuY: number = 0;
-  @State @Watch('onMenubarJsonChange') menubarJson: string = '[]';
+  @State @Watch("onMenubarJsonChange") menubarJson: string = "[]";
   @State menubarVisible: boolean = true;
 
   // --- Local state ---
   @State private menuItems: MenuItemData[] = [];
   @State private menubarItems: MenuItemData[] = [];
-  @State private activeDropdownId: string = '';
+  @State private activeDropdownId: string = "";
   @State private activeDropdownShown: boolean = false;
-  @State private hoveredItemId: string = '';
+  @State private hoveredItemId: string = "";
 
   private iconPixelMaps: Map<string, image.PixelMap> = new Map();
   private popupIconIds: Set<string> = new Set();
@@ -130,20 +134,25 @@ export struct MenuBarComponent {
       this.collectIconIds(items, this.menubarIconIds);
       this.prepareIcons(items);
       this.cleanupStaleIcons();
-      this.menubarItems = items.filter(i => i.type === 'submenu' && i.text);
+      this.menubarItems = items.filter((i) => i.type === "submenu" && i.text);
       this.acceleratorMatcher.buildFromItems(items);
       const submenuDetails = this.menubarItems.map(
-        i => `${i.text}: [${(i.submenuItems ?? []).map(s => s.text ?? s.id).join(',')}]`
+        (i) => `${i.text}: [${(i.submenuItems ?? []).map((s) => s.text ?? s.id).join(",")}]`,
       );
       console.info(
         `[Menubar] onMenubarJsonChange: items=${items.length}, ` +
-        `submenuItems=${this.menubarItems.length}, details=${submenuDetails.join('; ')}`
+          `submenuItems=${this.menubarItems.length}, details=${submenuDetails.join("; ")}`,
       );
       // If dropdown is open, close and reopen to force re-render with updated data
       // 诊断埋点#3：close-reopen 分支。判读：若点击后先看到此日志再看到 onWillDisappear → 根因B
       // (set-menubar 二次到达触发 close-reopen，reopen 因 activeDropdownId 已被清空而失败)。
       if (this.activeDropdownShown && this.activeDropdownId) {
-        hilog.info(0x1999, 'MenuBar', 'onMenubarJsonChange close-reopen: activeId=%{public}s', this.activeDropdownId);
+        hilog.info(
+          0x1999,
+          "MenuBar",
+          "onMenubarJsonChange close-reopen: activeId=%{public}s",
+          this.activeDropdownId,
+        );
         this.activeDropdownShown = false;
         setTimeout(() => {
           this.activeDropdownShown = true;
@@ -165,7 +174,7 @@ export struct MenuBarComponent {
       const item = queue.shift()!;
       if (item.icon) {
         try {
-          const decoded = buffer.from(item.icon, 'base64');
+          const decoded = buffer.from(item.icon, "base64");
           const arrayBuf = decoded.buffer as ArrayBuffer;
           const imageSource = image.createImageSource(arrayBuf);
           const pixelMap = imageSource.createPixelMapSync();
@@ -220,11 +229,16 @@ export struct MenuBarComponent {
    */
   private nativeIconResource(nativeIcon: string): Resource | null {
     switch (nativeIcon) {
-      case 'sys.symbol.ohos_star': return $r('sys.symbol.ohos_star');
-      case 'sys.symbol.ohos_lock': return $r('sys.symbol.ohos_lock');
-      case 'sys.symbol.ohos_wifi': return $r('sys.symbol.ohos_wifi');
-      case 'sys.symbol.folder': return $r('sys.symbol.folder');
-      default: return null;
+      case "sys.symbol.ohos_star":
+        return $r("sys.symbol.ohos_star");
+      case "sys.symbol.ohos_lock":
+        return $r("sys.symbol.ohos_lock");
+      case "sys.symbol.ohos_wifi":
+        return $r("sys.symbol.ohos_wifi");
+      case "sys.symbol.folder":
+        return $r("sys.symbol.folder");
+      default:
+        return null;
     }
   }
 
@@ -240,73 +254,92 @@ export struct MenuBarComponent {
 
   @Builder
   RenderMenuItems(items: MenuItemData[]) {
-    ForEach(this.splitByDivider(items), (group: MenuItemData[], index: number) => {
-      MenuItemGroup() {
-        ForEach(group, (item: MenuItemData) => {
-          if (item.type === 'submenu') {
-            MenuItem({
-              content: item.text ?? '',
-              builder: (): void => this.SubmenuContent(item.submenuItems ?? []),
-              symbolStartIcon: item.nativeIcon ? this.nativeIconSymbol(item.nativeIcon) : undefined,
-            })
-          } else if (item.type === 'check') {
-            MenuItem({
-              content: item.text ?? '',
-              symbolStartIcon: item.nativeIcon ? this.nativeIconSymbol(item.nativeIcon) : undefined,
-            })
-              .enabled(item.enabled ?? true)
-              .selected(item.checked ?? false)
-              .selectIcon(true)
-              .onChange((checked: boolean) => {
-                item.checked = checked;
-                const handler = getMenuClickHandler(this.windowId);
-                if (handler) {
-                  handler(item);
+    ForEach(
+      this.splitByDivider(items),
+      (group: MenuItemData[], index: number) => {
+        MenuItemGroup() {
+          ForEach(
+            group,
+            (item: MenuItemData) => {
+              if (item.type === "submenu") {
+                MenuItem({
+                  content: item.text ?? "",
+                  builder: (): void => this.SubmenuContent(item.submenuItems ?? []),
+                  symbolStartIcon: item.nativeIcon
+                    ? this.nativeIconSymbol(item.nativeIcon)
+                    : undefined,
+                });
+              } else if (item.type === "check") {
+                MenuItem({
+                  content: item.text ?? "",
+                  symbolStartIcon: item.nativeIcon
+                    ? this.nativeIconSymbol(item.nativeIcon)
+                    : undefined,
+                })
+                  .enabled(item.enabled ?? true)
+                  .selected(item.checked ?? false)
+                  .selectIcon(true)
+                  .onChange((checked: boolean) => {
+                    item.checked = checked;
+                    const handler = getMenuClickHandler(this.windowId);
+                    if (handler) {
+                      handler(item);
+                    }
+                  });
+              } else if (item.type === "icon" && this.iconPixelMaps.has(item.id)) {
+                MenuItem() {
+                  Row() {
+                    Image(this.iconPixelMaps.get(item.id))
+                      .width(24)
+                      .height(24)
+                      .margin({ right: 8 })
+                    Text(item.text ?? "").fontSize(14)
+                  }
                 }
-              })
-          } else if (item.type === 'icon' && this.iconPixelMaps.has(item.id)) {
-            MenuItem() {
-              Row() {
-                Image(this.iconPixelMaps.get(item.id))
-                  .width(24)
-                  .height(24)
-                  .margin({ right: 8 })
-                Text(item.text ?? '')
-                  .fontSize(14)
+                .enabled(item.enabled ?? true)
+                .onClick(() => {
+                  const handler = getMenuClickHandler(this.windowId);
+                  if (handler) {
+                    handler(item);
+                  }
+                });
+              } else {
+                MenuItem({
+                  content: item.text ?? item.predefinedType ?? "",
+                  symbolStartIcon: item.nativeIcon
+                    ? this.nativeIconSymbol(item.nativeIcon)
+                    : undefined,
+                })
+                  .enabled(item.enabled ?? true)
+                  .onClick(() => {
+                    const handler = getMenuClickHandler(this.windowId);
+                    hilog.info(
+                      0x1999,
+                      "MenuBar",
+                      "menuItem onClick id=%{public}s windowId=%{public}d handler=%{public}s",
+                      item.id,
+                      this.windowId,
+                      handler ? "found" : "NULL",
+                    );
+                    if (handler) {
+                      handler(item);
+                    }
+                  });
               }
-            }
-              .enabled(item.enabled ?? true)
-              .onClick(() => {
-                const handler = getMenuClickHandler(this.windowId);
-                if (handler) {
-                  handler(item);
-                }
-              })
-          } else {
-            MenuItem({
-              content: item.text ?? item.predefinedType ?? '',
-              symbolStartIcon: item.nativeIcon ? this.nativeIconSymbol(item.nativeIcon) : undefined,
-            })
-              .enabled(item.enabled ?? true)
-              .onClick(() => {
-                const handler = getMenuClickHandler(this.windowId);
-                hilog.info(0x1999, 'MenuBar', 'menuItem onClick id=%{public}s windowId=%{public}d handler=%{public}s',
-                  item.id, this.windowId, handler ? 'found' : 'NULL');
-                if (handler) {
-                  handler(item);
-                }
-              })
-          }
-        }, (item: MenuItemData) => item.id)
-      }
-    }, (_group: MenuItemData[], index: number) => `group_${index}`)
+            },
+            (item: MenuItemData) => item.id,
+          )
+        };
+      },
+      (_group: MenuItemData[], index: number) => `group_${index}`,
+    );
   }
 
   private splitByDivider(items: MenuItemData[]): MenuItemData[][] {
     const groups: MenuItemData[][] = [];
     let current: MenuItemData[] = [];
     for (const item of items) {
-      if (item.type === 'predefined' && item.predefinedType === 'separator') {
+      if (item.type === "predefined" && item.predefinedType === "separator") {
         if (current.length > 0) {
           groups.push(current);
           current = [];
@@ -325,83 +358,97 @@ export struct MenuBarComponent {
   SubmenuContent(items: MenuItemData[]) {
     Menu() {
       this.RenderMenuItems(items)
-    }
+    };
   }
 
   @Builder
   MenuContent() {
     Menu() {
       this.RenderMenuItems(this.menuItems)
-    }
+    };
   }
 
   @Builder
   MenuBarRow() {
     Row() {
-      ForEach(this.menubarItems, (item: MenuItemData) => {
-        Row() {
-          if (item.icon && this.iconPixelMaps.has(item.id)) {
-            Image(this.iconPixelMaps.get(item.id))
-              .width(16)
-              .height(16)
-              .margin({ right: 4 })
-          } else if (item.nativeIcon && this.nativeIconResource(item.nativeIcon)) {
-            // Top-level nativeIcon: render as a system symbol, mirroring the
-            // Image branch above (submenu icon and nativeIcon are mutually exclusive)
-            SymbolGlyph(this.nativeIconResource(item.nativeIcon) as Resource)
-              .fontSize(16)
-              .margin({ right: 4 })
-          }
-          Text(item.text ?? '')
-            .fontSize(14)
-            .fontColor((item.enabled ?? true) ? '#333333' : '#999999')
-        }
-        .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-        .enabled(item.enabled ?? true)
-        .opacity((item.enabled ?? true) ? 1.0 : 0.5)
-        .backgroundColor(
-          this.activeDropdownId === item.id ? '#E0E0E0' :
-          this.hoveredItemId === item.id ? '#EBEBEB' :
-          '#F5F5F5'
-        )
-        .onClick(() => {
-          // 诊断埋点#1：menubar Row 点击。判读：
-          //  - 若点击后立即看到 onWillDisappear 且无第二次 onClick → 根因A（bindMenu 竞争/子窗口失焦）
-          //  - 若 onWillDisappear 在无 onClick 的情况下触发 → 根因C（子窗口 attach/focus 时序）
-          hilog.info(0x1999, 'MenuBar', 'dropdown onClick id=%{public}s prevShown=%{public}s prevActive=%{public}s',
-            item.id, this.activeDropdownShown, this.activeDropdownId);
-          this.activeDropdownId = item.id;
-          this.activeDropdownShown = true;
-        })
-        .onHover((isHover: boolean) => {
-          this.hoveredItemId = isHover ? item.id : '';
-        })
-        .bindMenu(
-          this.activeDropdownShown && this.activeDropdownId === item.id,
-          this.MenubarDropdownContent(item),
-          {
-            showInSubWindow: true,
-            onWillDisappear: () => {
-              // 诊断埋点#2：dropdown 消失。判读：配合埋点#1 的时序判断根因 A/B/C
-              hilog.info(0x1999, 'MenuBar', 'onWillDisappear activeId=%{public}s', this.activeDropdownId);
-              this.activeDropdownShown = false;
-              this.activeDropdownId = '';
+      ForEach(
+        this.menubarItems,
+        (item: MenuItemData) => {
+          Row() {
+            if (item.icon && this.iconPixelMaps.has(item.id)) {
+              Image(this.iconPixelMaps.get(item.id)).width(16).height(16).margin({ right: 4 });
+            } else if (item.nativeIcon && this.nativeIconResource(item.nativeIcon)) {
+              // Top-level nativeIcon: render as a system symbol, mirroring the
+              // Image branch above (submenu icon and nativeIcon are mutually exclusive)
+              SymbolGlyph(this.nativeIconResource(item.nativeIcon) as Resource)
+                .fontSize(16)
+                .margin({ right: 4 });
             }
+            Text(item.text ?? "")
+              .fontSize(14)
+              .fontColor((item.enabled ?? true) ? "#333333" : "#999999")
           }
-        )
-      }, (item: MenuItemData) => item.id)
+          .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+          .enabled(item.enabled ?? true)
+          .opacity((item.enabled ?? true) ? 1.0 : 0.5)
+          .backgroundColor(
+            this.activeDropdownId === item.id
+              ? "#E0E0E0"
+              : this.hoveredItemId === item.id
+                ? "#EBEBEB"
+                : "#F5F5F5",
+          )
+          .onClick(() => {
+            // 诊断埋点#1：menubar Row 点击。判读：
+            //  - 若点击后立即看到 onWillDisappear 且无第二次 onClick → 根因A（bindMenu 竞争/子窗口失焦）
+            //  - 若 onWillDisappear 在无 onClick 的情况下触发 → 根因C（子窗口 attach/focus 时序）
+            hilog.info(
+              0x1999,
+              "MenuBar",
+              "dropdown onClick id=%{public}s prevShown=%{public}s prevActive=%{public}s",
+              item.id,
+              this.activeDropdownShown,
+              this.activeDropdownId,
+            );
+            this.activeDropdownId = item.id;
+            this.activeDropdownShown = true;
+          })
+          .onHover((isHover: boolean) => {
+            this.hoveredItemId = isHover ? item.id : "";
+          })
+          .bindMenu(
+            this.activeDropdownShown && this.activeDropdownId === item.id,
+            this.MenubarDropdownContent(item),
+            {
+              showInSubWindow: true,
+              onWillDisappear: () => {
+                // 诊断埋点#2：dropdown 消失。判读：配合埋点#1 的时序判断根因 A/B/C
+                hilog.info(
+                  0x1999,
+                  "MenuBar",
+                  "onWillDisappear activeId=%{public}s",
+                  this.activeDropdownId,
+                );
+                this.activeDropdownShown = false;
+                this.activeDropdownId = "";
+              },
+            },
+          );
+        },
+        (item: MenuItemData) => item.id,
+      )
     }
-    .width('100%')
+    .width("100%")
     .height(40)
-    .backgroundColor('#F5F5F5')
-    .alignItems(VerticalAlign.Center)
+    .backgroundColor("#F5F5F5")
+    .alignItems(VerticalAlign.Center);
   }
 
   @Builder
   MenubarDropdownContent(item: MenuItemData) {
     Menu() {
       this.RenderMenuItems(this.getActiveDropdownItem()?.submenuItems ?? [])
-    }
+    };
   }
 
   private getActiveDropdownItem(): MenuItemData | null {
@@ -428,8 +475,15 @@ export struct MenuBarComponent {
         menubarVisibilityTracker.set(this.windowId, visible);
       },
       onMenuPopup: (json: string, x: number, y: number) => {
-        hilog.info(0x1999, 'MenuBar', 'onMenuPopup windowId=%{public}d x=%{public}d y=%{public}d jsonLen=%{public}d',
-          this.windowId, x, y, json.length);
+        hilog.info(
+          0x1999,
+          "MenuBar",
+          "onMenuPopup windowId=%{public}d x=%{public}d y=%{public}d jsonLen=%{public}d",
+          this.windowId,
+          x,
+          y,
+          json.length,
+        );
         this.menuJson = json;
         this.menuX = x;
         this.menuY = y;
@@ -468,7 +522,7 @@ export struct MenuBarComponent {
     Column() {
       // Menubar row
       if (this.menubarItems.length > 0 && this.menubarVisible) {
-        this.MenuBarRow()
+        this.MenuBarRow();
       }
 
       // Popup menu anchor (1x1 invisible). Use bindContextMenu (not bindMenu):
@@ -485,8 +539,8 @@ export struct MenuBarComponent {
           offset: { x: this.menuX, y: this.menuY },
           aboutToDisappear: () => {
             this.menuShown = false;
-          }
+          },
         })
-    }
+    };
   }
 }

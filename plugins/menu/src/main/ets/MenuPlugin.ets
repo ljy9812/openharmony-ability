@@ -66,7 +66,12 @@ export class MenuPlugin extends AsyncPluginBase {
     }
 
     if (action === "set-menubar") {
-      const request = expectBridgeRequestType(payload, "ohos.menu", action, SET_MENUBAR_REQUEST_TYPE) as SetMenubarRequest;
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.menu",
+        action,
+        SET_MENUBAR_REQUEST_TYPE,
+      ) as SetMenubarRequest;
       if (typeof request.jsonData !== "string") {
         throw new Error("set-menubar.jsonData must be a string");
       }
@@ -79,16 +84,30 @@ export class MenuPlugin extends AsyncPluginBase {
         // sub-window) or the menubar has not attached yet. Rejecting lets the
         // Rust MenuClient surface the failure instead of caching
         // MENU_HAS_CONTENT as success.
-        throw new Error(`set-menubar: no menu callback registered for window '${request.windowId}'`);
+        throw new Error(
+          `set-menubar: no menu callback registered for window '${request.windowId}'`,
+        );
       }
       cb.onMenubarJson?.(request.jsonData);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "popup") {
-      const request = expectBridgeRequestType(payload, "ohos.menu", action, POPUP_REQUEST_TYPE) as PopupRequest;
-      hilog.info(DOMAIN, "MenuPlugin", "popup windowId=%{public}s x=%{public}d y=%{public}d jsonLen=%{public}d",
-        request.windowId, request.x ?? 0, request.y ?? 0, request.jsonData.length);
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.menu",
+        action,
+        POPUP_REQUEST_TYPE,
+      ) as PopupRequest;
+      hilog.info(
+        DOMAIN,
+        "MenuPlugin",
+        "popup windowId=%{public}s x=%{public}d y=%{public}d jsonLen=%{public}d",
+        request.windowId,
+        request.x ?? 0,
+        request.y ?? 0,
+        request.jsonData.length,
+      );
       if (typeof request.jsonData !== "string") {
         throw new Error("popup.jsonData must be a string");
       }
@@ -106,7 +125,12 @@ export class MenuPlugin extends AsyncPluginBase {
     }
 
     if (action === "set-menubar-visible") {
-      const request = expectBridgeRequestType(payload, "ohos.menu", action, SET_VISIBLE_REQUEST_TYPE) as SetVisibleRequest;
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.menu",
+        action,
+        SET_VISIBLE_REQUEST_TYPE,
+      ) as SetVisibleRequest;
       if (typeof request.visible !== "boolean") {
         throw new Error("set-menubar-visible.visible must be a boolean");
       }
@@ -115,20 +139,32 @@ export class MenuPlugin extends AsyncPluginBase {
       }
       const cb = getMenuDataCallback(request.windowId);
       if (!cb) {
-        throw new Error(`set-menubar-visible: no menu callback registered for window '${request.windowId}'`);
+        throw new Error(
+          `set-menubar-visible: no menu callback registered for window '${request.windowId}'`,
+        );
       }
       cb.onMenubarVisible?.(request.visible);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "execute-predefined") {
-      const request = expectBridgeRequestType(payload, "ohos.menu", action, PREDEFINED_REQUEST_TYPE) as PredefinedRequest;
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.menu",
+        action,
+        PREDEFINED_REQUEST_TYPE,
+      ) as PredefinedRequest;
       if (typeof request.action !== "string" || !request.action) {
         throw new Error("execute-predefined.action must be a non-empty string");
       }
       const executor = getPredefinedActionExecutor();
       if (!executor) {
-        hilog.warn(DOMAIN, "MenuPlugin", "execute-predefined: PredefinedActionExecutor not initialized, action: %{public}s", request.action);
+        hilog.warn(
+          DOMAIN,
+          "MenuPlugin",
+          "execute-predefined: PredefinedActionExecutor not initialized, action: %{public}s",
+          request.action,
+        );
         throw new Error("PredefinedActionExecutor not initialized");
       }
       const actionType = request.action as PredefinedType;

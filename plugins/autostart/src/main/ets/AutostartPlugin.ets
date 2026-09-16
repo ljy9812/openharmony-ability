@@ -93,7 +93,9 @@ export class AutostartPlugin extends AsyncPluginBase {
       return true;
     } catch (err) {
       const error = err as BusinessError;
-      console.error(`[Autostart] startAbility failed: code=${error.code}, message=${error.message}`);
+      console.error(
+        `[Autostart] startAbility failed: code=${error.code}, message=${error.message}`,
+      );
       return false;
     }
   }
@@ -109,15 +111,20 @@ export class AutostartPlugin extends AsyncPluginBase {
    * This ArkTS method is only called when the version check passes.
    */
   private async queryAutostartStatus(): Promise<boolean> {
+    // getAutoStartupStatusForSelf is API 21+ while the repo lint floor is 12; the
+    // Rust side gates this action on sdk_api_version >= 21 (see the doc comment
+    // above), so the ESObject access only side-steps the guard-blind lint check.
     try {
-      return await autoStartupManager.getAutoStartupStatusForSelf();
+      return (await (autoStartupManager as ESObject).getAutoStartupStatusForSelf()) as boolean;
     } catch (err) {
       const error = err as BusinessError;
       if (error.code === 801) {
         // Capability not supported on this device — return false silently.
         return false;
       }
-      console.error(`[Autostart] getAutoStartupStatusForSelf failed: code=${error.code}, message=${error.message}`);
+      console.error(
+        `[Autostart] getAutoStartupStatusForSelf failed: code=${error.code}, message=${error.message}`,
+      );
       return false;
     }
   }

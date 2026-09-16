@@ -72,7 +72,9 @@ function parseTerminateRequest(payload: BridgeTypedValue): TerminateRequest {
 
 function parseSetColorModeRequest(payload: BridgeTypedValue): SetColorModeRequest {
   if (payload.typeName !== SET_COLOR_MODE_REQUEST_TYPE || typeof payload.value !== "object") {
-    throw new Error(`ohos.app-control.set-color-mode requires bridge type ${SET_COLOR_MODE_REQUEST_TYPE}`);
+    throw new Error(
+      `ohos.app-control.set-color-mode requires bridge type ${SET_COLOR_MODE_REQUEST_TYPE}`,
+    );
   }
   const request = payload.value as SetColorModeRequest;
   if (!Number.isInteger(request?.colorMode)) {

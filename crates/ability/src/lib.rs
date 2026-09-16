@@ -33,7 +33,6 @@ pub mod version;
 #[cfg(feature = "window")]
 pub mod window;
 
-
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
 

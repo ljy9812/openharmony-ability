@@ -1,5 +1,5 @@
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { KeyCode } from '@kit.InputKit';
+import { hilog } from "@kit.PerformanceAnalysisKit";
+import { KeyCode } from "@kit.InputKit";
 
 const DOMAIN = 0x0000;
 
@@ -27,27 +27,28 @@ struct KeyRepeatTest {
       }
       .width("100%")
       .padding({ left: 16, right: 16, top: 12, bottom: 8 })
-
       Text("Hold a key to test repeat detection. Press ESC or ✕ to clear log.")
         .fontSize(13)
         .fontColor("#AAA")
         .padding({ left: 16, bottom: 8 })
-
       Scroll() {
         Column() {
-          ForEach(this.keyTestLog, (item: string) => {
-            Text(item)
-              .fontSize(14)
-              .fontFamily("monospace")
-              .fontColor(item.includes("repeat=true") ? "#4CAF50" : "#CCC")
-              .fontWeight(item.includes("repeat=true") ? FontWeight.Bold : FontWeight.Normal)
-              .width("100%")
-          }, (item: string, index: number) => index.toString())
+          ForEach(
+            this.keyTestLog,
+            (item: string) => {
+              Text(item)
+                .fontSize(14)
+                .fontFamily("monospace")
+                .fontColor(item.includes("repeat=true") ? "#4CAF50" : "#CCC")
+                .fontWeight(item.includes("repeat=true") ? FontWeight.Bold : FontWeight.Normal)
+                .width("100%");
+            },
+            (item: string, index: number) => index.toString(),
+          )
         }
         .width("100%")
         .padding({ left: 16, right: 16 })
-      }
-      .layoutWeight(1)
+      }.layoutWeight(1)
     }
     .id("keyTestOverlay")
     .width("100%")
@@ -76,14 +77,14 @@ struct KeyRepeatTest {
 
       const entry = `key="${keyText}" type=${event.type === KeyType.Down ? "Down" : "Up"} repeat=${isRepeat}`;
       this.keyTestLog = [...this.keyTestLog.slice(-49), entry];
-      hilog.info(DOMAIN, 'KeyTest', '%{public}s', entry);
+      hilog.info(DOMAIN, "KeyTest", "%{public}s", entry);
     })
     .onAppear(() => {
       try {
         focusControl.requestFocus("keyTestOverlay");
       } catch (e) {
-        hilog.warn(DOMAIN, 'KeyTest', 'focusControl failed: %{public}s', String(e));
+        hilog.warn(DOMAIN, "KeyTest", "focusControl failed: %{public}s", String(e));
       }
-    })
+    });
   }
 }

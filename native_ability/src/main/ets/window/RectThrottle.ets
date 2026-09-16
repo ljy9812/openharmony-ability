@@ -1,6 +1,6 @@
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { window } from '@kit.ArkUI';
-import { DOMAIN } from '../helper/constants';
+import { hilog } from "@kit.PerformanceAnalysisKit";
+import { window } from "@kit.ArkUI";
+import { DOMAIN } from "../helper/constants";
 
 // Phase 3 (design.md D5): typed wrappers replacing ESObject, eliminating
 // arkts-limited-esobj WARN. These carry windowId through the NAPI boundary.
@@ -62,30 +62,33 @@ export class RectThrottle {
     this.isDestroying = isDestroying;
   }
 
-  dispatch(
-    windowId: number,
-    payload: object,
-    dispatchFn: (w: object) => void,
-    kind: string,
-  ): void {
-    hilog.debug(DOMAIN, 'WindowManager', `[THROTTLE-IN] wid=${windowId} kind=${kind}`);
+  dispatch(windowId: number, payload: object, dispatchFn: (w: object) => void, kind: string): void {
+    hilog.debug(DOMAIN, "WindowManager", `[THROTTLE-IN] wid=${windowId} kind=${kind}`);
     // Discard events for windows being destroyed (main window id=0 not in Map → unaffected)
     if (this.isDestroying(windowId)) {
       return;
     }
 
-    const timersMap = kind === 'rect' ? this.rectTimers : this.sizeTimers;
-    const pendingMap = kind === 'rect' ? this.rectPending : this.sizePending;
-    const leadingMap = kind === 'rect' ? this.rectLeading : this.sizeLeading;
+    const timersMap = kind === "rect" ? this.rectTimers : this.sizeTimers;
+    const pendingMap = kind === "rect" ? this.rectPending : this.sizePending;
+    const leadingMap = kind === "rect" ? this.rectLeading : this.sizeLeading;
 
     // Leading: first event in the window fires immediately
     if (!leadingMap.get(windowId)) {
       leadingMap.set(windowId, true);
-      hilog.debug(DOMAIN, 'WindowManager', `[THROTTLE-OUT] wid=${windowId} kind=${kind} edge=leading`);
+      hilog.debug(
+        DOMAIN,
+        "WindowManager",
+        `[THROTTLE-OUT] wid=${windowId} kind=${kind} edge=leading`,
+      );
       try {
         dispatchFn(payload);
       } catch (e) {
-        hilog.warn(DOMAIN, 'WindowManager', `[THROTTLE] leading dispatch failed wid=${windowId} kind=${kind}: ${String(e)}`);
+        hilog.warn(
+          DOMAIN,
+          "WindowManager",
+          `[THROTTLE] leading dispatch failed wid=${windowId} kind=${kind}: ${String(e)}`,
+        );
       }
       // Set timer to end the leading window and flush trailing
       const timer = setTimeout(() => {
@@ -99,11 +102,19 @@ export class RectThrottle {
           }
           const pending = pendingMap.get(windowId);
           if (pending !== undefined) {
-            hilog.debug(DOMAIN, 'WindowManager', `[THROTTLE-OUT] wid=${windowId} kind=${kind} edge=trailing`);
+            hilog.debug(
+              DOMAIN,
+              "WindowManager",
+              `[THROTTLE-OUT] wid=${windowId} kind=${kind} edge=trailing`,
+            );
             dispatchFn(pending);
           }
         } catch (e) {
-          hilog.warn(DOMAIN, 'WindowManager', `[THROTTLE] trailing dispatch failed wid=${windowId} kind=${kind}: ${String(e)}`);
+          hilog.warn(
+            DOMAIN,
+            "WindowManager",
+            `[THROTTLE] trailing dispatch failed wid=${windowId} kind=${kind}: ${String(e)}`,
+          );
         } finally {
           timersMap.delete(windowId);
           pendingMap.delete(windowId);
@@ -113,7 +124,7 @@ export class RectThrottle {
       timersMap.set(windowId, timer);
     } else {
       // Trailing: store pending (caller already deep-copied fields into the wrapped object)
-      if (kind === 'rect') {
+      if (kind === "rect") {
         this.rectPending.set(windowId, payload as WindowRectEventWrap);
       } else {
         this.sizePending.set(windowId, payload as WindowSizeEventWrap);
@@ -126,9 +137,13 @@ export class RectThrottle {
   // guarantees timer callback cannot interleave with a synchronous clear).
   clearWindow(windowId: number): void {
     const rectTimer = this.rectTimers.get(windowId);
-    if (rectTimer !== undefined) { clearTimeout(rectTimer); }
+    if (rectTimer !== undefined) {
+      clearTimeout(rectTimer);
+    }
     const sizeTimer = this.sizeTimers.get(windowId);
-    if (sizeTimer !== undefined) { clearTimeout(sizeTimer); }
+    if (sizeTimer !== undefined) {
+      clearTimeout(sizeTimer);
+    }
     this.rectTimers.delete(windowId);
     this.rectPending.delete(windowId);
     this.rectLeading.delete(windowId);

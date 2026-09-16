@@ -31,9 +31,9 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result
                 return Ok(());
             };
             if let Some(ref mut h) = *on_insert_text_app.event_loop.borrow_mut() {
-                h(Event::Input(InputEvent::ImeEvent(
-                    ImeEvent::TextInputEvent(TextInputEventData { text: s }),
-                )))
+                h(Event::Input(InputEvent::Ime(ImeEvent::TextInputEvent(
+                    TextInputEventData { text: s },
+                ))))
             }
             Ok(())
         })?;
@@ -65,9 +65,9 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result
                 on_ime_hide_app.hide_keyboard();
             }
             if let Some(ref mut h) = *on_ime_hide_app.event_loop.borrow_mut() {
-                h(Event::Input(InputEvent::ImeEvent(
-                    ImeEvent::ImeStatusEvent(status),
-                )))
+                h(Event::Input(InputEvent::Ime(ImeEvent::ImeStatusEvent(
+                    status,
+                ))))
             }
             Ok(())
         })?;
@@ -90,9 +90,9 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result
                 return Ok(());
             };
             if let Some(ref mut h) = *on_backspace_app.event_loop.borrow_mut() {
-                h(Event::Input(InputEvent::ImeEvent(
-                    ImeEvent::BackspaceEvent(value),
-                )))
+                h(Event::Input(InputEvent::Ime(ImeEvent::BackspaceEvent(
+                    value,
+                ))))
             }
             Ok(())
         })?;
@@ -115,9 +115,7 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result
                 return Ok(());
             };
             if let Some(ref mut h) = *on_ime_enter_app.event_loop.borrow_mut() {
-                h(Event::Input(InputEvent::ImeEvent(ImeEvent::EnterEvent(
-                    value,
-                ))))
+                h(Event::Input(InputEvent::Ime(ImeEvent::EnterEvent(value))))
             }
             Ok(())
         })?;

@@ -105,11 +105,12 @@ mod tests {
     #[test]
     fn test_version_calculation() {
         // Test the version calculation formula: M * 10000 + S * 100 + F
-        assert_eq!(5 * 10000 + 0 * 100 + 0, 50000); // HarmonyOS 5.0.0
-        assert_eq!(5 * 10000 + 0 * 100 + 1, 50001); // HarmonyOS 5.0.1
-        assert_eq!(5 * 10000 + 0 * 100 + 2, 50002); // HarmonyOS 5.0.2
-        assert_eq!(5 * 10000 + 1 * 100 + 0, 50100); // HarmonyOS 5.1.0
-        assert_eq!(6 * 10000 + 0 * 100 + 0, 60000); // HarmonyOS 6.0.0
+        let encode = |major: i32, minor: i32, fix: i32| major * 10000 + minor * 100 + fix;
+        assert_eq!(encode(5, 0, 0), 50000); // HarmonyOS 5.0.0
+        assert_eq!(encode(5, 0, 1), 50001); // HarmonyOS 5.0.1
+        assert_eq!(encode(5, 0, 2), 50002); // HarmonyOS 5.0.2
+        assert_eq!(encode(5, 1, 0), 50100); // HarmonyOS 5.1.0
+        assert_eq!(encode(6, 0, 0), 60000); // HarmonyOS 6.0.0
     }
 
     #[test]
@@ -120,14 +121,14 @@ mod tests {
 
         assert!(v60000 >= 50001);
         assert!(v50001 >= 50001);
-        assert!(!(v50001 >= 60000));
+        assert!(v50001 < 60000);
 
         let sdk_v14 = 14;
         let sdk_v12 = 12;
 
         assert!(sdk_v14 >= 14);
         assert!(sdk_v12 >= 12);
-        assert!(!(sdk_v12 >= 14));
+        assert!(sdk_v12 < 14);
     }
 
     // NAPI-dependent tests: require OHOS device runtime

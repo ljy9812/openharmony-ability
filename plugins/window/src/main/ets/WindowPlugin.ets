@@ -445,7 +445,9 @@ function parseLimitsRequest(payload: BridgeTypedValue): WindowLimitsRequest {
 
 function parseImePositionRequest(payload: BridgeTypedValue): ImePositionRequest {
   if (payload.typeName !== IME_POSITION_REQUEST_TYPE || typeof payload.value !== "object") {
-    throw new Error(`ohos.window.set-ime-position requires bridge type ${IME_POSITION_REQUEST_TYPE}`);
+    throw new Error(
+      `ohos.window.set-ime-position requires bridge type ${IME_POSITION_REQUEST_TYPE}`,
+    );
   }
   const request = payload.value as ImePositionRequest;
   if (!isWindowId(request?.windowId) || !isSafeInteger(request?.x) || !isSafeInteger(request?.y)) {
@@ -478,7 +480,9 @@ function parseCursorIconRequest(payload: BridgeTypedValue): CursorIconRequest {
 
 function parseCursorVisibleRequest(payload: BridgeTypedValue): CursorVisibleRequest {
   if (payload.typeName !== CURSOR_VISIBLE_REQUEST_TYPE || typeof payload.value !== "object") {
-    throw new Error(`ohos.window.set-cursor-visible requires bridge type ${CURSOR_VISIBLE_REQUEST_TYPE}`);
+    throw new Error(
+      `ohos.window.set-cursor-visible requires bridge type ${CURSOR_VISIBLE_REQUEST_TYPE}`,
+    );
   }
   const request = payload.value as CursorVisibleRequest;
   if (typeof request?.visible !== "boolean") {
@@ -489,11 +493,18 @@ function parseCursorVisibleRequest(payload: BridgeTypedValue): CursorVisibleRequ
 
 function parseDecorationFlagsRequest(payload: BridgeTypedValue): DecorationFlagsRequest {
   if (payload.typeName !== DECORATION_FLAGS_REQUEST_TYPE || typeof payload.value !== "object") {
-    throw new Error(`ohos.window.set-decoration-flags requires bridge type ${DECORATION_FLAGS_REQUEST_TYPE}`);
+    throw new Error(
+      `ohos.window.set-decoration-flags requires bridge type ${DECORATION_FLAGS_REQUEST_TYPE}`,
+    );
   }
   const request = payload.value as DecorationFlagsRequest;
   // FLAG bit-field: closable=1, maximizable=2, minimizable=4, resizable=8 (max 15).
-  if (!isWindowId(request?.windowId) || !isSafeInteger(request?.flags) || request.flags < 0 || request.flags > 15) {
+  if (
+    !isWindowId(request?.windowId) ||
+    !isSafeInteger(request?.flags) ||
+    request.flags < 0 ||
+    request.flags > 15
+  ) {
     throw new Error("set-decoration-flags requires a valid windowId and flags in [0, 15]");
   }
   return request;
@@ -540,7 +551,7 @@ export class WindowPlugin extends AsyncPluginBase {
         // the transparent window (vibrancy/frosted glass effect invisible).
         if (request.transparent && deviceInfo.sdkApiVersion >= 20) {
           try {
-            created.setWindowContainerColor('#00000000', '#00000000');
+            created.setWindowContainerColor("#00000000", "#00000000");
           } catch (containerErr: any) {
             if (containerErr.code !== 801) {
               // 801 = API not supported; other errors logged but non-fatal
@@ -606,13 +617,17 @@ export class WindowPlugin extends AsyncPluginBase {
 
     if (action === "set-blur") {
       const request = parseBlurRequest(payload);
-      hilog.info(DOMAIN, TAG,
-        'set-blur: ENTER windowId=%{public}d radius=%{public}f',
-        Number(request.windowId), request.radius);
+      hilog.info(
+        DOMAIN,
+        TAG,
+        "set-blur: ENTER windowId=%{public}d radius=%{public}f",
+        Number(request.windowId),
+        request.radius,
+      );
       // Use WindowManager.applyWindowBlur (backdropBlur on WebView container)
       // instead of setWindowShadowRadius (window shadow — wrong API for vibrancy)
       WindowManager.getInstance().applyWindowBlur(request.windowId, request.radius);
-      hilog.info(DOMAIN, TAG, 'set-blur: applyWindowBlur returned, ack=true');
+      hilog.info(DOMAIN, TAG, "set-blur: applyWindowBlur returned, ack=true");
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
@@ -737,28 +752,62 @@ export class WindowPlugin extends AsyncPluginBase {
       const request = parseWindowIdRequest(payload);
       const notifId = ++attentionNotifId;
       const doPublish = (): void => {
-        notificationManager.publish({
-          id: notifId,
-          content: {
-            contentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
-            normal: { title: "Tauri App", text: "请查看应用窗口" as string },
-          } as ESObject,
-        } as ESObject).then(() => {
-          hilog.info(DOMAIN, TAG, "request-user-attention: published OK (id=%{public}d, window=%{public}d)", notifId, request.windowId);
-        }).catch((err: ESObject) => {
-          const code = (err && (err as ESObject).code) ? (err as ESObject).code : -1;
-          hilog.warn(DOMAIN, TAG, "request-user-attention: publish failed id=%{public}d code=%{public}s", notifId, String(code));
-          // 1600004 = notification not enabled → pop the system authorization
-          // dialog (requestEnableNotification) and retry once.
-          if (code === 1600004) {
-            notificationManager.requestEnableNotification().then(() => {
-              hilog.info(DOMAIN, TAG, "request-user-attention: enabled, retry publish (id=%{public}d)", notifId);
-              doPublish();
-            }).catch((e2: ESObject) => {
-              hilog.warn(DOMAIN, TAG, "request-user-attention: requestEnableNotification failed: %{public}s", JSON.stringify(e2));
-            });
-          }
-        });
+        notificationManager
+          .publish({
+            id: notifId,
+            content: {
+              contentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
+              normal: { title: "Tauri App", text: "请查看应用窗口" as string },
+            } as ESObject,
+          } as ESObject)
+          .then(() => {
+            hilog.info(
+              DOMAIN,
+              TAG,
+              "request-user-attention: published OK (id=%{public}d, window=%{public}d)",
+              notifId,
+              request.windowId,
+            );
+          })
+          .catch((err: ESObject) => {
+            const code = err && (err as ESObject).code ? (err as ESObject).code : -1;
+            hilog.warn(
+              DOMAIN,
+              TAG,
+              "request-user-attention: publish failed id=%{public}d code=%{public}s",
+              notifId,
+              String(code),
+            );
+            // 1600004 = notification not enabled → pop the system authorization
+            // dialog (requestEnableNotification) and retry once.
+            if (code === 1600004) {
+              // The no-arg overload is deprecated since API 12; this UIAbilityContext
+              // overload (@since 12) is the SDK's documented replacement, but oxk's
+              // arkts/system-api-version flags the shared name regardless of overload
+              // and ignores suppression comments — ESObject type-erasure is the only
+              // working silence. The ArkTS compiler rejects namespace casts; the demo's
+              // strict ArkTS build is pre-existing red, lint is the CI gate.
+              (notificationManager as ESObject)
+                .requestEnableNotification(context.abilityContext)
+                .then(() => {
+                  hilog.info(
+                    DOMAIN,
+                    TAG,
+                    "request-user-attention: enabled, retry publish (id=%{public}d)",
+                    notifId,
+                  );
+                  doPublish();
+                })
+                .catch((e2: ESObject) => {
+                  hilog.warn(
+                    DOMAIN,
+                    TAG,
+                    "request-user-attention: requestEnableNotification failed: %{public}s",
+                    JSON.stringify(e2),
+                  );
+                });
+            }
+          });
       };
       doPublish();
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
@@ -780,13 +829,31 @@ export class WindowPlugin extends AsyncPluginBase {
       };
       try {
         await inputMethod.getController().updateCursor(cursorInfo);
-        hilog.info(DOMAIN, TAG, "set-ime-position: updateCursor OK window=%{public}d x=%{public}d y=%{public}d", request.windowId, request.x, request.y);
-        return { typeName: IME_POSITION_RESPONSE_TYPE, value: new ImePositionResponse(true, 0, "OK") };
+        hilog.info(
+          DOMAIN,
+          TAG,
+          "set-ime-position: updateCursor OK window=%{public}d x=%{public}d y=%{public}d",
+          request.windowId,
+          request.x,
+          request.y,
+        );
+        return {
+          typeName: IME_POSITION_RESPONSE_TYPE,
+          value: new ImePositionResponse(true, 0, "OK"),
+        };
       } catch (error) {
-        const code = (error && (error as ESObject).code) ? (error as ESObject).code : -1;
+        const code = error && (error as ESObject).code ? (error as ESObject).code : -1;
         // 12800009 = input method client detached — no focused editor; caller decides severity.
-        hilog.warn(DOMAIN, TAG, "set-ime-position: updateCursor failed code=%{public}s", String(code));
-        return { typeName: IME_POSITION_RESPONSE_TYPE, value: new ImePositionResponse(false, code as number, String(error)) };
+        hilog.warn(
+          DOMAIN,
+          TAG,
+          "set-ime-position: updateCursor failed code=%{public}s",
+          String(code),
+        );
+        return {
+          typeName: IME_POSITION_RESPONSE_TYPE,
+          value: new ImePositionResponse(false, code as number, String(error)),
+        };
       }
     }
 
@@ -874,8 +941,9 @@ export class WindowPlugin extends AsyncPluginBase {
       if (request.windowId === 0) {
         throw new Error("Cannot destroy the main Ability window (id 0)");
       }
-      const existing = this.windows.get(request.windowId)
-        ?? WindowManager.getInstance().getWindow(request.windowId);
+      const existing =
+        this.windows.get(request.windowId) ??
+        WindowManager.getInstance().getWindow(request.windowId);
       if (existing !== undefined) {
         await existing.destroyWindow();
         this.windows.delete(request.windowId);
@@ -925,7 +993,11 @@ export class WindowPlugin extends AsyncPluginBase {
     }
   }
 
-  private windowState(action: string, payload: BridgeTypedValue, context: BridgeCallContext): BridgeTypedValue {
+  private windowState(
+    action: string,
+    payload: BridgeTypedValue,
+    context: BridgeCallContext,
+  ): BridgeTypedValue {
     const request = parseWindowIdRequest(payload);
     const win = this.requireWindow(request.windowId, context);
     try {

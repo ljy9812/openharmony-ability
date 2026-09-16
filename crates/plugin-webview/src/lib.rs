@@ -364,6 +364,9 @@ pub struct WebviewCreateRequest {
     pub style: WebviewStyle,
     pub javascript_enabled: Option<bool>,
     pub devtools: Option<bool>,
+    /// Enables ArkWeb DOM storage (localStorage/sessionStorage). ArkWeb disables it by
+    /// default; when unset, DOM storage stays disabled, so callers opt in with `true`.
+    pub dom_storage_access: Option<bool>,
     pub user_agent: Option<String>,
     pub autoplay: Option<bool>,
     pub initialization_scripts: Option<Vec<WebviewInitializationScript>>,
@@ -403,6 +406,7 @@ impl WebviewCreateRequest {
             style: WebviewStyle::default(),
             javascript_enabled: None,
             devtools: None,
+            dom_storage_access: None,
             user_agent: None,
             autoplay: None,
             initialization_scripts: None,
@@ -441,6 +445,12 @@ impl WebviewCreateRequest {
     /// Uses a transparent background when no explicit style background color was supplied.
     pub fn transparent(mut self, transparent: bool) -> Self {
         self.transparent = Some(transparent);
+        self
+    }
+
+    /// Enables ArkWeb DOM storage (localStorage/sessionStorage).
+    pub fn dom_storage_access(mut self, enabled: bool) -> Self {
+        self.dom_storage_access = Some(enabled);
         self
     }
 
@@ -1050,7 +1060,7 @@ fn snapshot_call_options() -> BridgeCallOptions {
 /// main thread is still inside the NAPI `openharmony()` entry and the ArkTS
 /// loop cannot answer a bridge call.
 pub fn arkweb_engine_version() -> Result<String> {
-    arkweb_version_capi::engine_version().map_err(|reason| Error::from_reason(reason))
+    arkweb_version_capi::engine_version().map_err(Error::from_reason)
 }
 
 /// `ArkWebEngineVersion` values from `native_interface_arkweb.h`.
@@ -1086,16 +1096,14 @@ mod arkweb_version_capi {
         ARKWEB_VERSION_API
             .get_or_init(|| unsafe {
                 // RTLD_NOW | RTLD_LOCAL = 2 on OHOS musl.
-                let handle = dlopen(b"libohweb.so\0".as_ptr() as *const c_char, 2);
+                let handle = dlopen(c"libohweb.so".as_ptr(), 2);
                 if handle.is_null() {
-                    log::warn!(
-                        "[webview] dlopen libohweb.so failed — ArkWeb version unavailable"
-                    );
+                    log::warn!("[webview] dlopen libohweb.so failed — ArkWeb version unavailable");
                     return None;
                 }
                 let get_version = dlsym(
                     handle,
-                    b"OH_NativeArkWeb_GetActiveWebEngineVersion\0".as_ptr() as *const c_char,
+                    c"OH_NativeArkWeb_GetActiveWebEngineVersion".as_ptr(),
                 );
                 if get_version.is_null() {
                     log::warn!(
@@ -1106,7 +1114,7 @@ mod arkweb_version_capi {
                 }
                 let is_evergreen = dlsym(
                     handle,
-                    b"OH_NativeArkWeb_IsActiveWebEngineEvergreen\0".as_ptr() as *const c_char,
+                    c"OH_NativeArkWeb_IsActiveWebEngineEvergreen".as_ptr(),
                 );
                 Some(ArkWebVersionApi {
                     get_active_web_engine_version: std::mem::transmute::<
@@ -1114,7 +1122,9 @@ mod arkweb_version_capi {
                         GetActiveWebEngineVersionFn,
                     >(get_version),
                     is_active_web_engine_evergreen: (!is_evergreen.is_null()).then(|| {
-                        std::mem::transmute::<*mut c_void, IsActiveWebEngineEvergreenFn>(is_evergreen)
+                        std::mem::transmute::<*mut c_void, IsActiveWebEngineEvergreenFn>(
+                            is_evergreen,
+                        )
                     }),
                 })
             })
@@ -1717,6 +1727,7 @@ mod tests {
         let request = WebviewCreateRequest::new("webview")
             .parent_node(7)
             .transparent(true)
+            .dom_storage_access(true)
             .url("https://example.test");
         assert_eq!(request.id, "webview");
         assert_eq!(request.parent_handle, Some(7));
@@ -1724,6 +1735,7 @@ mod tests {
         assert!(request.html.is_none());
         assert!(request.headers.is_none());
         assert_eq!(request.transparent, Some(true));
+        assert_eq!(request.dom_storage_access, Some(true));
     }
 
     #[test]

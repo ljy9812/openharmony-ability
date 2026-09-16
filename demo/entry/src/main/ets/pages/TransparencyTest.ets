@@ -1,4 +1,4 @@
-import { webview } from '@kit.ArkWeb';
+import { webview } from "@kit.ArkWeb";
 
 /**
  * Phase 1 验证测试页
@@ -39,7 +39,12 @@ struct TransparencyTest {
 </html>`;
 
   @Builder
-  TestCard(title: string, bgColor: ResourceColor, renderMode: RenderMode, ctrl: webview.WebviewController) {
+  TestCard(
+    title: string,
+    bgColor: ResourceColor,
+    renderMode: RenderMode,
+    ctrl: webview.WebviewController,
+  ) {
     Column({ space: 4 }) {
       Text(title)
         .fontSize(14)
@@ -73,7 +78,7 @@ struct TransparencyTest {
       .height(280)
     }
     .width("100%")
-    .padding(8)
+    .padding(8);
   }
 
   build() {
@@ -84,8 +89,9 @@ struct TransparencyTest {
           .fontWeight(FontWeight.Bold)
           .width("100%")
           .textAlign(TextAlign.Center)
-
-        Text("验证说明：如果 Web 组件透明生效，下方彩色背景应该能透过 Web 的白色/透明区域显示出来。")
+        Text(
+          "验证说明：如果 Web 组件透明生效，下方彩色背景应该能透过 Web 的白色/透明区域显示出来。",
+        )
           .fontSize(13)
           .fontColor(Color.Gray)
           .width("100%")
@@ -95,7 +101,7 @@ struct TransparencyTest {
           "Test 1: ASYNC_RENDER (默认模式)",
           Color.Red,
           RenderMode.ASYNC_RENDER,
-          this.controller1
+          this.controller1,
         )
 
         // 测试 2：同步渲染模式
@@ -103,7 +109,7 @@ struct TransparencyTest {
           "Test 2: SYNC_RENDER (同步模式)",
           Color.Blue,
           RenderMode.SYNC_RENDER,
-          this.controller2
+          this.controller2,
         )
 
         // 测试 3：对照组 - 不透明 Web（验证非透明场景正常）
@@ -112,14 +118,13 @@ struct TransparencyTest {
             .fontSize(14)
             .fontWeight(FontWeight.Bold)
             .width("100%")
-
           Web({ src: this.transparentHtml, controller: this.controller3 })
             .width("100%")
             .height(280)
             .renderMode(RenderMode.ASYNC_RENDER)
             .javaScriptAccess(false)
-            // 注意：不设置 .backgroundColor，使用默认不透明
         }
+        // 注意：不设置 .backgroundColor，使用默认不透明
         .width("100%")
         .padding(8)
 
@@ -128,30 +133,31 @@ struct TransparencyTest {
           Text("📋 验证结果记录")
             .fontSize(16)
             .fontWeight(FontWeight.Bold)
-
-          Text("Test 1 (ASYNC_RENDER + Transparent):")
-            .fontSize(13)
+          Text("Test 1 (ASYNC_RENDER + Transparent):").fontSize(13)
           Text("  绿色条是否可见？___  红色背景是否透过？___")
-            .fontSize(12).fontColor(Color.Gray)
-
-          Text("Test 2 (SYNC_RENDER + Transparent):")
-            .fontSize(13)
+            .fontSize(12)
+            .fontColor(Color.Gray)
+          Text("Test 2 (SYNC_RENDER + Transparent):").fontSize(13)
           Text("  绿色条是否可见？___  蓝色背景是否透过？___")
-            .fontSize(12).fontColor(Color.Gray)
-
-          Text("Test 3 (对照组 - 不透明):")
-            .fontSize(13)
+            .fontSize(12)
+            .fontColor(Color.Gray)
+          Text("Test 3 (对照组 - 不透明):").fontSize(13)
           Text("  绿色条是否可见？___  白色/不透明背景？___")
-            .fontSize(12).fontColor(Color.Gray)
-
+            .fontSize(12)
+            .fontColor(Color.Gray)
           Text("预期结果：")
-            .fontSize(14).fontWeight(FontWeight.Bold).margin({ top: 8 })
+            .fontSize(14)
+            .fontWeight(FontWeight.Bold)
+            .margin({ top: 8 })
           Text("• Test 1 & 2: 绿色条可见 + 彩色背景透过 = 透明生效")
-            .fontSize(12).fontColor(Color.Green)
+            .fontSize(12)
+            .fontColor(Color.Green)
           Text("• Test 3: 绿色条可见 + 白色背景 = 不透明（对照组正常）")
-            .fontSize(12).fontColor(Color.Green)
+            .fontSize(12)
+            .fontColor(Color.Green)
           Text("• 如果 Test 1 不透明但 Test 2 透明 → 需要用 SYNC_RENDER")
-            .fontSize(12).fontColor(Color.Orange)
+            .fontSize(12)
+            .fontColor(Color.Orange)
         }
         .width("100%")
         .padding(12)
@@ -162,6 +168,6 @@ struct TransparencyTest {
       .padding(16)
     }
     .width("100%")
-    .height("100%")
+    .height("100%");
   }
 }

@@ -2,22 +2,36 @@ import { AbilityConstant, Configuration, UIAbility, Want } from "@kit.AbilityKit
 import common from "@ohos.app.ability.common";
 import window from "@ohos.window";
 import webview from "@ohos.web.webview";
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { deviceInfo } from '@kit.BasicServicesKit';
+import { hilog } from "@kit.PerformanceAnalysisKit";
 import * as Entry from "../components/MainPage";
-import { setMenuClickHandler, setMenuBarRecoverFn, getMenuDataCallback } from "../components/MenuBarComponent";
-import { ApplicationLifecycle, Module, BridgeBindings, BridgePluginFactory, BridgeLifecycleEvent, BridgeAbilityCreateLifecyclePayload, BridgeEmptyLifecyclePayload, BridgeMemoryLevelLifecyclePayload, BridgeWindowStageEventLifecyclePayload, AbilityInitContext } from "./type";
-import { MenuManager, PredefinedActionExecutor, setPredefinedActionExecutor } from "../helper/menu";
-import { AboutMetadataData } from "../helper/menu_types";
-import { setCurrentAbilityName } from "../helper/StatusBarUtils";
-import { WindowManager, WindowSizeEventWrap, WindowRectEventWrap } from "../window/WindowManager";
-import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from '../helper/constants';
-import { setPrimaryWebviewControllerCallback } from "../components/DefaultXComponent";
-import { ProcessInitializer } from "./ProcessInitializer";
 import { BridgeHostRegistry } from "../bridge/BridgeHost";
 import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
 import { AbilityStateCodec } from "../runtime/AbilityStateCodec";
 import { SerialTaskQueue } from "../runtime/SerialTaskQueue";
+import {
+  AbilityInitContext,
+  ApplicationLifecycle,
+  BridgeBindings,
+  BridgeAbilityCreateLifecyclePayload,
+  BridgeEmptyLifecyclePayload,
+  BridgeLifecycleEvent,
+  BridgeMemoryLevelLifecyclePayload,
+  BridgePluginFactory,
+  BridgeWindowStageEventLifecyclePayload,
+  Module,
+} from "./type";
+import {
+  setMenuClickHandler,
+  setMenuBarRecoverFn,
+  getMenuDataCallback,
+} from "../components/MenuBarComponent";
+import { MenuManager, PredefinedActionExecutor, setPredefinedActionExecutor } from "../helper/menu";
+import { AboutMetadataData } from "../helper/menu_types";
+import { setCurrentAbilityName } from "../helper/StatusBarUtils";
+import { WindowManager, WindowSizeEventWrap, WindowRectEventWrap } from "../window/WindowManager";
+import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "../helper/constants";
+import { setPrimaryWebviewControllerCallback } from "../components/DefaultXComponent";
+import { ProcessInitializer } from "./ProcessInitializer";
 
 export const STATE_KEY = "ohos.rs.ability.application.state";
 
@@ -39,112 +53,190 @@ export class NativeAbility extends UIAbility {
   // matching the Rust-declared plugin ids. BridgeHostRegistry.prepare installs them
   // into every module host for this Ability session.
   public bridgePlugins: BridgePluginFactory[] = [];
+
+  private moduleRuntimes: NativeModuleRuntime[] = [];
+  private bridgeSessionId: string = "";
+  private readonly lifecycleQueue = new SerialTaskQueue((label: string, error: Error): void => {
+    hilog.error(
+      DOMAIN,
+      "NativeAbility",
+      "lifecycle op '%{public}s' failed: %{public}s",
+      label,
+      String(error),
+    );
+  });
   private acceptingLifecycle: boolean = false;
   private abilityGeneration: number = 0;
   private windowStageGeneration: number = 0;
-  private bridgeSessionId: string = "";
-  private moduleRuntimes: NativeModuleRuntime[] = [];
   private windowStageActive: boolean = false;
-  private readonly lifecycleQueue = new SerialTaskQueue((label: string, error: Error): void => {
-    hilog.error(DOMAIN, 'NativeAbility', "lifecycle op '%{public}s' failed: %{public}s", label, String(error));
-  });
+  private observedWindowStage?: window.WindowStage;
+
+  // Kept as an arrow-function field so detachWindowListeners can pass the exact same
+  // reference to windowStage.off("windowStageEvent", ...).
+  private readonly onWindowStageEvent = (event: window.WindowStageEventType): void => {
+    if (!this.acceptingLifecycle || this.observedWindowStage === undefined) {
+      return;
+    }
+    void this.enqueueLifecycleOperation("window-stage-event", async (): Promise<void> => {
+      this.forEachLifecycle((lifecycle) =>
+        lifecycle.windowStageEventCallback.onWindowStageEvent(event),
+      );
+      await this.notifyBridgeLifecycle({
+        kind: "window-stage-event",
+        payload: new BridgeWindowStageEventLifecyclePayload(event),
+      });
+    });
+  };
+
+  protected resolveModuleNames(): string[] {
+    const moduleNames = NativeModuleLoader.resolveModuleNames(this.moduleName);
+    if (moduleNames.length === 0) {
+      throw new Error("moduleName must contain at least one module");
+    }
+    return moduleNames;
+  }
 
   protected forEachLifecycle(handler: (lifecycle: ApplicationLifecycle) => void): void {
     for (const runtime of this.moduleRuntimes) {
       try {
         handler(runtime.lifecycle);
       } catch (e) {
-        hilog.error(DOMAIN, 'NativeAbility', 'Lifecycle callback error: %{public}s', String(e));
+        hilog.error(DOMAIN, "NativeAbility", "Lifecycle callback error: %{public}s", String(e));
       }
     }
   }
 
-  async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
+  onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     setCurrentAbilityName(want.abilityName ?? "");
     // Populate AppStorage keys consumed by DeepLinkPlugin.ets (get-initial-uri /
     // get-latest-uri bridge actions, keys INITIAL_WANT_URI_KEY/LATEST_WANT_URI_KEY).
     // Contract documented in DeepLinkPlugin.ets. Was never written before.
-    AppStorage.setOrCreate("initialWantUri", want.uri ?? '');
-    AppStorage.setOrCreate("wantUri", want.uri ?? '');
+    AppStorage.setOrCreate("initialWantUri", want.uri ?? "");
+    AppStorage.setOrCreate("wantUri", want.uri ?? "");
 
-    hilog.info(DOMAIN, 'NativeAbility', 'onCreate - moduleName: %{public}s', JSON.stringify(this.moduleName));
-    AppStorage.setOrCreate("moduleName", this.moduleName);
-    AppStorage.setOrCreate("loadMode", this.loadMode);
+    hilog.info(
+      DOMAIN,
+      "NativeAbility",
+      "onCreate - moduleName: %{public}s",
+      JSON.stringify(this.moduleName),
+    );
 
+    const isRestore: boolean =
+      (want.parameters?.["ohos.ability.params.abilityRecoveryRestart"] as boolean) ?? false;
+    const savedState = want.parameters?.[STATE_KEY];
+    const state = isRestore && savedState !== undefined ? savedState.toString() : "";
+    const requestedModules = this.resolveModuleNames();
+    // A single module owns its state string verbatim, even if business data happens to begin with
+    // the framework's multi-module prefix. Only multi-module sessions interpret the state map.
+    let restoredStateMap: Record<string, string> = {};
+    if (requestedModules.length > 1) {
+      restoredStateMap = this.parseSavedStateMap(state);
+    }
+
+    this.acceptingLifecycle = true;
+    const generation = ++this.abilityGeneration;
+    this.updateAppStorage("moduleName", this.moduleName);
+    this.updateAppStorage("loadMode", this.loadMode);
+    void this.enqueueLifecycleOperation("ability-create", async (): Promise<void> => {
+      await this.initializeSession(
+        requestedModules,
+        restoredStateMap,
+        state,
+        generation,
+        want,
+        launchParam,
+      );
+    });
+  }
+
+  private async initializeSession(
+    requestedModules: string[],
+    restoredStateMap: Record<string, string>,
+    fallbackState: string,
+    generation: number,
+    want: Want,
+    launchParam: AbilityConstant.LaunchParam,
+  ): Promise<void> {
     const context = this.context as common.UIAbilityContext;
 
-    // 1. Process-level initialization (runs only once; subsequent instances skip it).
-    //    Loads native modules, probes for custom protocols, initializes the web engine.
-    //    No longer calls module.init — session creation is this Ability's responsibility.
+    // Process-level initialization, once per process (adaptation line): WindowManager
+    // singleton, custom-scheme probing + web-engine init, createSubWindow TSFN hookup
+    // and the primary-module AppStorage publish consumed by FloatPage / the
+    // windowStatusChange fan-in below. Idempotent for subsequent Ability instances;
+    // module loading itself is re-done transactionally below via NativeModuleLoader.
     await ProcessInitializer.initialize(context, this.moduleName, this.loadMode, want);
+    this.assertInitializationActive(generation);
 
-    // 2. Create the bridge session for this Ability instance.
-    const moduleNames = ProcessInitializer.getLoadedModuleNames();
-    if (moduleNames.length === 0) {
-      hilog.error(DOMAIN, 'NativeAbility', 'No native modules loaded; cannot create bridge session');
-      return;
-    }
-    const sessionId = BridgeHostRegistry.prepare(moduleNames, context, this.bridgePlugins);
-    this.bridgeSessionId = sessionId;
-    this.updateAppStorage("bridgeSessionId", sessionId);
-    hilog.info(DOMAIN, 'NativeAbility', 'Bridge session created: %{public}s', sessionId);
-
-    // 3. Decode per-module restored state (ability recovery scenario).
-    const isRestore = (want.parameters?.["ohos.ability.params.abilityRecoveryRestart"] as boolean) ?? false;
-    const restoredStateMap = isRestore
-      ? AbilityStateCodec.decode((want.parameters?.[STATE_KEY] as string) ?? "")
-      : {};
-
-    // 4. Per module: build BridgeBindings → init → configurePlugins → attachEventSink → activateAbility.
-    const modules = ProcessInitializer.getNativeModules();
-    for (let i = 0; i < modules.length; i++) {
-      const module = modules[i];
-      const moduleName = moduleNames[i];
-      const bridgeOwner = `${moduleName}#${sessionId}`;
-      const bindings: BridgeBindings = {
-        bridgeInvoke: (pluginId: string, action: string, requestTypeName: string, responseTypeName: string, value: ESObject, timeoutMs: number): Promise<ESObject> =>
-          BridgeHostRegistry.invokeAsync(sessionId, moduleName, pluginId, action, requestTypeName, responseTypeName, value, timeoutMs),
-        bridgeInvokeSync: (pluginId: string, action: string, requestTypeName: string, responseTypeName: string, value: ESObject): ESObject =>
-          BridgeHostRegistry.invokeSync(sessionId, moduleName, pluginId, action, requestTypeName, responseTypeName, value),
-        bridgeDispatch: (): void => {
-          // TSFN no-op trampoline. Rust's MainThreadTask::run() executes inside the
-          // build_callback registered during attach_bridge_session; ArkTS just needs a
-          // callable here so get_named_property("bridgeDispatch") succeeds.
-        },
-      };
-      const initContext = ProcessInitializer.createInitContext(context, moduleName);
-      hilog.debug(DOMAIN, 'NativeAbility', 'before module.init mod=%{public}s modules=%{public}d', moduleName, modules.length);
-      const lifecycle = module.init(bindings, bridgeOwner, initContext);
-      hilog.debug(DOMAIN, 'NativeAbility', 'after module.init mod=%{public}s bridgePlugins=%{public}d', moduleName, lifecycle.bridgePlugins?.length ?? -1);
-
+    const previousSessionId = this.bridgeSessionId;
+    if (previousSessionId) {
+      BridgeHostRegistry.beginClosing(previousSessionId);
       try {
-      BridgeHostRegistry.configurePlugins(sessionId, moduleName, lifecycle.bridgePlugins);
-      hilog.debug(DOMAIN, 'NativeAbility', 'after configurePlugins mod=%{public}s', moduleName);
-      BridgeHostRegistry.attachApplicationLifecycle(sessionId, moduleName, lifecycle);
-      hilog.debug(DOMAIN, 'NativeAbility', 'after attachApplicationLifecycle mod=%{public}s', moduleName);
-      BridgeHostRegistry.attachEventSink(
-        sessionId,
-        moduleName,
-        module.onBridgeSyncEvent
-          ? (pluginId: string, event: string, requestTypeName: string, responseTypeName: string, value: ESObject): ESObject =>
-              module.onBridgeSyncEvent!(pluginId, event, requestTypeName, responseTypeName, value)
-          : undefined,
-        module.onBridgeLifecycle
-          ? (kind: string): void => module.onBridgeLifecycle!(kind)
-          : undefined,
-      );
+        await this.destroyWindowStageIfActive();
+        await this.notifyBridgeLifecycle({
+          kind: "ability-destroy",
+          payload: new BridgeEmptyLifecyclePayload(),
+        });
+        this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onAbilityDestroy());
+      } finally {
+        // A duplicated platform create is not expected, but treating replacement as a complete
+        // teardown prevents an old component root from surviving into the new bridge session.
+        for (const runtime of this.moduleRuntimes) {
+          try {
+            runtime.module.disposeAllRenders();
+          } catch {}
+        }
+        this.releaseModuleBridges(this.moduleRuntimes);
+        await BridgeHostRegistry.dispose(previousSessionId);
+      }
+    }
+    this.assertInitializationActive(generation);
+    this.bridgeSessionId = "";
+    this.moduleRuntimes = [];
+    this.windowStageActive = false;
+    this.updateAppStorage("bridgeSessionId", "");
 
-      // Register this module's runtime BEFORE the async ability-create lifecycle below.
-      // OHOS does NOT await an async onCreate: it fires onWindowStageCreate as soon as the
-      // event loop yields (here, inside `await activateAbility` → deliverLifecycle). If the
-      // runtime is pushed only after that await, onWindowStageCreate reads an empty
-      // `moduleRuntimes`, the setWindowStage loop runs zero iterations, `windowStageReady`
-      // stays false, and the subsequent DefaultXComponent attach fails with "cannot attach
-      // without an active WindowStage" — freezing the app before setup runs.
-      this.moduleRuntimes.push({ moduleName, module, lifecycle, bridgeOwner });
-      hilog.debug(DOMAIN, 'NativeAbility', 'pushed runtime mod=%{public}s total=%{public}d', moduleName, this.moduleRuntimes.length);
+    // Prepare hosts without activating `ability` plugins. Their onInstall hooks are allowed to
+    // call Rust synchronously, so module.init and both sinks must exist first.
+    const sessionId = BridgeHostRegistry.prepare(requestedModules, context, this.bridgePlugins);
+    this.bridgeSessionId = sessionId;
+    hilog.info(DOMAIN, "NativeAbility", "Bridge session created: %{public}s", sessionId);
 
-      const restoredState = restoredStateMap[moduleName] ?? "";
+    const loadedModules: LoadedNativeModule[] = [];
+    const initializedRuntimes: NativeModuleRuntime[] = [];
+    try {
+      // Loading is transactional. Parallel arrays and partial "continue after error" states made
+      // a module name point at the wrong lifecycle object after one dynamic import failed.
+      for (const moduleName of requestedModules) {
+        const module = await NativeModuleLoader.load(moduleName, this.loadMode);
+        this.assertInitializationActive(generation);
+        loadedModules.push({ moduleName, module });
+      }
+
+      for (const loaded of loadedModules) {
+        const bridgeOwner = `${sessionId}:${loaded.moduleName}`;
+        const lifecycle = loaded.module.init(
+          this.createBridgeBindings(sessionId, loaded.moduleName),
+          bridgeOwner,
+          this.createInitContext(loaded.moduleName),
+        );
+        const runtime: NativeModuleRuntime = {
+          moduleName: loaded.moduleName,
+          module: loaded.module,
+          lifecycle,
+          bridgeOwner,
+        };
+        initializedRuntimes.push(runtime);
+        BridgeHostRegistry.configurePlugins(sessionId, loaded.moduleName, lifecycle.bridgePlugins);
+        BridgeHostRegistry.attachApplicationLifecycle(sessionId, loaded.moduleName, lifecycle);
+        this.attachBridgeSinks(sessionId, loaded.moduleName, loaded.module);
+      }
+
+      // Register every runtime BEFORE the ability-create NAPI dispatch below. The dispatch is
+      // synchronous, but keeping the batch assignment in one place guarantees forEachLifecycle
+      // below reaches all modules of this session (the single-runtime push per iteration of the
+      // adaptation line had the same goal, with interleaving hazards the queue now removes).
+      this.moduleRuntimes = initializedRuntimes;
+
       // Dispatch AbilityCreated into the Rust bridge registry. This NAPI callback is the ONLY
       // path that flips Rust `BridgePluginRegistryState.session_active` to true
       // (bridge/mod.rs dispatch_lifecycle → AbilityCreated). Without it, every main-thread
@@ -152,129 +244,549 @@ export class NativeAbility extends UIAbility {
       // (seal-engine-schemes / before-engine-init / controller-attached) is rejected with
       // "outside an active Ability session". activateAbility only sets the ArkTS abilityReady
       // flag and delivers to ArkTS plugin.onLifecycle — it does NOT reach Rust
-      // dispatch_lifecycle, so it cannot substitute for this call. onWindowStageCreate below
-      // uses the same lifecycle.windowStageEventCallback callback pattern; this onAbilityCreate
-      // was simply dropped during the NativeAbility refactor (it survived in onWindowStageCreate).
-      try {
-        lifecycle.windowStageEventCallback.onAbilityCreate(restoredState);
-      } catch (e) {
-        hilog.error(DOMAIN, 'NativeAbility', 'onAbilityCreate failed: %{public}s', String(e));
-      }
-      // Mirror onNewWant: feed the cold-start want.uri into the Rust-side
-      // INITIAL_WANT_URI Mutex via the NAPI on_ability_create_with_want closure
-      // (lifecycle.rs → store_initial_want_uri). Without this, deep-link
-      // getCurrent() lazy-take returns null on cold start. Like onAbilityCreate above,
-      // this was dropped during the NativeAbility refactor and never re-added.
-      // isContinuation/parametersJson additionally feed the Rust-side continuation
-      // storage (app.rs CONTINUATION_RESTORE/CONTINUATION_DATA) for cross-device
-      // app-continuation restore; launchReason is compared symbolically here (never
-      // sent as a raw number across the bridge).
-      try {
-        const isContinuation = launchParam.launchReason === AbilityConstant.LaunchReason.CONTINUATION;
-        lifecycle.windowStageEventCallback.onAbilityCreateWithWant({
-          uri: want.uri ?? '',
-          isContinuation,
-          parametersJson: JSON.stringify(want.parameters ?? {}),
-        });
-      } catch (e) {
-        hilog.error(DOMAIN, 'NativeAbility', 'onAbilityCreateWithWant failed: %{public}s', String(e));
-      }
-      hilog.debug(DOMAIN, 'NativeAbility', 'before activateAbility mod=%{public}s', moduleName);
-      await BridgeHostRegistry.activateAbility(sessionId, moduleName, {
-        kind: "ability-create",
-        payload: new BridgeAbilityCreateLifecyclePayload(restoredState),
-      });
-      hilog.debug(DOMAIN, 'NativeAbility', 'after activateAbility mod=%{public}s', moduleName);
-      } catch (e) {
-        hilog.error(DOMAIN, 'NativeAbility', 'module setup THREW mod=%{public}s: %{public}s', moduleName, String(e));
-        hilog.error(DOMAIN, 'NativeAbility', 'stack: %{public}s', (e as Error)?.stack ?? 'no-stack');
-        // Fail-fast collapse (issue #87 minor-3): continuing with a half-initialized
-        // bridge leaves every later call failing with a confusing "not installed".
-        // Mirror onDestroy's teardown instead: close the session so pending bridge
-        // calls/hooks fail fast with "closing", then feed Event::Destroy to the
-        // modules that DID initialize (plus this failing module if its runtime was
-        // already pushed) so Rust's run_loop receives Event::Destroy and exits
-        // normally. terminate() itself cannot succeed at onCreate time — the
-        // main-thread Env is only populated later by render() — so the destroy
-        // dispatch, not a terminate call, drives the Rust exit chain.
-        if (this.bridgeSessionId) {
-          BridgeHostRegistry.beginClosing(this.bridgeSessionId);
+      // dispatch_lifecycle, so it cannot substitute for this call.
+      // Ordering: strictly after the batch assignment above and strictly before the
+      // activateAbility loop below.
+      for (const runtime of initializedRuntimes) {
+        const restoredState = restoredStateMap[runtime.moduleName] ?? fallbackState;
+        try {
+          runtime.lifecycle.windowStageEventCallback.onAbilityCreate(restoredState);
+        } catch (e) {
+          hilog.error(
+            DOMAIN,
+            "NativeAbility",
+            "onAbilityCreate failed for %{public}s: %{public}s",
+            runtime.moduleName,
+            String(e),
+          );
         }
-        const pushed = this.moduleRuntimes.some((r) => r.moduleName === moduleName);
-        if (!pushed) {
-          // The throw predates this module's runtime push — forEachLifecycle
-          // below would never reach it.
-          try {
-            lifecycle.windowStageEventCallback.onAbilityDestroy();
-          } catch (e2) {
-            hilog.error(DOMAIN, 'NativeAbility', 'onAbilityDestroy (failed module %{public}s) failed: %{public}s', moduleName, String(e2));
-          }
+        // Mirror onNewWant: feed the cold-start want.uri into the Rust-side
+        // INITIAL_WANT_URI Mutex via the NAPI on_ability_create_with_want closure
+        // (lifecycle.rs → store_initial_want_uri). Without this, deep-link
+        // getCurrent() lazy-take returns null on cold start.
+        // isContinuation/parametersJson additionally feed the Rust-side continuation
+        // storage (app.rs CONTINUATION_RESTORE/CONTINUATION_DATA) for cross-device
+        // app-continuation restore; launchReason is compared symbolically here (never
+        // sent as a raw number across the bridge).
+        try {
+          const isContinuation =
+            launchParam.launchReason === AbilityConstant.LaunchReason.CONTINUATION;
+          runtime.lifecycle.windowStageEventCallback.onAbilityCreateWithWant({
+            uri: want.uri ?? "",
+            isContinuation,
+            parametersJson: JSON.stringify(want.parameters ?? {}),
+          });
+        } catch (e) {
+          hilog.error(
+            DOMAIN,
+            "NativeAbility",
+            "onAbilityCreateWithWant failed for %{public}s: %{public}s",
+            runtime.moduleName,
+            String(e),
+          );
         }
-        this.forEachLifecycle((l) => l.windowStageEventCallback.onAbilityDestroy());
-        // Prevent the real onDestroy from double-dispatching Event::Destroy to the
-        // same modules (onDestroy's dispatch is not gated by acceptingLifecycle).
-        // onDestroy still runs its own session teardown (dispose) normally.
+      }
+
+      const abilityActivations: Promise<void>[] = [];
+      for (const runtime of initializedRuntimes) {
+        abilityActivations.push(
+          BridgeHostRegistry.activateAbility(sessionId, runtime.moduleName, {
+            kind: "ability-create",
+            payload: new BridgeAbilityCreateLifecyclePayload(
+              restoredStateMap[runtime.moduleName] ?? fallbackState,
+            ),
+          }),
+        );
+      }
+      await Promise.all(abilityActivations);
+      this.assertInitializationActive(generation);
+      // Publish only a fully initialized session. DefaultXComponent must never observe a host
+      // whose native module has not attached its bridge endpoints and lifecycle sinks yet.
+      this.updateAppStorage("bridgeSessionId", sessionId);
+    } catch (error) {
+      // Promise.all may reject while another module's install hook is still active. Close every
+      // host first so no late hook can enter Rust while its bridge is being released below.
+      BridgeHostRegistry.beginClosing(sessionId);
+      for (const runtime of initializedRuntimes.slice().reverse()) {
+        try {
+          runtime.lifecycle.windowStageEventCallback.onAbilityDestroy();
+        } catch {}
+      }
+      this.releaseModuleBridges(initializedRuntimes);
+      await BridgeHostRegistry.dispose(sessionId);
+      if (this.bridgeSessionId === sessionId) {
+        this.bridgeSessionId = "";
         this.moduleRuntimes = [];
-        return;
+        this.updateAppStorage("bridgeSessionId", "");
       }
-    }
-
-    this.acceptingLifecycle = true;
-  }
-
-  private enqueueLifecycleOperation(label: string, op: () => Promise<void>): Promise<void> {
-    return this.lifecycleQueue.enqueue(label, op);
-  }
-
-  private async notifyBridgeLifecycle(event: BridgeLifecycleEvent): Promise<void> {
-    for (const runtime of this.moduleRuntimes) {
-      await BridgeHostRegistry.emitLifecycle(this.bridgeSessionId, runtime.moduleName, event);
+      throw new Error(`Unable to initialize native Ability session: ${String(error)}`);
     }
   }
 
-  private detachWindowListeners(): void {
-    if (!this.bridgeSessionId) {
-      return;
-    }
-    for (const runtime of this.moduleRuntimes) {
-      try {
-        BridgeHostRegistry.invalidateWindowStage(this.bridgeSessionId, runtime.moduleName);
-      } catch (e) {
-        hilog.warn(DOMAIN, 'NativeAbility', 'invalidateWindowStage failed for %{public}s: %{public}s', runtime.moduleName, String(e));
-      }
+  private assertInitializationActive(generation: number): void {
+    if (!this.acceptingLifecycle || generation !== this.abilityGeneration) {
+      throw new Error("Native Ability session initialization was cancelled by lifecycle teardown");
     }
   }
 
-  private async destroyWindowStageIfActive(): Promise<void> {
-    if (!this.windowStageActive || !this.bridgeSessionId) {
-      return;
+  private assertWindowStageActive(generation: number): void {
+    if (!this.acceptingLifecycle || generation !== this.windowStageGeneration) {
+      throw new Error("WindowStage creation was cancelled by lifecycle teardown");
     }
-    for (const runtime of this.moduleRuntimes) {
-      await BridgeHostRegistry.clearWindowStage(this.bridgeSessionId, runtime.moduleName);
-    }
-    this.windowStageActive = false;
+  }
+
+  /**
+   * Adds framework or subclass work to the one Ability-scoped lifecycle queue. OpenHarmony does
+   * not await onCreate/onWindowStageCreate/onWindowStageDestroy, so those callbacks only capture
+   * their arguments synchronously; this queue is the actual ordering barrier.
+   */
+  protected enqueueLifecycleOperation(
+    label: string,
+    operation: () => Promise<void>,
+  ): Promise<void> {
+    void this.lifecycleQueue.enqueue(label, operation);
+    return this.lifecycleQueue.settled();
+  }
+
+  protected parseSavedStateMap(rawState: string): Record<string, string> {
+    return AbilityStateCodec.decode(rawState);
+  }
+
+  protected serializeSavedStateMap(stateMap: Record<string, string>): string {
+    return AbilityStateCodec.encode(stateMap);
+  }
+
+  // Delegates to ProcessInitializer so the sdkApiVersion/distributionOSApiVersion fields
+  // survive: the #[ability] derive feeds them into version::init and every API-level
+  // gate on the Rust side. The base main-line context (basePath/prefPath/locales/
+  // resourceManager) is built there too, so there is exactly one construction site.
+  protected createInitContext(moduleName: string): AbilityInitContext {
+    return ProcessInitializer.createInitContext(
+      this.context as common.UIAbilityContext,
+      moduleName,
+    );
+  }
+
+  /**
+   * Wires both scoped ArkTS -> Rust ports immediately after module.init. The lifecycle sink lets
+   * BridgeHost serialize UI readiness with ArkTS plugin installation instead of relying on
+   * Promise microtask timing in DefaultXComponent.
+   */
+  private attachBridgeSinks(sessionId: string, moduleName: string, module: Module): void {
+    const mainThreadSink =
+      typeof module.onBridgeSyncEvent === "function"
+        ? (
+            pluginId: string,
+            event: string,
+            requestTypeName: string,
+            responseTypeName: string,
+            value: ESObject,
+          ): ESObject =>
+            module.onBridgeSyncEvent!(pluginId, event, requestTypeName, responseTypeName, value)
+        : undefined;
+    const lifecycleSink =
+      typeof module.onBridgeLifecycle === "function"
+        ? (kind: string): void => module.onBridgeLifecycle!(kind)
+        : undefined;
+    BridgeHostRegistry.attachEventSink(sessionId, moduleName, mainThreadSink, lifecycleSink);
+  }
+
+  /**
+   * Creates the Ability-session transport for one native module. It deliberately lives here,
+   * not in DefaultXComponent: ability-only plugins must work before a render surface appears and
+   * must survive a component disappear/reappear cycle within the same Ability.
+   */
+  private createBridgeBindings(sessionId: string, moduleName: string): BridgeBindings {
+    return {
+      bridgeInvoke: async (
+        pluginId: string,
+        action: string,
+        requestTypeName: string,
+        responseTypeName: string,
+        value: ESObject,
+        timeoutMs: number,
+      ): Promise<ESObject> => {
+        return await BridgeHostRegistry.invokeAsync(
+          sessionId,
+          moduleName,
+          pluginId,
+          action,
+          requestTypeName,
+          responseTypeName,
+          value,
+          timeoutMs,
+        );
+      },
+      bridgeInvokeSync: (
+        pluginId: string,
+        action: string,
+        requestTypeName: string,
+        responseTypeName: string,
+        value: ESObject,
+      ): ESObject => {
+        return BridgeHostRegistry.invokeSync(
+          sessionId,
+          moduleName,
+          pluginId,
+          action,
+          requestTypeName,
+          responseTypeName,
+          value,
+        );
+      },
+      // MainThreadScheduler runs the Rust closure inside this TSFN callback before invoking this
+      // no-op function. It intentionally carries no component or capability state.
+      bridgeDispatch: (): void => {},
+    };
   }
 
   private releaseModuleBridges(runtimes: NativeModuleRuntime[]): void {
-    for (const runtime of runtimes) {
+    for (const runtime of runtimes.slice().reverse()) {
       try {
         runtime.module.disposeBridge(runtime.bridgeOwner);
       } catch (e) {
-        hilog.warn(DOMAIN, 'NativeAbility', 'disposeBridge failed for %{public}s: %{public}s', runtime.moduleName, String(e));
+        hilog.warn(
+          DOMAIN,
+          "NativeAbility",
+          "disposeBridge failed for %{public}s: %{public}s",
+          runtime.moduleName,
+          String(e),
+        );
       }
     }
   }
 
-  private updateAppStorage(key: string, value: string): void {
-    AppStorage.setOrCreate(key, value);
+  protected async notifyBridgeLifecycle(event: BridgeLifecycleEvent): Promise<void> {
+    const sessionId = this.bridgeSessionId;
+    if (!sessionId) {
+      return;
+    }
+    const deliveries: Promise<void>[] = [];
+    for (const runtime of this.moduleRuntimes) {
+      deliveries.push(this.notifyModuleBridgeLifecycle(sessionId, runtime.moduleName, event));
+    }
+    await Promise.all(deliveries);
   }
 
-  private serializeSavedStateMap(map: Record<string, string>): string {
-    return AbilityStateCodec.encode(map);
+  private async notifyModuleBridgeLifecycle(
+    sessionId: string,
+    moduleName: string,
+    event: BridgeLifecycleEvent,
+  ): Promise<void> {
+    try {
+      await BridgeHostRegistry.emitLifecycle(sessionId, moduleName, event);
+    } catch (e) {
+      hilog.error(
+        DOMAIN,
+        "NativeAbility",
+        "bridge lifecycle '%{public}s' failed for %{public}s: %{public}s",
+        event.kind,
+        moduleName,
+        String(e),
+      );
+    }
   }
 
+  onWindowStageCreate(windowStage: window.WindowStage): void {
+    if (!this.acceptingLifecycle) {
+      return;
+    }
+    const generation = ++this.windowStageGeneration;
+    void this.enqueueLifecycleOperation("window-stage-create", async (): Promise<void> => {
+      this.assertWindowStageActive(generation);
+      const sessionId = this.bridgeSessionId;
+      if (!sessionId) {
+        throw new Error("Bridge session is unavailable during window-stage-create");
+      }
+
+      // First inject the ArkTS WindowStage object. Rust readiness is then advanced before ArkTS
+      // plugin installation/lifecycle delivery can emit a synchronous event back into Rust.
+      const stageAssignments: Promise<void>[] = [];
+      for (const runtime of this.moduleRuntimes) {
+        stageAssignments.push(
+          BridgeHostRegistry.setWindowStage(sessionId, runtime.moduleName, windowStage),
+        );
+      }
+      await Promise.all(stageAssignments);
+      this.assertWindowStageActive(generation);
+      this.forEachLifecycle((lifecycle) =>
+        lifecycle.windowStageEventCallback.onWindowStageCreate(),
+      );
+      this.windowStageActive = true;
+      await this.notifyBridgeLifecycle({
+        kind: "window-stage-create",
+        payload: new BridgeEmptyLifecyclePayload(),
+      });
+      this.assertWindowStageActive(generation);
+
+      // ── OHOS platform wiring (adaptation line) ──
+      // Everything in this block must run after the bridge window-stage assignment +
+      // window-stage-create lifecycle above (plugins may resolve windows / emit reverse
+      // events into Rust) and before the page content loads at the bottom of this queue
+      // operation, so the WindowManager registry and the menubar are ready when the first
+      // component attaches.
+      WindowManager.getInstance().registerUIAbilityStage(0, windowStage, this.context, false);
+      hilog.info(DOMAIN, "NativeAbility", "onWindowStageCreate: windowId=0 transparent=false");
+
+      // WindowManager doesn't hold a lifecycle reference, so it exposes a single
+      // rectChangeCallback that createSubWindow's per-window windowRectChange handler
+      // invokes. Here we wire it to fan out to every lifecycle (same forEachLifecycle
+      // pattern as the main-window registrations below). The wrapped options already
+      // carry the windowId.
+      WindowManager.getInstance().registerRectChangeCallback((wrapped: WindowRectEventWrap) => {
+        this.forEachLifecycle((lifecycle) =>
+          lifecycle.windowStageEventCallback.onWindowRectChange(wrapped),
+        );
+      });
+
+      try {
+        this.observedWindowStage = windowStage;
+        windowStage.on("windowStageEvent", this.onWindowStageEvent);
+      } catch (e) {
+        hilog.error(DOMAIN, "NativeAbility", "windowStage.on failed: %{public}s", String(e));
+      }
+
+      let win: window.Window | null = null;
+      try {
+        win = await windowStage.getMainWindow();
+      } catch (e) {
+        hilog.error(DOMAIN, "NativeAbility", "getMainWindow failed: %{public}s", String(e));
+        win = null;
+      }
+
+      if (win) {
+        try {
+          win.on("windowSizeChange", (size: window.Size) => {
+            // Phase 3 (design.md D2/D3): wrap with typed interface and route through
+            // per-window(0) throttle (leading+trailing 16ms). windowId=0 = main window.
+            // Double-registration dedup: BridgeHost also registers onSizeChange for the
+            // same windowId=0 — the throttle merges both sources automatically.
+            const wrapped: WindowSizeEventWrap = {
+              windowId: 0,
+              width: size.width,
+              height: size.height,
+            };
+            WindowManager.getInstance().throttledRectDispatch(
+              0,
+              wrapped,
+              (w: object) => {
+                this.forEachLifecycle((lifecycle) =>
+                  lifecycle.windowStageEventCallback.onWindowSizeChange(w),
+                );
+              },
+              "size",
+            );
+          });
+          win.on("windowRectChange", (options: window.RectChangeOptions) => {
+            // Phase 3 (design.md D3): RECOVER→menubar logic stays synchronous (UI logic,
+            // not throttled — must respond immediately on fullscreen exit).
+            if (options.reason === window.RectChangeReason.RECOVER) {
+              const cb = getMenuDataCallback("main");
+              cb?.onMenubarVisible?.(true);
+            }
+            // Phase 3 (design.md D2/D5): rect dispatch through per-window(0) throttle.
+            // Deep-copy rect fields (not system object ref) per design.md D5.
+            const wrapped: WindowRectEventWrap = {
+              windowId: 0,
+              reason: options.reason,
+              rect: {
+                left: options.rect.left,
+                top: options.rect.top,
+                width: options.rect.width,
+                height: options.rect.height,
+              },
+            };
+            WindowManager.getInstance().throttledRectDispatch(
+              0,
+              wrapped,
+              (w: object) => {
+                this.forEachLifecycle((lifecycle) =>
+                  lifecycle.windowStageEventCallback.onWindowRectChange(w),
+                );
+              },
+              "rect",
+            );
+          });
+          win.on("avoidAreaChange", (options: window.AvoidAreaOptions) => {
+            this.forEachLifecycle((lifecycle) =>
+              lifecycle.windowStageEventCallback.onAvoidAreaChange(options),
+            );
+          });
+          win.on("keyboardHeightChange", (height) => {
+            this.forEachLifecycle((lifecycle) =>
+              lifecycle.keyboardEventCallback.onKeyboardHeightChange(height),
+            );
+          });
+          // 回灌系统窗口状态到 tao 镜像位(问题五 5.3):
+          // 最大化/最小化/全屏/悬浮等系统状态变化经 notifyWindowStatus NAPI 入队,
+          // runtime-wry drain 后用真实 windowId 路由到对应 tao Window 更新镜像位。
+          // API 11+;不支持则静默降级(不比现状差)。详见 doc/OHOS窗口遗留问题.md。
+          try {
+            win.on("windowStatusChange", (statusType: window.WindowStatusType) => {
+              const nativeModule: Module | undefined =
+                AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+              if (nativeModule && typeof nativeModule.notifyWindowStatus === "function") {
+                // 本地单 UIAbility 架构:主窗口恒为 tao windowId=0(upstream 的
+                // readWindowId() 首实例也返回 0);runtime-wry 按 tao window_id 路由。
+                nativeModule.notifyWindowStatus(0, statusType);
+              }
+            });
+            // seed 初始态(官方 updateWindowInfo 模式),避免漏掉注册前状态。
+            const initialStatus = win.getWindowStatus();
+            const nativeModule: Module | undefined =
+              AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+            if (nativeModule && typeof nativeModule.notifyWindowStatus === "function") {
+              nativeModule.notifyWindowStatus(0, initialStatus);
+            }
+          } catch (e) {
+            hilog.warn(
+              DOMAIN,
+              "NativeAbility",
+              "windowStatusChange registration failed: %{public}s",
+              String(e),
+            );
+          }
+        } catch (e) {
+          hilog.error(
+            DOMAIN,
+            "NativeAbility",
+            "Window event registration failed: %{public}s",
+            String(e),
+          );
+        }
+      }
+
+      // Transparent window background/container color is applied in
+      // DefaultXComponent.aboutToAppear (window fully ready there). The transparent
+      // flag is stored in WindowManager.registerUIAbilityStage and applied via
+      // WindowManager.applyTransparentBackground(windowId) in aboutToAppear.
+      try {
+        this.setupMenuPopup(windowStage);
+      } catch (menuErr) {
+        hilog.error(DOMAIN, "NativeAbility", "setupMenuPopup threw: %{public}s", String(menuErr));
+      }
+
+      await this.loadWindowStageContent(windowStage);
+      this.assertWindowStageActive(generation);
+    });
+  }
+
+  // App-continuation target-side restore entry. When the system launches the target
+  // Ability for a continuation it calls onWindowStageRestore instead of
+  // onWindowStageCreate (verified on MateBook Pro OpenHarmony 6.1.0: cold-start
+  // continuation also goes through this callback). Tauri does not use ArkUI
+  // page-stack auto-restore — the continuation payload is a custom JSON route
+  // (source onContinue → continuationData, target onCreate → onAbilityCreateWithWant
+  // stores it in Rust) — so this must do the same loadContentByName + bridge
+  // windowStage wiring as onWindowStageCreate, or the window stays empty →
+  // SetUIContent timeout → white screen (app icon only).
+  // Cold-start continuation: windowStageActive=false (onCreate does not set it) →
+  // full setup. Warm continuation: windowStageActive=true (onWindowStageCreate
+  // already ran the setup) → skip to avoid a duplicate load.
+  // The signature must match the base UIAbility.onWindowStageRestore:
+  // (windowStage) => void (no want/launchParam, not async).
+  onWindowStageRestore(windowStage: window.WindowStage): void {
+    if (this.windowStageActive) {
+      hilog.info(
+        DOMAIN,
+        "NativeAbility",
+        "onWindowStageRestore: stage already active (warm continuation), skipping full setup",
+      );
+      return;
+    }
+    hilog.info(
+      DOMAIN,
+      "NativeAbility",
+      "onWindowStageRestore: cold continuation, delegating to window-stage setup",
+    );
+    void this.onWindowStageCreate(windowStage);
+  }
+
+  onWindowStageDestroy(): void {
+    if (!this.acceptingLifecycle) {
+      return;
+    }
+    this.windowStageGeneration += 1;
+    this.detachWindowListeners();
+    try {
+      WindowManager.getInstance().unregisterUIAbilityStage(0);
+    } catch (e) {
+      hilog.error(
+        DOMAIN,
+        "NativeAbility",
+        "onWindowStageDestroy cleanup failed: %{public}s",
+        String(e),
+      );
+    }
+    const sessionId = this.bridgeSessionId;
+    if (sessionId) {
+      for (const runtime of this.moduleRuntimes) {
+        try {
+          BridgeHostRegistry.invalidateWindowStage(sessionId, runtime.moduleName);
+        } catch (e) {
+          hilog.warn(
+            DOMAIN,
+            "NativeAbility",
+            "invalidateWindowStage failed for %{public}s: %{public}s",
+            runtime.moduleName,
+            String(e),
+          );
+        }
+      }
+    }
+    // No explicit notifyBridgeLifecycle("window-stage-destroy") here: the queued
+    // destroyWindowStageIfActive → BridgeHost.clearWindowStage already delivers the
+    // window-stage-destroy lifecycle to every ArkTS plugin and runs
+    // forEachLifecycle(onWindowStageDestroy) (→ Rust) below.
+    void this.enqueueLifecycleOperation("window-stage-destroy", async (): Promise<void> => {
+      await this.destroyWindowStageIfActive();
+    });
+  }
+
+  private async destroyWindowStageIfActive(): Promise<void> {
+    if (!this.windowStageActive) {
+      return;
+    }
+    this.windowStageActive = false;
+    this.detachWindowListeners();
+    const sessionId = this.bridgeSessionId;
+    if (sessionId) {
+      const stageClears: Promise<void>[] = [];
+      for (const runtime of this.moduleRuntimes) {
+        stageClears.push(BridgeHostRegistry.clearWindowStage(sessionId, runtime.moduleName));
+      }
+      await Promise.all(stageClears);
+    }
+    for (const runtime of this.moduleRuntimes) {
+      try {
+        runtime.module.disposeAllRenders();
+      } catch {}
+    }
+    this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onWindowStageDestroy());
+  }
+
+  private detachWindowListeners(): void {
+    const windowStage = this.observedWindowStage;
+    this.observedWindowStage = undefined;
+    if (windowStage !== undefined) {
+      try {
+        windowStage.off("windowStageEvent", this.onWindowStageEvent);
+      } catch {}
+    }
+  }
+
+  /**
+   * Loads application content inside the framework's WindowStage lifecycle transaction. Override
+   * this instead of starting detached Promise work from the platform callback.
+   */
   protected async loadWindowStageContent(windowStage: window.WindowStage): Promise<void> {
-    await windowStage.loadContentByName(Entry.RouteName);
+    if (this.defaultPage) {
+      try {
+        await windowStage.loadContentByName(Entry.RouteName);
+      } catch (error) {
+        throw new Error(`Unable to load default WindowStage content: ${String(error)}`);
+      }
+    }
   }
 
   private setupMenuPopup(windowStage: window.WindowStage): void {
@@ -285,7 +797,7 @@ export class NativeAbility extends UIAbility {
     // registration body never executed (the Rust side discarded the callback);
     // the stub has been deleted (issue #87 major-4), so probe isDesktopDevice
     // instead, which setupMenuPopup itself needs at the line below.
-    if (!primaryModule || typeof primaryModule.isDesktopDevice !== 'function') {
+    if (!primaryModule || typeof primaryModule.isDesktopDevice !== "function") {
       return;
     }
 
@@ -302,18 +814,29 @@ export class NativeAbility extends UIAbility {
     // menu plugin is already register_plugin'd (the tray backend's set_ohos_app) + in
     // EntryAbility.bridgePlugins, so the host is active once the menubar is set.
     const emitMenuEventFn: (menuId: string, windowId?: string) => void = (menuId, windowId) => {
-      hilog.info(DOMAIN, 'NativeAbility', 'emitMenuEventFn ENTER menuId=%{public}s windowId=%{public}s', menuId, windowId ?? 'main');
+      hilog.info(
+        DOMAIN,
+        "NativeAbility",
+        "emitMenuEventFn ENTER menuId=%{public}s windowId=%{public}s",
+        menuId,
+        windowId ?? "main",
+      );
       try {
         BridgeHostRegistry.invokeNativeSyncProcessWide(
-          'ohos.menu',
-          'menu-click',
-          'ohos.menu.MenuClickEvent',
-          'std.bool',
-          { menuId, windowId: windowId ?? 'main' },
+          "ohos.menu",
+          "menu-click",
+          "ohos.menu.MenuClickEvent",
+          "std.bool",
+          { menuId, windowId: windowId ?? "main" },
         );
-        hilog.info(DOMAIN, 'NativeAbility', 'emitMenuEventFn forwarded menuId=%{public}s ok', menuId);
+        hilog.info(
+          DOMAIN,
+          "NativeAbility",
+          "emitMenuEventFn forwarded menuId=%{public}s ok",
+          menuId,
+        );
       } catch (e) {
-        hilog.warn(DOMAIN, 'NativeAbility', 'emitMenuEvent forward failed: %{public}s', String(e));
+        hilog.warn(DOMAIN, "NativeAbility", "emitMenuEvent forward failed: %{public}s", String(e));
       }
     };
 
@@ -325,12 +848,12 @@ export class NativeAbility extends UIAbility {
     executor.setContext(this.context as common.UIAbilityContext);
     setPredefinedActionExecutor(executor);
     executor.setShowAboutFn((metadata: AboutMetadataData) => {
-      const appName = metadata.name ?? '';
-      const appVersion = metadata.version ?? '';
-      const appCopyright = metadata.copyright ?? '';
-      const appAuthors = metadata.authors?.join(', ') ?? '';
-      const appComments = metadata.comments ?? '';
-      const appWebsite = metadata.website ?? '';
+      const appName = metadata.name ?? "";
+      const appVersion = metadata.version ?? "";
+      const appCopyright = metadata.copyright ?? "";
+      const appAuthors = metadata.authors?.join(", ") ?? "";
+      const appComments = metadata.comments ?? "";
+      const appWebsite = metadata.website ?? "";
 
       const lines: string[] = [];
       if (appName) lines.push(appName);
@@ -339,8 +862,8 @@ export class NativeAbility extends UIAbility {
       if (appAuthors) lines.push(`Authors: ${appAuthors}`);
       if (appComments) lines.push(appComments);
       if (appWebsite) lines.push(appWebsite);
-      const message = lines.join('\n');
-      const title = appName || 'About';
+      const message = lines.join("\n");
+      const title = appName || "About";
 
       try {
         const uiContext = mainWindow.getUIContext();
@@ -349,19 +872,25 @@ export class NativeAbility extends UIAbility {
           message: message,
           autoCancel: true,
           confirm: {
-            value: 'OK',
+            value: "OK",
             action: () => {},
           },
         });
       } catch (e) {
-        hilog.error(DOMAIN, 'NativeAbility', 'Show about dialog failed: %{public}s', String(e));
+        hilog.error(DOMAIN, "NativeAbility", "Show about dialog failed: %{public}s", String(e));
       }
     });
 
     const menuManager = new MenuManager(executor, emitMenuEventFn);
 
     setMenuClickHandler(0, (item) => {
-      hilog.info(DOMAIN, 'NativeAbility', 'menuClickHandler invoked id=%{public}s type=%{public}s', item.id, item.type);
+      hilog.info(
+        DOMAIN,
+        "NativeAbility",
+        "menuClickHandler invoked id=%{public}s type=%{public}s",
+        item.id,
+        item.type,
+      );
       menuManager.handleItemClick(item);
     });
 
@@ -382,195 +911,6 @@ export class NativeAbility extends UIAbility {
     // on_menu_request stub discarded the callback (`let _ = callback`). All three
     // of its branches (menubar visibility / popup / menubar json) are served by
     // the MenuPlugin bridge actions set-menubar / popup / set-menubar-visible.
-  }
-
-  async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
-    this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onWindowStageCreate());
-
-    WindowManager.getInstance().registerUIAbilityStage(0, windowStage, this.context, false);
-    hilog.info(DOMAIN, 'NativeAbility', 'onWindowStageCreate: windowId=0 transparent=false');
-
-    // Phase 2 (design.md D3 注入小节): WindowManager doesn't hold a lifecycle reference,
-    // so it exposes a single rectChangeCallback that createSubWindow's per-window
-    // windowRectChange handler invokes. Here we wire it to fan out to every lifecycle
-    // (same forEachLifecycle pattern as the main-window registrations above). The
-    // wrapped options already carry the windowId.
-    WindowManager.getInstance().registerRectChangeCallback((wrapped: WindowRectEventWrap) => {
-      this.forEachLifecycle((lifecycle) =>
-        lifecycle.windowStageEventCallback.onWindowRectChange(wrapped),
-      );
-    });
-
-    // Inject the WindowStage into the bridge session so plugins requiring a
-    // window-stage context (e.g. window/webview) can install before the page renders.
-    if (this.bridgeSessionId) {
-      hilog.debug(DOMAIN, 'NativeAbility', 'setWindowStage loop: runtimes=%{public}d sess=%{public}s', this.moduleRuntimes.length, this.bridgeSessionId);
-      for (const runtime of this.moduleRuntimes) {
-        try {
-          await BridgeHostRegistry.setWindowStage(this.bridgeSessionId, runtime.moduleName, windowStage);
-        } catch (e) {
-          hilog.error(DOMAIN, 'NativeAbility', 'setWindowStage failed for %{public}s: %{public}s', runtime.moduleName, String(e));
-        }
-      }
-      this.windowStageActive = true;
-      try {
-        await this.notifyBridgeLifecycle({
-          kind: "window-stage-create",
-          payload: new BridgeEmptyLifecyclePayload(),
-        });
-      } catch (e) {
-        hilog.error(DOMAIN, 'NativeAbility', 'window-stage-create lifecycle failed: %{public}s', String(e));
-      }
-    }
-
-    try {
-      windowStage.on("windowStageEvent", (event: window.WindowStageEventType) => {
-        this.forEachLifecycle((lifecycle) =>
-          lifecycle.windowStageEventCallback.onWindowStageEvent(event),
-        );
-      });
-    } catch (e) {
-      hilog.error(DOMAIN, 'NativeAbility', 'windowStage.on failed: %{public}s', String(e));
-    }
-
-    let win: window.Window | null = null;
-    try {
-      win = await windowStage.getMainWindow();
-    } catch (e) {
-      hilog.error(DOMAIN, 'NativeAbility', 'getMainWindow failed: %{public}s', String(e));
-      win = null;
-    }
-
-    if (win) {
-      try {
-        win.on("windowSizeChange", (size: window.Size) => {
-          // Phase 3 (design.md D2/D3): wrap with typed interface and route through
-          // per-window(0) throttle (leading+trailing 16ms). windowId=0 = main window.
-          // Double-registration dedup: BridgeHost also registers onSizeChange for the
-          // same windowId=0 — the throttle merges both sources automatically.
-          const wrapped: WindowSizeEventWrap = { windowId: 0, width: size.width, height: size.height };
-          WindowManager.getInstance().throttledRectDispatch(0, wrapped, (w: object) => {
-            this.forEachLifecycle((lifecycle) =>
-              lifecycle.windowStageEventCallback.onWindowSizeChange(w),
-            );
-          }, 'size');
-        });
-        win.on("windowRectChange", (options: window.RectChangeOptions) => {
-          // Phase 3 (design.md D3): RECOVER→menubar logic stays synchronous (UI logic,
-          // not throttled — must respond immediately on fullscreen exit).
-          if (options.reason === window.RectChangeReason.RECOVER) {
-            const cb = getMenuDataCallback("main");
-            cb?.onMenubarVisible?.(true);
-          }
-          // Phase 3 (design.md D2/D5): rect dispatch through per-window(0) throttle.
-          // Deep-copy rect fields (not system object ref) per design.md D5.
-          const wrapped: WindowRectEventWrap = {
-            windowId: 0,
-            reason: options.reason,
-            rect: { left: options.rect.left, top: options.rect.top, width: options.rect.width, height: options.rect.height }
-          };
-          WindowManager.getInstance().throttledRectDispatch(0, wrapped, (w: object) => {
-            this.forEachLifecycle((lifecycle) =>
-              lifecycle.windowStageEventCallback.onWindowRectChange(w),
-            );
-          }, 'rect');
-        });
-        win.on("avoidAreaChange", (options: window.AvoidAreaOptions) => {
-          this.forEachLifecycle((lifecycle) =>
-            lifecycle.windowStageEventCallback.onAvoidAreaChange(options),
-          );
-        });
-        win.on("keyboardHeightChange", (height) => {
-          this.forEachLifecycle((lifecycle) =>
-            lifecycle.keyboardEventCallback.onKeyboardHeightChange(height),
-          );
-        });
-        // 回灌系统窗口状态到 tao 镜像位(问题五 5.3):
-        // 最大化/最小化/全屏/悬浮等系统状态变化经 notifyWindowStatus NAPI 入队,
-        // runtime-wry drain 后用真实 windowId 路由到对应 tao Window 更新镜像位。
-        // API 11+;不支持则静默降级(不比现状差)。详见 doc/OHOS窗口遗留问题.md。
-        try {
-          win.on("windowStatusChange", (statusType: window.WindowStatusType) => {
-            const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
-            if (nativeModule && typeof nativeModule.notifyWindowStatus === 'function') {
-              // 本地单 UIAbility 架构:主窗口恒为 tao windowId=0(upstream 的
-              // readWindowId() 首实例也返回 0);runtime-wry 按 tao window_id 路由。
-              nativeModule.notifyWindowStatus(0, statusType);
-            }
-          });
-          // seed 初始态(官方 updateWindowInfo 模式),避免漏掉注册前状态。
-          const initialStatus = win.getWindowStatus();
-          const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
-          if (nativeModule && typeof nativeModule.notifyWindowStatus === 'function') {
-            nativeModule.notifyWindowStatus(0, initialStatus);
-          }
-        } catch (e) {
-          hilog.warn(DOMAIN, 'NativeAbility', 'windowStatusChange registration failed: %{public}s', String(e));
-        }
-      } catch (e) {
-        hilog.error(DOMAIN, 'NativeAbility', 'Window event registration failed: %{public}s', String(e));
-      }
-    }
-
-    if (this.defaultPage) {
-      try {
-        await this.loadWindowStageContent(windowStage);
-      } catch (e) {
-        hilog.error(DOMAIN, 'NativeAbility', 'loadWindowStageContent failed: %{public}s', String(e));
-      }
-    }
-
-    // Transparent window background/container color is applied in
-    // DefaultXComponent.aboutToAppear (window fully ready there). The transparent
-    // flag is stored in WindowManager.registerUIAbilityStage and applied via
-    // WindowManager.applyTransparentBackground(windowId) in aboutToAppear.
-
-    try {
-      this.setupMenuPopup(windowStage);
-    } catch (menuErr) {
-      console.error(`[Menu] setupMenuPopup threw: ${menuErr}`);
-    }
-  }
-
-  // App-continuation target-side restore entry. When the system launches the target
-  // Ability for a continuation it calls onWindowStageRestore instead of
-  // onWindowStageCreate (verified on MateBook Pro OpenHarmony 6.1.0: cold-start
-  // continuation also goes through this callback). Tauri does not use ArkUI
-  // page-stack auto-restore — the continuation payload is a custom JSON route
-  // (source onContinue → continuationData, target onCreate → onAbilityCreateWithWant
-  // stores it in Rust) — so this must do the same loadContentByName + bridge
-  // windowStage wiring as onWindowStageCreate, or the window stays empty →
-  // SetUIContent timeout → white screen (app icon only).
-  // Cold-start continuation: windowStageActive=false (onCreate does not set it) →
-  // full setup. Warm continuation: windowStageActive=true (onWindowStageCreate
-  // already ran the setup) → skip to avoid a duplicate load.
-  // The signature must match the base UIAbility.onWindowStageRestore:
-  // (windowStage) => void (no want/launchParam, not async).
-  onWindowStageRestore(windowStage: window.WindowStage): void {
-    if (this.windowStageActive) {
-      hilog.info(DOMAIN, 'NativeAbility', 'onWindowStageRestore: stage already active (warm continuation), skipping full setup');
-      return;
-    }
-    hilog.info(DOMAIN, 'NativeAbility', 'onWindowStageRestore: cold continuation, delegating to window-stage setup');
-    void this.onWindowStageCreate(windowStage);
-  }
-
-  onWindowStageDestroy(): void | Promise<void> {
-    this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onWindowStageDestroy());
-    try {
-      WindowManager.getInstance().unregisterUIAbilityStage(0);
-    } catch (e) {
-      hilog.error(DOMAIN, 'NativeAbility', 'onWindowStageDestroy cleanup failed: %{public}s', String(e));
-    }
-    if (this.bridgeSessionId) {
-      return this.enqueueLifecycleOperation("window-stage-destroy", async (): Promise<void> => {
-        await this.destroyWindowStageIfActive();
-        await this.notifyBridgeLifecycle({
-          kind: "window-stage-destroy",
-          payload: new BridgeEmptyLifecyclePayload(),
-        });
-      });
-    }
   }
 
   onMemoryLevel(level: AbilityConstant.MemoryLevel): void {
@@ -617,6 +957,9 @@ export class NativeAbility extends UIAbility {
           kind: "ability-destroy",
           payload: new BridgeEmptyLifecyclePayload(),
         });
+        // No queue-internal onAbilityDestroy here: the synchronous dispatch above already
+        // sent Event::Destroy to every module; a second dispatch would double-count the
+        // Rust-side destroy path.
       } finally {
         const runtimes = this.moduleRuntimes;
         this.releaseModuleBridges(runtimes);
@@ -630,9 +973,15 @@ export class NativeAbility extends UIAbility {
   }
 
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
-    const uri = want.uri ?? '';
+    const uri = want.uri ?? "";
     const parametersJson = JSON.stringify(want.parameters ?? {});
-    hilog.info(DOMAIN, 'NativeAbility', 'onNewWant - uri: %{public}s, parametersJson.length: %{public}d', uri, parametersJson.length);
+    hilog.info(
+      DOMAIN,
+      "NativeAbility",
+      "onNewWant - uri: %{public}s, parametersJson.length: %{public}d",
+      uri,
+      parametersJson.length,
+    );
 
     // Update the latest want.uri for deep-link get-latest-uri (warm-start
     // relaunch). initialWantUri is intentionally NOT updated — it stays the
@@ -646,7 +995,11 @@ export class NativeAbility extends UIAbility {
     try {
       const wm = WindowManager.getInstance();
       if (wm.hasPendingAction()) {
-        hilog.info(DOMAIN, 'NativeAbility', 'onNewWant detected pending action, cancelling cleanup timer');
+        hilog.info(
+          DOMAIN,
+          "NativeAbility",
+          "onNewWant detected pending action, cancelling cleanup timer",
+        );
         wm.cancelCleanupTimer();
       }
     } catch (e) {
@@ -656,7 +1009,19 @@ export class NativeAbility extends UIAbility {
     // isContinuation marks a warm-start app-continuation restore; consumed by the
     // Rust-side continuation storage (lifecycle.rs → store_continuation).
     const isContinuation = launchParam.launchReason === AbilityConstant.LaunchReason.CONTINUATION;
-    this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onNewWant({ uri, parametersJson, isContinuation }));
+    // acceptingLifecycle guard (main-line style): never dispatch lifecycle callbacks
+    // outside an active session (e.g. after onDestroy has started teardown).
+    if (this.acceptingLifecycle) {
+      this.forEachLifecycle((lifecycle) =>
+        lifecycle.windowStageEventCallback.onNewWant({ uri, parametersJson, isContinuation }),
+      );
+    } else {
+      hilog.warn(
+        DOMAIN,
+        "NativeAbility",
+        "onNewWant skipped lifecycle dispatch: session no longer accepting lifecycle events",
+      );
+    }
   }
 
   // Source-side app-continuation save. The snapshot is PRE-REGISTERED by the JS
@@ -676,12 +1041,17 @@ export class NativeAbility extends UIAbility {
         snapshot = primaryModule.readContinueSnapshot();
       }
     } catch (e) {
-      hilog.error(DOMAIN, 'NativeAbility', 'onContinue - snapshot read failed: %{public}s', String(e));
+      hilog.error(
+        DOMAIN,
+        "NativeAbility",
+        "onContinue - snapshot read failed: %{public}s",
+        String(e),
+      );
       return AbilityConstant.OnContinueResult.MISMATCH;
     }
 
     if (snapshot.length === 0) {
-      hilog.info(DOMAIN, 'NativeAbility', 'onContinue - empty snapshot, refusing (MISMATCH)');
+      hilog.info(DOMAIN, "NativeAbility", "onContinue - empty snapshot, refusing (MISMATCH)");
       return AbilityConstant.OnContinueResult.MISMATCH;
     }
 
@@ -689,7 +1059,12 @@ export class NativeAbility extends UIAbility {
     // → JSON.parse(...).continuationData. Passed through verbatim — the payload
     // schema is an application-level contract.
     wantParam["continuationData"] = snapshot;
-    hilog.info(DOMAIN, 'NativeAbility', 'onContinue - AGREE, snapshot length: %{public}d', snapshot.length);
+    hilog.info(
+      DOMAIN,
+      "NativeAbility",
+      "onContinue - AGREE, snapshot length: %{public}d",
+      snapshot.length,
+    );
     return AbilityConstant.OnContinueResult.AGREE;
   }
 
@@ -716,9 +1091,10 @@ export class NativeAbility extends UIAbility {
 
     for (const runtime of this.moduleRuntimes) {
       try {
-        stateMap[runtime.moduleName] = runtime.lifecycle.windowStageEventCallback.onAbilitySaveState() ?? "";
+        stateMap[runtime.moduleName] =
+          runtime.lifecycle.windowStageEventCallback.onAbilitySaveState() ?? "";
       } catch (e) {
-        hilog.error(DOMAIN, 'NativeAbility', 'onAbilitySaveState failed: %{public}s', String(e));
+        hilog.error(DOMAIN, "NativeAbility", "onAbilitySaveState failed: %{public}s", String(e));
       }
     }
 
@@ -732,5 +1108,10 @@ export class NativeAbility extends UIAbility {
     wantParam[STATE_KEY] = new String(stateToSave);
 
     return AbilityConstant.OnSaveResult.RECOVERY_AGREE;
+  }
+
+  private updateAppStorage<T>(key: string, value: T): void {
+    AppStorage.setOrCreate(key, value);
+    AppStorage.set(key, value);
   }
 }

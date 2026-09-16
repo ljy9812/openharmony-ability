@@ -1,11 +1,11 @@
 /**
  * Menu module type definitions
  */
-import { SymbolGlyphModifier } from '@kit.ArkUI';
+import { SymbolGlyphModifier } from "@kit.ArkUI";
 
 export interface MenuItemData {
   id: string;
-  type: 'item' | 'separator' | 'submenu' | 'predefined' | 'check' | 'icon';
+  type: "item" | "separator" | "submenu" | "predefined" | "check" | "icon";
   text?: string;
   enabled?: boolean;
   accelerator?: string;
@@ -29,16 +29,32 @@ export interface AboutMetadataData {
 }
 
 /**
- * Predefined menu item types, which will be translated to system default menu items with 
+ * Predefined menu item types, which will be translated to system default menu items with
  * corresponding actions.
  */
 export type PredefinedType =
-  | 'separator'
-  | 'copy' | 'cut' | 'paste' | 'selectAll'
-  | 'undo' | 'redo'
-  | 'minimize' | 'maximize' | 'fullscreen' | 'recover' | 'restore' | 'destroyWindow' | 'close'
-  | 'quit' | 'about' | 'hide' | 'hideOthers' | 'showAll'
-  | 'services' | 'bringAllToFront' | 'none';
+  | "separator"
+  | "copy"
+  | "cut"
+  | "paste"
+  | "selectAll"
+  | "undo"
+  | "redo"
+  | "minimize"
+  | "maximize"
+  | "fullscreen"
+  | "recover"
+  | "restore"
+  | "destroyWindow"
+  | "close"
+  | "quit"
+  | "about"
+  | "hide"
+  | "hideOthers"
+  | "showAll"
+  | "services"
+  | "bringAllToFront"
+  | "none";
 
 export interface MenuCreateOptions {
   id?: string;

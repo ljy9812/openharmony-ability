@@ -38,7 +38,12 @@ const restartApp = (): number => {
     return 0;
   } catch (err) {
     const error = err as Error;
-    hilog.error(DOMAIN, "ProcessPlugin", "appRecovery.restartApp failed: %{public}s", error.message);
+    hilog.error(
+      DOMAIN,
+      "ProcessPlugin",
+      "appRecovery.restartApp failed: %{public}s",
+      error.message,
+    );
     return -2;
   }
 };

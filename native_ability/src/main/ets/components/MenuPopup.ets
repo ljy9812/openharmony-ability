@@ -1,5 +1,4 @@
-import { MenuItemData, MenuManager } from '../helper/menu';
-
+import { MenuItemData, MenuManager } from "../helper/menu";
 @Component
 export struct MenuPopup {
   @Prop items: MenuItemData[];
@@ -18,8 +17,8 @@ export struct MenuPopup {
         aboutToDisappear: () => {
           this.isShown = false;
           this.onDisappear?.();
-        }
-      })
+        },
+      });
   }
 
   @Builder
@@ -27,22 +26,22 @@ export struct MenuPopup {
     Menu() {
       ForEach(this.items, (item: MenuItemData) => {
         this.buildMenuItem(item);
-      });
-    }
+      })
+    };
   }
 
   @Builder
   buildMenuItem(item: MenuItemData) {
-    if (item.type === 'separator') {
-      MenuDivider()
-    } else if (item.type === 'item' || item.type === 'predefined') {
-      MenuItem({ content: item.text ?? '', labelInfo: item.accelerator })
+    if (item.type === "separator") {
+      MenuDivider();
+    } else if (item.type === "item" || item.type === "predefined") {
+      MenuItem({ content: item.text ?? "", labelInfo: item.accelerator })
         .enabled(item.enabled ?? true)
         .onClick(() => {
           this.itemClick(item);
         });
-    } else if (item.type === 'check') {
-      MenuItem({ content: item.text ?? '' })
+    } else if (item.type === "check") {
+      MenuItem({ content: item.text ?? "" })
         .enabled(item.enabled ?? true)
         .type(MenuItemType.Check)
         .checked(item.checked ?? false)
@@ -50,16 +49,16 @@ export struct MenuPopup {
           item.checked = checked;
           this.itemClick(item);
         });
-    } else if (item.type === 'icon') {
-      MenuItem({ content: item.text ?? '', labelInfo: item.accelerator })
+    } else if (item.type === "icon") {
+      MenuItem({ content: item.text ?? "", labelInfo: item.accelerator })
         .enabled(item.enabled ?? true)
         .onClick(() => {
           this.itemClick(item);
         });
-    } else if (item.type === 'submenu') {
-      MenuItem({ 
-        content: item.text ?? '',
-        builder: () => this.SubmenuContent(item.submenuItems ?? [])
+    } else if (item.type === "submenu") {
+      MenuItem({
+        content: item.text ?? "",
+        builder: () => this.SubmenuContent(item.submenuItems ?? []),
       });
     }
   }
@@ -69,8 +68,8 @@ export struct MenuPopup {
     Menu() {
       ForEach(items, (item: MenuItemData) => {
         this.buildMenuItem(item);
-      });
-    }
+      })
+    };
   }
 
   itemClick(item: MenuItemData) {

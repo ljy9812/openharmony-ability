@@ -627,21 +627,23 @@ mod tests {
         assert!(!empty_opts.page_begin);
         assert!(!empty_opts.page_end);
 
-        let mut full = WebviewCallbacks::default();
-        full.navigation = Some(Arc::new(|_| true));
-        full.download_start = Some(Arc::new(|_| {
-            crate::WebviewDownloadStartResponse::allow(None)
-        }));
-        full.drag_enter = Some(Arc::new(|_| ()));
-        full.new_window = Some(Arc::new(|_| false));
-        full.page_begin = Some(Arc::new(|_| ()));
-        full.page_end = Some(Arc::new(|_| ()));
-        full.title_change = Some(Arc::new(|_| ()));
-        full.download_end = Some(Arc::new(|_| ()));
-        full.close_window = Some(Arc::new(|| ()));
-        full.https_intercept = Some(Arc::new(|_| {
-            crate::WebviewHttpsInterceptResponse::passthrough()
-        }));
+        let full = WebviewCallbacks {
+            navigation: Some(Arc::new(|_| true)),
+            download_start: Some(Arc::new(|_| {
+                crate::WebviewDownloadStartResponse::allow(None)
+            })),
+            drag_enter: Some(Arc::new(|_| ())),
+            new_window: Some(Arc::new(|_| false)),
+            page_begin: Some(Arc::new(|_| ())),
+            page_end: Some(Arc::new(|_| ())),
+            title_change: Some(Arc::new(|_| ())),
+            download_end: Some(Arc::new(|_| ())),
+            close_window: Some(Arc::new(|| ())),
+            https_intercept: Some(Arc::new(|_| {
+                crate::WebviewHttpsInterceptResponse::passthrough()
+            })),
+            ..Default::default()
+        };
         assert!(!full.is_empty());
         let opts = full.options();
         assert!(opts.navigation_intercept);

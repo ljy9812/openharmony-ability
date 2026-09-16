@@ -1,5 +1,5 @@
 import { accessibility } from "@kit.AccessibilityKit";
-import { BusinessError } from "@kit.BasicServicesKit";
+import { BusinessError, deviceInfo } from "@kit.BasicServicesKit";
 import {
   AsyncPluginBase,
   BridgeCallContext,
@@ -113,13 +113,26 @@ export class AccessibilityPlugin extends AsyncPluginBase {
     }
 
     if (action === "is-open-accessibility") {
-      expectBridgeRequestType(payload, "ohos.accessibility", action, IS_OPEN_ACCESSIBILITY_REQUEST_TYPE);
+      expectBridgeRequestType(
+        payload,
+        "ohos.accessibility",
+        action,
+        IS_OPEN_ACCESSIBILITY_REQUEST_TYPE,
+      );
       // OHOS claims ohos.permission.ACCESSIBILITY (system_core) is required; whether a
       // third-party read-only call is actually rejected is unresolved — surface whatever
       // BusinessError the system throws instead of swallowing it.
       let enabled = false;
+      // isScreenReaderOpenSync is API 18+ while the repo lint floor is 12; older
+      // devices surface a clear error instead of the raw BusinessError from a
+      // missing API. The ESObject access side-steps the (guard-blind) lint check.
+      if (deviceInfo.sdkApiVersion < 18) {
+        throw new Error(
+          `isScreenReaderOpenSync requires API 18+ (current ${deviceInfo.sdkApiVersion})`,
+        );
+      }
       try {
-        enabled = accessibility.isScreenReaderOpenSync();
+        enabled = (accessibility as ESObject).isScreenReaderOpenSync() as boolean;
       } catch (e) {
         const err = e as BusinessError;
         throw new Error(`isScreenReaderOpenSync failed: code=${err.code} msg=${err.message}`);
@@ -134,10 +147,12 @@ export class AccessibilityPlugin extends AsyncPluginBase {
       expectBridgeRequestType(payload, "ohos.accessibility", action, IS_TOUCH_EXPLORE_REQUEST_TYPE);
       let enabled = false;
       try {
-        enabled = await accessibility.isOpenTouchGuide();
+        // isOpenTouchGuide (Promise) deprecated since API 10; the Sync variant
+        // is its documented replacement (@since 10).
+        enabled = accessibility.isOpenTouchGuideSync();
       } catch (e) {
         const err = e as BusinessError;
-        throw new Error(`isOpenTouchGuide failed: code=${err.code} msg=${err.message}`);
+        throw new Error(`isOpenTouchGuideSync failed: code=${err.code} msg=${err.message}`);
       }
       return {
         typeName: IS_TOUCH_EXPLORE_RESPONSE_TYPE,
@@ -156,7 +171,9 @@ export class AccessibilityPlugin extends AsyncPluginBase {
           accessibility.on("screenReaderStateChange", handler);
         } catch (e) {
           const err = e as BusinessError;
-          throw new Error(`on(screenReaderStateChange) failed: code=${err.code} msg=${err.message}`);
+          throw new Error(
+            `on(screenReaderStateChange) failed: code=${err.code} msg=${err.message}`,
+          );
         }
         this.screenReaderHandler = handler;
       }

@@ -2,6 +2,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     fmt::Debug,
+    rc::Rc,
     sync::{
         atomic::{AtomicBool, AtomicI64},
         Arc, Mutex, RwLock,
@@ -10,6 +11,8 @@ use std::{
 
 use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Object, Env, Error, Result};
+use ohos_arkui_binding::component::attribute::ArkUIGesture;
+use ohos_arkui_binding::gesture::inner_gesture::Gesture;
 use ohos_arkui_binding::XComponent;
 use ohos_display_binding::{
     default_display_height, default_display_refresh_rate, default_display_scaled_density,
@@ -22,12 +25,32 @@ use crate::{
     bridge::MainThreadBridgeEndpoint, AvoidArea, AvoidAreaType, BridgeMainThread,
     BridgeMainThreadEvent, BridgePlugin, BridgePluginDeclaration, BridgePluginRegistry,
     BridgeRuntime, Configuration, Event, MainThreadScheduler, OpenHarmonyWaker,
-    PluginLifecycleEvent, Rect,
+    PluginLifecycleEvent, Rect, TouchInputDelivery,
 };
 
 static ID: AtomicI64 = AtomicI64::new(0);
 
 pub(crate) static HAS_EVENT: AtomicBool = AtomicBool::new(false);
+
+#[derive(Clone, Default)]
+struct RenderGestures {
+    handles: Rc<RefCell<Vec<Gesture>>>,
+}
+
+impl RenderGestures {
+    fn replace(&self, gestures: Vec<Gesture>) {
+        *self.handles.borrow_mut() = gestures;
+    }
+
+    fn release(&self, xcomponent: Option<&XComponent>) {
+        for gesture in self.handles.borrow_mut().drain(..) {
+            if let Some(xcomponent) = xcomponent {
+                let _ = xcomponent.remove_gesture(&gesture);
+            }
+            let _ = gesture.dispose();
+        }
+    }
+}
 
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
@@ -62,8 +85,11 @@ impl AbilityInitContext {
 pub struct OpenHarmonyAppInner {
     pub(crate) raw_window: Option<RawWindow>,
     pub(crate) xcomponent: Option<XComponent>,
+    /// ArkUI system gesture handles attached to the active render XComponent.
+    render_gestures: RenderGestures,
     /// Owner token of this native module's one active DefaultXComponent render.
     render_owner: Option<String>,
+    touch_input_delivery: TouchInputDelivery,
     surface_active: bool,
 
     state: Vec<u8>,
@@ -97,8 +123,7 @@ pub struct OpenHarmonyAppInner {
     /// must not re-enter any OpenHarmonyApp API (deadlock). Keep them lock-free:
     /// channel sends / atomics only. Expected to stay LOW-COUNT (one per tao
     /// window); every listener runs on every decor change under the lock.
-    pub(crate) decor_change_callbacks:
-        Vec<(u64, std::sync::Arc<dyn Fn(i32) -> bool + Send + Sync>)>,
+    pub(crate) decor_change_callbacks: Vec<(u64, DecorChangeListener)>,
     next_decor_cb_id: u64,
     pub(crate) avoid_areas: HashMap<AvoidAreaType, AvoidArea>,
     pub(crate) init_context: AbilityInitContext,
@@ -162,7 +187,9 @@ impl OpenHarmonyAppInner {
         OpenHarmonyAppInner {
             raw_window: None,
             xcomponent: None,
+            render_gestures: RenderGestures::default(),
             render_owner: None,
+            touch_input_delivery: TouchInputDelivery::default(),
             surface_active: false,
             state: vec![],
             save_state: false,
@@ -220,7 +247,10 @@ impl OpenHarmonyAppInner {
         if let Some(xcomponent) = self.xcomponent.as_ref() {
             // Callable from embedding apps; a failure here must not abort the
             // process (issue #87 minor-2 — this used to .expect).
-            if let Err(e) = xcomponent.native_xcomponent().set_frame_rate(min, max, expected) {
+            if let Err(e) = xcomponent
+                .native_xcomponent()
+                .set_frame_rate(min, max, expected)
+            {
                 crate::warn!("set_frame_rate({min}, {max}, {expected}) failed: {e:?}");
             }
         }
@@ -314,6 +344,10 @@ impl OpenHarmonyAppInner {
             return None;
         }
         let surface_was_active = self.surface_active;
+        self.render_gestures.release(self.xcomponent.as_ref());
+        if let Some(xcomponent) = self.xcomponent.as_ref() {
+            xcomponent.native_xcomponent().unregister_callbacks();
+        }
         self.render_owner = None;
         self.surface_active = false;
         self.raw_window = None;
@@ -447,6 +481,7 @@ impl OpenHarmonyAppInner {
 
 type EventLoop = Arc<RefCell<Option<Box<dyn FnMut(Event)>>>>;
 type BackPressInterceptor = Arc<RefCell<Option<Box<dyn FnMut() -> bool>>>>;
+type DecorChangeListener = std::sync::Arc<dyn Fn(i32) -> bool + Send + Sync>;
 
 /// Transport endpoints owned by one NativeAbility/module session. This lifetime is deliberately
 /// independent from the module's optional DefaultXComponent render surface.
@@ -627,7 +662,36 @@ impl OpenHarmonyApp {
             .unwrap_or_default()
     }
 
-    pub(crate) fn begin_render(&self, owner: &str, xcomponent: XComponent) -> Result<()> {
+    /// Selects the touch representation delivered by future XComponent renders.
+    ///
+    /// Delivery is frozen for an active render so one physical pointer sequence cannot switch
+    /// representations between its start and end events.
+    pub fn set_touch_input_delivery(&self, delivery: TouchInputDelivery) -> Result<()> {
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|_| Error::from_reason("Failed to configure touch input delivery"))?;
+        if inner.render_owner.is_some() {
+            return Err(Error::from_reason(
+                "Touch input delivery cannot change while a DefaultXComponent render is active",
+            ));
+        }
+        inner.touch_input_delivery = delivery;
+        Ok(())
+    }
+
+    pub fn touch_input_delivery(&self) -> TouchInputDelivery {
+        self.inner
+            .read()
+            .map(|inner| inner.touch_input_delivery)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn begin_render(
+        &self,
+        owner: &str,
+        xcomponent: XComponent,
+    ) -> Result<TouchInputDelivery> {
         let bridge_active = self
             .bridge_session
             .read()
@@ -644,6 +708,20 @@ impl OpenHarmonyApp {
             .map_err(|_| Error::from_reason("Failed to claim native render owner"))?;
         inner.claim_render_owner(owner)?;
         inner.xcomponent = Some(xcomponent);
+        Ok(inner.touch_input_delivery)
+    }
+
+    pub(crate) fn set_render_gestures(&self, owner: &str, gestures: Vec<Gesture>) -> Result<()> {
+        let inner = self
+            .inner
+            .write()
+            .map_err(|_| Error::from_reason("Failed to store native render gestures"))?;
+        if !inner.owns_render(owner) {
+            return Err(Error::from_reason(
+                "Cannot attach gestures to a stale DefaultXComponent render owner",
+            ));
+        }
+        inner.render_gestures.replace(gestures);
         Ok(())
     }
 
@@ -888,10 +966,7 @@ impl OpenHarmonyApp {
     /// id for `remove_decor_change_callback`. The listener runs on the thread
     /// that latched the decor, with the app RwLock held — it must not call back
     /// into OpenHarmonyApp APIs (deadlock); channel sends / atomics only.
-    pub fn register_decor_change_callback(
-        &self,
-        listener: std::sync::Arc<dyn Fn(i32) -> bool + Send + Sync>,
-    ) -> u64 {
+    pub fn register_decor_change_callback(&self, listener: DecorChangeListener) -> u64 {
         self.inner
             .write()
             .map(|mut inner| {
@@ -1231,19 +1306,21 @@ pub fn drain_pending_window_closes() -> Vec<i32> {
         .unwrap_or_default()
 }
 
-/// ─── Cursor position tracking ─────────────────────────────────────────────
-/// ArkTS `MainPage.onMouse` calls `update_cursor_position` via NAPI because the
-/// NDK `DispatchMouseEvent` path does not fire while the cursor is over the
-/// WebView (which covers the window). tao's `cursor_position()` reads these
-/// atomics. Dropped during the pluginize refactor (restored from 5941dfb).
+// ─── Cursor position tracking ─────────────────────────────────────────────
+// ArkTS `MainPage.onMouse` calls `update_cursor_position` via NAPI because the
+// NDK `DispatchMouseEvent` path does not fire while the cursor is over the
+// WebView (which covers the window). tao's `cursor_position()` reads these
+// atomics. Dropped during the pluginize refactor (restored from 5941dfb).
 
 /// Last known cursor X position, in vp relative to the MainPage component
 /// (f64 stored as u64 bits). Read through [`OpenHarmonyApp::cursor_position`].
-pub(crate) static CURSOR_POSITION_X: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub(crate) static CURSOR_POSITION_X: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
 
 /// Last known cursor Y position, in vp relative to the MainPage component
 /// (f64 stored as u64 bits). Read through [`OpenHarmonyApp::cursor_position`].
-pub(crate) static CURSOR_POSITION_Y: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub(crate) static CURSOR_POSITION_Y: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
 
 /// NAPI function called from the ArkTS `onMouse` handler (Move/Press) to
 /// update the tracked cursor position. Coordinates are MainPage-relative vp.
@@ -1496,8 +1573,40 @@ mod want_parameters_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::OpenHarmonyAppInner;
-    use crate::{update_cursor_position, AvoidArea, AvoidAreaType, CURSOR_POSITION_X, CURSOR_POSITION_Y, Rect};
+    use super::{OpenHarmonyApp, OpenHarmonyAppInner};
+    use crate::{
+        update_cursor_position, AvoidArea, AvoidAreaType, Rect, TouchInputDelivery,
+        CURSOR_POSITION_X, CURSOR_POSITION_Y,
+    };
+
+    #[test]
+    fn touch_input_delivery_is_frozen_during_render() {
+        let app = OpenHarmonyApp::new();
+        assert_eq!(
+            app.touch_input_delivery(),
+            TouchInputDelivery::RawXComponent
+        );
+        app.set_touch_input_delivery(TouchInputDelivery::ArkUiGestures)
+            .unwrap();
+        app.inner
+            .write()
+            .unwrap()
+            .claim_render_owner("owner")
+            .unwrap();
+
+        assert!(app
+            .set_touch_input_delivery(TouchInputDelivery::Both)
+            .is_err());
+        assert_eq!(
+            app.touch_input_delivery(),
+            TouchInputDelivery::ArkUiGestures
+        );
+
+        let _ = app.inner.write().unwrap().release_render_owner("owner");
+        app.set_touch_input_delivery(TouchInputDelivery::Both)
+            .unwrap();
+        assert_eq!(app.touch_input_delivery(), TouchInputDelivery::Both);
+    }
 
     #[test]
     fn render_owner_rejects_overlap_and_ignores_stale_surface_callbacks() {
@@ -1564,7 +1673,7 @@ mod tests {
         assert_eq!(inner.release_render_owner("owner"), Some(false));
         // release_render_owner clears key 0 (main window); sub-window rects would persist
         // until their own destruction path runs. Assert key 0 is gone.
-        assert!(inner.window_rects.get(&0).is_none());
+        assert!(!inner.window_rects.contains_key(&0));
         assert!(inner.avoid_areas.is_empty());
     }
 
