@@ -41,7 +41,7 @@ impl ContinuationClient {
     /// Peek-only: idempotent and does not consume
     /// [`take_continuation_data`](Self::take_continuation_data).
     pub fn is_continuation_restore(&self) -> bool {
-        self.app.is_continuation_restore()
+        openharmony_ability::is_continuation_restore()
     }
 
     /// Returns the continuation payload JSON (`want.parameters` from the source
@@ -52,7 +52,7 @@ impl ContinuationClient {
     /// verbatim — the wantParam schema is an application-level contract; parse
     /// it on the JS consumer side.
     pub fn take_continuation_data(&self) -> String {
-        self.app.take_continuation_data()
+        openharmony_ability::take_continuation_data()
     }
 }
 

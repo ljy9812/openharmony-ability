@@ -11,8 +11,9 @@ use napi_ohos::threadsafe_function::{
     ThreadsafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode,
 };
 use napi_ohos::Env;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 /// Global window ID generator to ensure unique IDs across Rust and ArkTS.
 static NEXT_WINDOW_ID: AtomicI64 = AtomicI64::new(1);
@@ -232,10 +233,92 @@ pub fn next_window_id() -> i64 {
 /// survived the startAbility call to the new instance.
 static LAST_UI_ABILITY_WINDOW_ID: AtomicI64 = AtomicI64::new(-1);
 
-/// NAPI: Called by the new EntryAbility instance's `onWindowStageCreate` (via
-/// ArkTS `WindowManager.registerUIAbilityStage`) to report the windowId
-/// it received from want.parameters. Records the id globally so automated tests
-/// can poll `get_last_ui_ability_window_id` and verify want-parameter forwarding.
+// ─── Multi-UIAbility handshake registry (design.md D7, openspec change
+// multi-uiability-windows) ───────────────────────────────────────────────────
+//
+// start_ui_ability pre-allocates a window id and fires the startAbility want
+// fire-and-forget; the new EntryAbility instance reports back asynchronously
+// from its onWindowStageCreate via `register_ui_ability_stage`. This registry
+// tracks that pending handshake so the embedding runtime can poll readiness
+// or attach a waker that fires the moment the stage registers. No blocking
+// wait exists anywhere in this chain (HC-5: no main-thread block_on/recv).
+//
+// Only handshakes opened by `register_pending_ui_ability` are tracked — the
+// process-launched first instance (id 0) and any untracked spawn never pass
+// through, and read as "ready" from `is_ui_ability_stage_ready`.
+
+struct PendingAbility {
+    stage_registered: bool,
+    /// Event-loop waker attached while waiting; consumed (and woken) when the
+    /// stage registers, so queued work for this window dispatches on the next
+    /// event-loop pass instead of waiting for an unrelated wake.
+    waker: Option<crate::OpenHarmonyWaker>,
+}
+
+static PENDING_UI_ABILITIES: Mutex<Option<HashMap<i64, PendingAbility>>> = Mutex::new(None);
+
+fn pending_ui_abilities() -> std::sync::MutexGuard<'static, Option<HashMap<i64, PendingAbility>>> {
+    // A poisoned lock means some other thread panicked mid-handshake; the
+    // registry contents are still consistent enough to keep serving.
+    PENDING_UI_ABILITIES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Opens the pending-handshake entry for a UIAbility window id allocated via
+/// [`next_window_id`]. Called by the embedding runtime when it fires
+/// start_ui_ability; the entry flips to ready when the new instance calls
+/// [`register_ui_ability_stage`] with the same id.
+pub fn register_pending_ui_ability(id: i64) {
+    pending_ui_abilities()
+        .get_or_insert_with(HashMap::new)
+        .insert(id, PendingAbility { stage_registered: false, waker: None });
+    crate::info!(
+        "register_pending_ui_ability: id={} (startAbility dispatched, awaiting stage registration)",
+        id
+    );
+}
+
+/// Attaches an event-loop waker to a pending handshake. If the stage has
+/// already registered by the time this is called, the waker fires
+/// immediately — the wait is already over.
+pub fn set_ui_ability_waker(id: i64, waker: crate::OpenHarmonyWaker) {
+    let mut immediate_wake = None;
+    {
+        let mut map = pending_ui_abilities();
+        match map.as_mut().and_then(|m| m.get_mut(&id)) {
+            Some(pending) if pending.stage_registered => immediate_wake = Some(waker),
+            Some(pending) => pending.waker = Some(waker),
+            // Unknown id: never opened as a pending handshake — nothing to
+            // wait for, drop the waker.
+            None => {}
+        }
+    }
+    // Wake outside the registry lock: the TSFN call is non-blocking, but the
+    // lock discipline stays uniform (never call out to ArkTS under a lock).
+    if let Some(waker) = immediate_wake {
+        waker.wake();
+    }
+}
+
+/// Whether the EntryAbility instance for `id` has registered its WindowStage.
+/// Unknown ids read as `true`: only handshakes opened by
+/// `register_pending_ui_ability` are tracked (the process-launched first
+/// instance, id 0, never passes through here).
+pub fn is_ui_ability_stage_ready(id: i64) -> bool {
+    pending_ui_abilities()
+        .as_ref()
+        .and_then(|m| m.get(&id))
+        .map(|p| p.stage_registered)
+        .unwrap_or(true)
+}
+
+/// NAPI: Called by each EntryAbility instance's `onWindowStageCreate` (via
+/// ArkTS `WindowManager.registerUIAbilityStage`) to report the windowId it
+/// received from want.parameters. Records the id globally for automated
+/// tests, and completes the multi-UIAbility handshake: marks the pending
+/// entry ready and wakes the event-loop waker the embedding runtime attached
+/// while waiting (see `register_pending_ui_ability`).
 #[napi]
 pub fn register_ui_ability_stage(window_id: i64) {
     crate::info!(
@@ -243,6 +326,39 @@ pub fn register_ui_ability_stage(window_id: i64) {
         window_id
     );
     LAST_UI_ABILITY_WINDOW_ID.store(window_id, Ordering::SeqCst);
+    let waker = {
+        let mut map = pending_ui_abilities();
+        match map.get_or_insert_with(HashMap::new).get_mut(&window_id) {
+            Some(pending) => {
+                pending.stage_registered = true;
+                pending.waker.take()
+            }
+            // First instance (id 0) or an untracked spawn — nothing pending.
+            None => None,
+        }
+    };
+    if let Some(waker) = waker {
+        waker.wake();
+    }
+}
+
+/// Removes the pending-handshake entry for a destroyed UIAbility instance
+/// (design.md D13). Window ids are never reused (`NEXT_WINDOW_ID` is
+/// monotonic), so a removed entry can never collide with a future spawn.
+/// Returns the registry's remaining size for the E4 ten-round leak check.
+///
+/// Known bounded edge: a startAbility that fails after
+/// `register_pending_ui_ability` never fires an ability-destroy callback, so
+/// its `{false, None}` entry stays — it has no consumer (only the waker reads
+/// the registry) and is therefore harmless.
+pub fn unregister_pending_ui_ability(id: i64) -> usize {
+    match pending_ui_abilities().as_mut() {
+        Some(map) => {
+            map.remove(&id);
+            map.len()
+        }
+        None => 0,
+    }
 }
 
 /// Reads the last windowId reported by a subsequent instance. Returns -1 if no

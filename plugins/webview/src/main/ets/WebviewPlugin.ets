@@ -1288,7 +1288,12 @@ function BuildWebview(data: ManagedWebview) {
         .width("100%")
         .height("100%")
         .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
-        .backgroundColor(data.transparent === true ? Color.Transparent : (data.style.backgroundColor ?? undefined))
+        // Explicit background color (create-time style or runtime set-background-color)
+        // takes precedence; transparent webviews fall back to Color.Transparent so
+        // vibrancy/blur stays visible. The old form (transparent ? Color.Transparent
+        // : style.backgroundColor) short-circuited runtime set_background_color into
+        // a visual no-op on transparent windows (tao skips the window layer for them).
+        .backgroundColor(data.style.backgroundColor ?? (data.transparent === true ? Color.Transparent : undefined))
         .visibility(data.style.visible === false ? Visibility.Hidden : Visibility.Visible)
         // Vibrancy: backdropBlur for opaque sub-windows (see Direct mode comment)
         .backdropBlur(data.style.blurRadius ?? 0)
@@ -1351,10 +1356,11 @@ function BuildWebview(data: ManagedWebview) {
       .width("100%")
       .height("100%")
       .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
-      // Transparent windows: force Web background to transparent so vibrancy/blur
-      // effects are visible through the Web component. Without this, the Web renders
-      // with its default opaque background, hiding any blur effect.
-      .backgroundColor(data.transparent === true ? Color.Transparent : (data.style.backgroundColor ?? undefined))
+      // Explicit background color takes precedence over the transparent fallback —
+      // same precedence flip as the overlay branch above (runtime set_background_color
+      // must stay visible on transparent windows). Unset + transparent →
+      // Color.Transparent so vibrancy/blur remains visible through the Web component.
+      .backgroundColor(data.style.backgroundColor ?? (data.transparent === true ? Color.Transparent : undefined))
       .visibility(data.style.visible === false ? Visibility.Hidden : Visibility.Visible)
       // Vibrancy/frosted glass: backdropBlur blurs in-surface pixels of the Web component.
       // Works on opaque containers (Float sub-windows where setWindowContainerColor returns 1300004).

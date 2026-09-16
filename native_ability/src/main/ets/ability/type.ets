@@ -20,13 +20,17 @@ export interface ApplicationLifecycle {
   keyboardEventCallback: KeyboardCallback;
 }
 
+// Trailing windowId parameters (multi-UIAbility, design.md D3/D8): 0 = the
+// process's first instance, or a spawned instance's pre-allocated tauri window
+// id. Payload-object callbacks whose object already wraps windowId
+// (onWindowSizeChange / onWindowRectChange) keep their single-arg shape.
 export interface EnvironmentCallback {
-  onConfigurationUpdated: (arg: object) => void;
-  onMemoryLevel: (arg: number) => void;
+  onConfigurationUpdated: (arg: object, windowId: number) => void;
+  onMemoryLevel: (arg: number, windowId: number) => void;
 }
 
 export interface KeyboardCallback {
-  onKeyboardHeightChange: (height: number) => void;
+  onKeyboardHeightChange: (height: number, windowId: number) => void;
 }
 
 // NewWantData payload for onNewWant. Optional continuation fields are read with
@@ -46,17 +50,17 @@ export interface CreateWithWantData {
 }
 
 export interface WindowStageEventCallback {
-  onWindowStageCreate: () => void;
-  onWindowStageDestroy: () => void;
-  onAbilityCreate: (arg: string) => void;
-  onAbilityCreateWithWant: (data: CreateWithWantData) => void;
-  onAbilityDestroy: () => void;
-  onAbilitySaveState: () => string;
-  onWindowStageEvent: (arg: number) => void;
+  onWindowStageCreate: (windowId: number) => void;
+  onWindowStageDestroy: (windowId: number) => void;
+  onAbilityCreate: (arg: string, windowId: number) => void;
+  onAbilityCreateWithWant: (data: CreateWithWantData, windowId: number) => void;
+  onAbilityDestroy: (windowId: number) => void;
+  onAbilitySaveState: (windowId: number) => string;
+  onWindowStageEvent: (arg: number, windowId: number) => void;
   onWindowSizeChange: (arg: object) => void;
   onWindowRectChange: (arg: object) => void;
-  onAvoidAreaChange: (arg: object) => void;
-  onNewWant: (data: NewWantData) => void;
+  onAvoidAreaChange: (arg: object, windowId: number) => void;
+  onNewWant: (data: NewWantData, windowId: number) => void;
 }
 
 export interface WebViewComponentEventCallback {
@@ -170,9 +174,11 @@ export interface Module {
   /**
    * Mounts this native module's one Rust render tree into `slot`. `renderOwner` is unique per
    * appearance and protects a later render from stale cleanup; another concurrently active
-   * DefaultXComponent must use a different native module.
+   * DefaultXComponent must use a different native module. `windowId` is the calling
+   * UIAbility instance's id (0 = primary) — it keys the input/redraw/resize events the
+   * Rust closures dispatch (multi-uiability-windows design.md D5).
    */
-  render: (slot: NodeContent, renderOwner: string) => void;
+  render: (slot: NodeContent, renderOwner: string, windowId: number) => void;
   /** Releases only the render tree owned by `renderOwner`. */
   disposeRender: (renderOwner: string) => void;
   /** Releases the remaining render tree when the WindowStage is torn down. */
@@ -211,7 +217,7 @@ export interface Module {
     responseTypeName: string,
     value: ESObject,
   ) => ESObject;
-  onBridgeLifecycle?: (kind: string) => void;
+  onBridgeLifecycle?: (kind: string, windowId: number) => void;
   /**
    * Legacy opt-in for native modules that register a custom `webview` URL scheme. Retained so
    * ProcessInitializer can probe for web-engine requirements on pre-pluginize modules. New

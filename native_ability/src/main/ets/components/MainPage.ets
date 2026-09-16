@@ -24,6 +24,13 @@ struct MainPage {
   @StorageProp("moduleName") moduleNames: string | string[] = "";
   // Subsequent UIAbility instances receive their windowId via LocalStorage
   @LocalStorageProp('windowId') windowId: number = MAIN_WINDOW_ID;
+  // Bridge session id (design.md D6/D12): the primary instance's own session,
+  // or the shared session id for a joined spawned instance. Delivered through
+  // the per-instance LocalStorage built in NativeAbility.loadWindowStageContent
+  // — NOT AppStorage, which is a process-global single value a spawned
+  // instance would overwrite mid-attachment. Passed down to
+  // DefaultXComponent as a plain @Prop.
+  @LocalStorageProp('bridgeSessionId') bridgeSessionId: string = "";
 
   private loadMode: "async" | "sync" = "async";
 
@@ -76,7 +83,11 @@ struct MainPage {
         Row() {
           Column() {
             if (this.resolvedModuleName !== "") {
-              DefaultXComponent({ moduleName: this.resolvedModuleName, windowId: this.windowId })
+              DefaultXComponent({
+                moduleName: this.resolvedModuleName,
+                windowId: this.windowId,
+                bridgeSessionId: this.bridgeSessionId,
+              })
             } else {
               Text("Loading Main Window...")
                 .fontSize(20)

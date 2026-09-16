@@ -115,7 +115,8 @@ impl BridgePlugin for ResourceBridgePlugin {
     fn on_lifecycle(&self, event: &PluginLifecycleEvent) -> Result<()> {
         if matches!(
             event,
-            PluginLifecycleEvent::AbilityCreated { .. } | PluginLifecycleEvent::AbilityDestroyed
+            PluginLifecycleEvent::AbilityCreated { .. }
+            | PluginLifecycleEvent::AbilityDestroyed { .. }
         ) {
             self.replace_resource_manager(None)?;
         }

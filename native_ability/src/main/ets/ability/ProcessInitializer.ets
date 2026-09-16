@@ -3,7 +3,7 @@ import common from "@ohos.app.ability.common";
 import webview from "@ohos.web.webview";
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
-import { Module, AbilityInitContext } from "./type";
+import { Module, AbilityInitContext, ApplicationLifecycle } from "./type";
 import { Loadable } from "../helper/loadable";
 import { WindowManager } from "../window/WindowManager";
 import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from '../helper/constants';
@@ -30,6 +30,16 @@ export class ProcessInitializer {
   private static initialized: boolean = false;
   private static nativeModules: Module[] = [];
   private static loadedModuleNames: string[] = [];
+  /**
+   * Process-level store of each module's init-returned lifecycle callback bundle
+   * (design.md D12 join model). The creator instance stores them right after
+   * module.init; a joined instance — whose own moduleRuntimes stays empty because
+   * module.init is never re-run — reads them via getLifecycles() so
+   * NativeAbility.forEachLifecycle can still fire the shared lifecycle callbacks
+   * with the joined instance's windowId (NAPI callbacks are process-level fns;
+   * each call carries its own windowId, so sharing the bundle is safe).
+   */
+  private static lifecycleByModule: Map<string, ApplicationLifecycle> = new Map();
 
   static isInitialized(): boolean {
     return this.initialized;
@@ -41,6 +51,20 @@ export class ProcessInitializer {
 
   static getLoadedModuleNames(): string[] {
     return this.loadedModuleNames;
+  }
+
+  /** Stores one module's lifecycle bundle (creator side of the D12 join model). */
+  static rememberLifecycle(moduleName: string, lifecycle: ApplicationLifecycle): void {
+    this.lifecycleByModule.set(moduleName, lifecycle);
+  }
+
+  /**
+   * Shared lifecycle bundles, read by a joined UIAbility instance whose own
+   * moduleRuntimes is empty (D12). Returns the process-level Map; callers must
+   * not mutate it.
+   */
+  static getLifecycles(): Map<string, ApplicationLifecycle> {
+    return this.lifecycleByModule;
   }
 
   static createInitContext(context: common.UIAbilityContext, moduleName: string): AbilityInitContext {

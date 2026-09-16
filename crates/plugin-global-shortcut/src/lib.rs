@@ -7,7 +7,7 @@
 //! channel for consumer consumption.
 //!
 //! Version guard: `inputConsumer` hotkey registration requires API 14+. On lower API levels,
-//! `register` silently returns `Ok(())`.
+//! the client methods return an error naming the required API level.
 
 use std::sync::OnceLock;
 
@@ -15,8 +15,9 @@ use crossbeam_channel::{unbounded, Receiver, Sender};
 use napi_derive_ohos::napi;
 use napi_ohos::bindgen_prelude::Unknown;
 use napi_ohos::{Error, Result};
+pub use openharmony_ability::version;
 use openharmony_ability::{
-    impl_bridge_napi_type, version, AsyncBridge, BridgeCallOptions, BridgeContextRequirement,
+    impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgeContextRequirement,
     BridgeMainThreadEvent, BridgeNapiType, BridgePlugin, BridgeRuntime, OpenHarmonyApp,
 };
 
@@ -25,6 +26,15 @@ const MAX_MODIFIERS: usize = 2;
 
 /// Minimum API level for `inputConsumer.on('hotkeyChange')`.
 const MIN_HOTKEY_API_VERSION: i32 = 14;
+
+/// Unified version error for all hotkey operations: names the operation, the
+/// required API level, and the current one.
+fn hotkey_api_version_error(op: &str) -> Error {
+    Error::from_reason(format!(
+        "{op} requires API level {MIN_HOTKEY_API_VERSION}+ on OpenHarmony (current: {})",
+        version::sdk_api_version()
+    ))
+}
 
 // ── Bridge plugin declaration ─────────────────────────────────────────────────
 
@@ -204,13 +214,14 @@ impl GlobalShortcutClient {
             .await
     }
 
-    /// Registers a global shortcut. On API levels below 14, silently returns `Ok(())`.
+    /// Registers a global shortcut. On API levels below 14, returns an error
+    /// naming the required API level.
     ///
     /// The `modifiers` slice uses the cross-platform modifier names:
     /// `"Control"`, `"Shift"`, `"Alt"`, `"Super"`.
     pub async fn register(&self, id: u32, modifiers: &[String], key: &str) -> Result<()> {
         if version::sdk_api_version() < MIN_HOTKEY_API_VERSION {
-            return Ok(());
+            return Err(hotkey_api_version_error("register"));
         }
         let deduped = validate_and_dedup_modifiers(modifiers)?;
         let response = self
@@ -227,10 +238,11 @@ impl GlobalShortcutClient {
     }
 
     /// Unregisters a previously registered shortcut by ID. Idempotent — unregistering an
-    /// unknown ID succeeds silently.
+    /// unknown ID succeeds silently. On API levels below 14, returns an error naming
+    /// the required API level.
     pub async fn unregister(&self, id: u32) -> Result<()> {
         if version::sdk_api_version() < MIN_HOTKEY_API_VERSION {
-            return Ok(());
+            return Err(hotkey_api_version_error("unregister"));
         }
         let response = self
             .call::<ShortcutUnregisterRequest, ShortcutAcknowledgement>(
@@ -241,10 +253,11 @@ impl GlobalShortcutClient {
         response.ensure()
     }
 
-    /// Unregisters all previously registered shortcuts.
+    /// Unregisters all previously registered shortcuts. On API levels below 14,
+    /// returns an error naming the required API level.
     pub async fn unregister_all(&self) -> Result<()> {
         if version::sdk_api_version() < MIN_HOTKEY_API_VERSION {
-            return Ok(());
+            return Err(hotkey_api_version_error("unregisterAll"));
         }
         let response = self
             .call::<ShortcutUnregisterAllRequest, ShortcutAcknowledgement>(

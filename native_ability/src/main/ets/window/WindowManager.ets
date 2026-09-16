@@ -7,8 +7,9 @@ import { deviceInfo } from '@kit.BasicServicesKit';
 import display from '@ohos.display';
 import * as FloatPage from '../components/FloatPage';
 import { getMenuDataCallback, windowKeyForId } from '../components/MenuBarComponent';
-import { DOMAIN } from '../helper/constants';
+import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from '../helper/constants';
 import { clearClipboardEnabled, clearZoomHotkeysEnabled, setClipboardEnabled, setZoomHotkeysEnabled } from '../helper/accelerator_matcher';
+import { unregisterKeySynthesisController } from '../helper/key_synthesis';
 import web_webview from '@ohos.web.webview';
 import { RectThrottle, WindowRectEventWrap, WindowSizeEventWrap } from './RectThrottle';
 import { WindowAttachmentRegistry } from './WindowAttachmentRegistry';
@@ -152,14 +153,62 @@ export class WindowManager {
   // Whether the primary (first-instance) WindowStage has been registered.
   // Unified registration for all UIAbility WindowStages (id=0 first instance
   // or id>0 subsequent instances — equal, no primary/subordinate distinction).
-  // Stores stage in uiAbilityStages, sets windowKinds, and registers focus tracking.
+  // Stores stage in uiAbilityStages, sets windowKinds, notifies the Rust handshake registry (D7),
+  // and registers focus tracking.
+  // D4b: whether a UIAbility instance has already registered its stage for
+  // windowId. STATIC and throw-free by design: the NativeAbility onCreate
+  // plain-relaunch guard runs BEFORE ProcessInitializer calls WindowManager.init
+  // (ProcessInitializer.ets) — getInstance() would throw "not initialized" and
+  // abort onCreate, freezing the app on the start window. Returning false while
+  // uninitialized is also semantically right: no instance means no registered
+  // stage, so a first cold launch takes the normal path.
+  static isStageRegistered(windowId: number): boolean {
+    return WindowManager.instance !== null && WindowManager.instance.uiAbilityStages.has(Number(windowId));
+  }
+
   registerUIAbilityStage(windowId: number, windowStage: window.WindowStage, context: common.UIAbilityContext, transparent: boolean = false): void {
     const wid = Number(windowId);
+    // D4b overwrite guard (design.md D4b, openspec multi-uiability-windows, risk R4):
+    // a plain-relaunch duplicate EntryAbility under launchType "standard" resolves
+    // to id 0 and would blind-overwrite the live primary's stage entry here —
+    // device-proven corrosion (input/render then route to the dead stage).
+    // Re-registration from the SAME context (warm re-create paths) is allowed;
+    // a different context on an occupied id is refused. The refusal is loud by
+    // design: a broken window is diagnosable, silent corrosion is not. The
+    // NativeAbility onCreate D4b guard prevents reaching this state; this is
+    // defense-in-depth for any future caller.
+    const existingContext = this.uiAbilityContexts.get(wid);
+    if (existingContext !== undefined && existingContext !== context) {
+      hilog.error(DOMAIN, 'WindowManager', 'registerUIAbilityStage REFUSED: id %{public}d already registered by another instance (D4b corrosion guard)', wid);
+      return;
+    }
     this.uiAbilityStages.set(wid, windowStage);
     this.uiAbilityContexts.set(wid, context);
     this.windowKinds.set(wid, WindowKind.UIAbility);
     this.transparentFlags.set(wid, transparent);
     hilog.info(DOMAIN, 'WindowManager', 'UIAbility stage registered: id=%{public}d transparent=%{public}s', wid, String(transparent));
+
+    // Report the stage registration to the Rust handshake registry (design.md
+    // D7, openspec multi-uiability-windows). The spawn side (tao Window::new →
+    // start-ui-ability) registered this id as pending with an event-loop waker;
+    // this NAPI call flips the registry entry and wakes the loop so queued
+    // webview ops for this window dispatch on the next pass. The old-framework
+    // caller (ArkHelper.ets) was dropped in the bridge-facade migration, which
+    // left register_ui_ability_stage a dead export — this is its replacement
+    // call site. The native module is process-level (single Rust registry
+    // shared by all UIAbility instances, NG4), so the AppStorage-stored module
+    // is the right handle regardless of which instance registers.
+    const nativeModule: ESObject = AppStorage.get<ESObject>(NATIVE_MODULE_STORAGE_KEY);
+    if (nativeModule && typeof nativeModule.registerUiAbilityStage === 'function') {
+      try {
+        nativeModule.registerUiAbilityStage(wid);
+      } catch (e) {
+        hilog.error(DOMAIN, 'WindowManager', 'registerUiAbilityStage NAPI call failed for id=%{public}d: %{public}s', wid, String(e));
+      }
+    } else {
+      hilog.warn(DOMAIN, 'WindowManager', 'nativeModule.registerUiAbilityStage unavailable; Rust handshake registry not notified for id=%{public}d', wid);
+    }
+
 
     // Register focus tracking for this window
     try {
@@ -194,6 +243,30 @@ export class WindowManager {
     this.windowOpQueues.delete(wid);
     this.preMaximizeRects.delete(wid);
     this.rectThrottle.clearWindow(wid);
+    // Phase 6 (design.md D13): a spawned UIAbility window closes via terminateSelf,
+    // which bypasses removeWindow — the focus/interaction trackers and the
+    // key-synthesis controller had no removal point on the UIAbility teardown path
+    // and leaked one entry per closed instance across create/destroy rounds (E4
+    // ten-round check). The attachment-backed maps (blur radii, refresh callbacks,
+    // deferred componentRoot callbacks) are cleared by attachments.clearWindow above.
+    if (this.lastFocusedWindowId === wid) {
+      // Clear BOTH the id and the Window reference — keeping the object would
+      // pin the destroyed ability's window and block GC (audit note on A9).
+      this.lastFocusedWindowId = -1;
+      this.lastFocusedWindow = null;
+    }
+    if (this.lastUserInteractedWindowId === wid) {
+      this.lastUserInteractedWindowId = -1;
+    }
+    // Key-synthesis controllers are registered for ALL windows (incl. main) but
+    // this map has no other removal point. Skip wid 0: the primary's controller
+    // outlives its stage teardown (continuation-restore reuses it).
+    if (wid !== 0) {
+      unregisterKeySynthesisController(wid);
+    }
+    // Per-window accelerator flags — same clearing removeWindow does for Float.
+    clearClipboardEnabled(wid);
+    clearZoomHotkeysEnabled(wid);
   }
 
   // Whether the given window is a UIAbility main window.
@@ -253,6 +326,11 @@ export class WindowManager {
         } catch (containerErr: any) {
           hilog.warn(DOMAIN, 'WindowManager', 'applyTransparentBackground: windowId=%{public}d setWindowContainerColor failed: code=%{public}d', wid, containerErr.code);
         }
+      } else {
+        // setWindowContainerColor is API 20+; below that the container layer
+        // stays opaque, so the transparent window background has no visible
+        // effect. Non-fatal.
+        hilog.warn(DOMAIN, 'WindowManager', 'applyTransparentBackground: windowId=%{public}d transparent container requires API20+, current %{public}d; container stays opaque', wid, deviceInfo.sdkApiVersion);
       }
     } catch (e) {
       hilog.warn(DOMAIN, 'WindowManager', 'applyTransparentBackground: windowId=%{public}d failed: %{public}s', wid, String(e));
@@ -590,16 +668,32 @@ export class WindowManager {
     // showWindow() cannot restore from MINIMIZE (it only shows a hidden window / raises an
     // already-shown main window to the top). The documented inverse of minimize() for the
     // main window is restore() (the minimize() API doc links restore() for restoration;
-    // API14+, guarded inside restoreWindow). This replaces the prior
-    // startAbility(instanceKey='main') path: under launchType "standard" (tauri-cli
-    // template) instanceKey is ignored and every startAbility spawns a DUPLICATE
-    // EntryAbility. The demo masked this (its module.json5 omits launchType → singleton →
-    // onNewWant). Restore only when actually minimized so a redundant set_visible(true) on
+    // API14+, guarded inside restoreWindow). D4 specified amendment: primary
+    // foregrounding now goes through startAbility(self) (menu.ets / StatusBarUtils /
+    // app-control show-ability) — under launchType "specified" + onAcceptWant AMS routes
+    // it to the live primary and pulls it to the top of the stack. showWindowMethod
+    // stays for the D4b duplicate-guard fallback (raise a still-visible primary) and
+    // the sub-window path; it CANNOT undo a context.hideAbility()-hidden ability.
+    // Restore only when actually minimized so a redundant set_visible(true) on
     // a visible maximized window does not un-maximize it. (PR#45 review F3/D)
     if (this.isUIAbilityMainWindow(windowId)) {
       if (this.isMinimized(windowId)) {
         this.restoreWindow(windowId);
+        return;
       }
+      // D4b plain-relaunch duplicate guard (fallback when the AbilityStage
+      // onAcceptWant route is bypassed): when the window is not
+      // minimized — backgrounded, covered, or already visible — raise it to
+      // the top. showWindow() on a main window raises an already-shown window
+      // without un-maximizing it; the F3/D un-maximize hazard only applies to
+      // restore()/set_visible, which stay confined to the minimized branch.
+      const win = this.getWindow(windowId);
+      if (!win) { hilog.warn(DOMAIN, 'WindowManager', 'showWindowMethod: window %{public}d not found', windowId); return; }
+      win.showWindow().then(() => {
+        hilog.info(DOMAIN, 'WindowManager', 'showWindowMethod raise %{public}d OK', windowId);
+      }).catch((err: ESObject) => {
+        hilog.warn(DOMAIN, 'WindowManager', 'showWindowMethod raise %{public}d failed: %{public}s', windowId, JSON.stringify(err));
+      });
       return;
     }
     // Sub-window: showWindow() restores from minimize (symmetric with hideWindow's minimize).
@@ -1054,6 +1148,14 @@ export class WindowManager {
       // is silently ignored (documented no-op), so it is safe to always pass on API19+.
       // This also unlocks maximize for the menu PredefinedMenuItem 'maximize' path and
       // setFullscreen's maximize(ENTER_IMMERSIVE) on sub-windows (same WMS gate).
+      //
+      // Stage routing: always uiAbilityStages.get(0) (primary). A 2026-09-16 zero-code
+      // experiment (openspec multi-uiability-windows B3/OQ2) proved createSubWindowWithOptions
+      // DOES run on a spawned UIAbility stage (creation+render+input all work), but the
+      // system close-cascades ALL sub-windows when that stage's instance is destroyed —
+      // owner semantics (like Windows WebviewWindowBuilder.parent). Production keeps
+      // Floats on the primary stage so they outlive individual instance destruction;
+      // per-instance Floats remain a documented-not-implemented option.
       if (deviceInfo.sdkApiVersion >= 19) {
         const opts: window.SubWindowOptions = {
           title: '',
@@ -1083,6 +1185,12 @@ export class WindowManager {
     // Title (set by setWindowTitle → updates this via setWindowTitle impl)
     storage.setOrCreate('title', '');
     this.windows.set(windowId, { window: win, storage, destroying: false });
+    // Register the Float kind explicitly. isUIAbilityMainWindow reads this map —
+    // today Float windows work only because a MISSING key is treated as "not a
+    // UIAbility main window". Making the kind explicit removes that implicit
+    // "absent means Float" dependency (removeWindow's windowKinds.delete above
+    // stays idempotent).
+    this.windowKinds.set(windowId, WindowKind.Float);
 
     // Phase 2 (design.md D3): register this sub-window's windowRectChange handler.
     // This is the only clean registration point for Float sub-windows — createSubWindow
@@ -1170,6 +1278,11 @@ export class WindowManager {
               hilog.warn(DOMAIN, 'WindowManager', `Float window container color failed: code=%{public}d`, containerErr.code);
             }
           }
+        } else {
+          // setWindowContainerColor is API 20+; below that the container layer
+          // stays opaque, so a transparent Float window shows no visible blur
+          // (vibrancy) effect. Non-fatal: the window itself still works.
+          hilog.warn(DOMAIN, 'WindowManager', `Float window %{public}d transparent container requires API20+, current %{public}d; container stays opaque (no visible blur)`, windowId, deviceInfo.sdkApiVersion);
         }
       } else if (backgroundColor !== undefined) {
         const colorStr = '#' + backgroundColor.toString(16).padStart(8, '0');
@@ -1242,29 +1355,41 @@ export class WindowManager {
   //   which was wrong — status bar != title bar.
   //   May be unsupported on phones (throws 801); the catch fallback does not affect other logic.
   // Float sub-window: LocalStorage setOrCreate('decorations') — FloatPage @LocalStorageProp reactively re-renders.
-  setDecorations(windowId: number, decorations: boolean): void {
+  // Returns whether the window kind was handled: Float storage write and a successful
+  // UIAbility setWindowDecorVisible return true; a missing window, a thrown system call,
+  // or an unknown window kind return false (the plugin handler surfaces that as an error).
+  // The two kinds are mutually exclusive in practice: `windows` map entries are only
+  // created by createSubWindow (Float), while UIAbility main windows are tracked in
+  // `windowKinds` and never carry a `windows` entry.
+  setDecorations(windowId: number, decorations: boolean): boolean {
     hilog.info(DOMAIN, 'WindowManager', 'setDecorations %{public}d decorations=%{public}s ENTER', windowId, String(decorations));
     // Float sub-window: write LocalStorage to drive FloatPage title bar show/hide
     const entry = this.windows.get(windowId);
     if (entry && entry.storage) {
       entry.storage.setOrCreate('decorations', decorations);
       hilog.info(DOMAIN, 'WindowManager', `Decorations set to %{public}s for Float window %{public}d (LocalStorage)`, String(decorations), windowId);
+      return true;
     }
     // UIAbility main window: call setWindowDecorVisible directly to control the system title bar
     if (this.isUIAbilityMainWindow(windowId)) {
       const win = this.getWindow(windowId);
       if (!win) {
         hilog.warn(DOMAIN, 'WindowManager', 'setDecorations: main window %{public}d not found', windowId);
-        return;
+        return false;
       }
       try {
         win.setWindowDecorVisible(decorations);
         hilog.info(DOMAIN, 'WindowManager', 'setDecorations %{public}d setWindowDecorVisible(%{public}s) OK', windowId, String(decorations));
+        return true;
       } catch (err) {
         // 801: device not supported (phones); 1300002: abnormal window state. Does not affect other logic.
         hilog.warn(DOMAIN, 'WindowManager', 'setDecorations %{public}d setWindowDecorVisible failed: %{public}s', windowId, JSON.stringify(err));
+        return false;
       }
     }
+    // Unknown window kind (never created through WindowManager).
+    hilog.warn(DOMAIN, 'WindowManager', 'setDecorations: unknown window %{public}d', windowId);
+    return false;
   }
 
   setWindowBackgroundColor(windowId: number, color: number): void {
