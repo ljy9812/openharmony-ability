@@ -31,7 +31,7 @@ use napi_derive_ohos::napi;
 use napi_ohos::{Error, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::{
+use openharmony_ability::{
     impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgeContextRequirement,
     BridgeNapiType, BridgePlugin, BridgeRuntime, OpenHarmonyApp,
 };
@@ -40,9 +40,9 @@ use crate::{
 
 /// Core-privileged OHOS capability (not Tauri-shaped).
 ///
-/// First-class OHOS ability exposed on par with `RuntimeInitArgs.app`.
-/// Intentionally NOT facade-ized: the API has no Tauri shape (pure OHOS
-/// platform capability). Precedent: `OpenHarmonyApp::updater()`.
+/// Pure OHOS platform capability with no Tauri shape, exposed as a dedicated
+/// plugin crate. Pairs with the ArkTS HAR `plugins/account`
+/// (`@ohos-rs/ability-plugin-account`).
 pub struct AccountBridgePlugin;
 
 impl BridgePlugin for AccountBridgePlugin {
@@ -113,9 +113,8 @@ impl_bridge_napi_type!(AccountLogoutResponse, "ohos.account.LogoutResponse");
 
 /// Core-privileged OHOS capability (not Tauri-shaped).
 ///
-/// First-class OHOS ability exposed on par with `RuntimeInitArgs.app`.
-/// Intentionally NOT facade-ized: the API has no Tauri shape (pure OHOS
-/// platform capability). Precedent: `OpenHarmonyApp::updater()`.
+/// Pure OHOS platform capability with no Tauri shape, exposed by this plugin
+/// crate. Pairs with the ArkTS HAR `plugins/account`.
 ///
 /// Account info returned by a successful Huawei Account login.
 ///
@@ -139,9 +138,8 @@ pub struct AccountInfo {
 
 /// Core-privileged OHOS capability (not Tauri-shaped).
 ///
-/// First-class OHOS ability exposed on par with `RuntimeInitArgs.app`.
-/// Intentionally NOT facade-ized: the API has no Tauri shape (pure OHOS
-/// platform capability). Precedent: `OpenHarmonyApp::updater()`.
+/// Pure OHOS platform capability with no Tauri shape, exposed by this plugin
+/// crate. Pairs with the ArkTS HAR `plugins/account`.
 ///
 /// Handle for Huawei Account one-tap login operations.
 ///
@@ -247,6 +245,18 @@ impl HuaweiAccount {
         self.bridge
             .call_async::<AccountBridgePlugin, Request, Response>(action, request, options)
             .await
+    }
+}
+
+pub trait AccountExt {
+    /// Huawei Account one-tap login handle. Requires an active
+    /// `NativeAbility` session.
+    fn account(&self) -> Result<HuaweiAccount>;
+}
+
+impl AccountExt for OpenHarmonyApp {
+    fn account(&self) -> Result<HuaweiAccount> {
+        HuaweiAccount::new(self)
     }
 }
 

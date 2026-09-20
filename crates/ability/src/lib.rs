@@ -16,9 +16,6 @@ mod waker;
 
 pub use helper::*;
 
-#[cfg(feature = "account")]
-mod account;
-
 #[cfg(feature = "updater")]
 mod updater;
 
@@ -97,9 +94,6 @@ pub use node::*;
 pub use render::*;
 pub use stage::*;
 pub use waker::*;
-
-#[cfg(feature = "account")]
-pub use account::*;
 
 #[cfg(feature = "updater")]
 pub use updater::*;

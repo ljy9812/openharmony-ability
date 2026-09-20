@@ -662,6 +662,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "openharmony-ability-plugin-account"
+version = "1.0.0-beta.0"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "openharmony-ability-plugin-app-control"
 version = "1.0.0-beta.1"
 dependencies = [

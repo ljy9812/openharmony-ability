@@ -12,7 +12,6 @@ description = "Binding Rust application on Harmony with Ability"
 # crate's dependency (default features on) propagates the default set. Moving
 # it out requires synchronizing tauri/crates/tauri/Cargo.toml.
 default = ["log", "updater", "window"]
-account = []
 log = ["dep:log"]
 updater = []
 # Process control (restart via appRecovery) — consumed by tauri-plugin-process,
