@@ -6,17 +6,8 @@ license = "MIT OR Apache-2.0"
 description = "Binding Rust application on Harmony with Ability"
 
 [features]
-# `updater` is a core-privileged capability (see `OpenHarmonyApp::updater()`).
-# Retained in default features: the updater plugin consumes it via
-# `tauri::ohos::APP` without an explicit feature declaration, and the tauri
-# crate's dependency (default features on) propagates the default set. Moving
-# it out requires synchronizing tauri/crates/tauri/Cargo.toml.
-default = ["log", "updater", "window"]
+default = ["log", "window"]
 log = ["dep:log"]
-updater = []
-# Process control (restart via appRecovery) — consumed by tauri-plugin-process,
-# which declares `features = ["process"]` on its OHOS target dependency.
-process = []
 window = ["dep:ohos-native-window-binding"]
 global_shortcut = []
 

@@ -1103,42 +1103,6 @@ impl OpenHarmonyApp {
         self.inner.read().unwrap().display_height()
     }
 
-    /// Get an updater handle for checking and installing updates via AppGallery.
-    ///
-    /// Core-privileged OHOS capability (not Tauri-shaped).
-    ///
-    /// First-class OHOS ability exposed on par with `RuntimeInitArgs.app`.
-    /// Intentionally NOT facade-ized: the API has no Tauri shape (pure OHOS
-    /// platform capability). Precedent: `OpenHarmonyApp::updater()`.
-    ///
-    /// Returns `Result<Updater>` (breaking change, 2026-08-21): the handle now
-    /// holds a `BridgeRuntime` resolved from the active session, replacing the
-    /// former global TSFN transport which was never wired up.
-    #[cfg(feature = "updater")]
-    pub fn updater(&self) -> Result<super::updater::Updater> {
-        super::updater::Updater::new(self)
-    }
-
-    /// Get a process handle for app-level process control via the bridge.
-    ///
-    /// Core-privileged OHOS capability (not Tauri-shaped).
-    ///
-    /// First-class OHOS ability exposed on par with `RuntimeInitArgs.app`.
-    /// Intentionally NOT facade-ized: the API has no Tauri shape (pure OHOS
-    /// platform capability). Precedent: `OpenHarmonyApp::updater()`.
-    ///
-    /// `Process::restart` dispatches `appRecovery.restartApp()` and returns
-    /// `Ok(0)` on success. The process is then hard-killed by the system
-    /// (`onDestroy` is NOT triggered) — callers should block afterwards and
-    /// let the runtime terminate them, same pattern as the non-OHOS restart
-    /// path. Requires the app's Ability to be recoverable (`recoverable: true`
-    /// in module.json5); recovery is enabled right before the restart call on
-    /// the ArkTS side.
-    #[cfg(feature = "process")]
-    pub fn process(&self) -> Result<super::process::Process> {
-        super::process::Process::new(self)
-    }
-
     pub fn run_loop<F: FnMut(Event) + 'static>(&self, event_handle: F) {
         if HAS_EVENT.load(std::sync::atomic::Ordering::SeqCst) {
             return;

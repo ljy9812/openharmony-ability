@@ -19,18 +19,19 @@
 use napi_derive_ohos::napi;
 use napi_ohos::Result;
 
-use crate::{
+use openharmony_ability::{
     impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgeContextRequirement, BridgePlugin,
     BridgeRuntime, OpenHarmonyApp,
 };
 
 // ── Plugin identity ────────────────────────────────────────────────────────
 
-/// Core-privileged OHOS capability (not Tauri-shaped).
+/// Pure OHOS platform capability with no Tauri shape, exposed as a dedicated
+/// plugin crate. Pairs with the ArkTS HAR `plugins/process`
+/// (`@ohos-rs/ability-plugin-process`).
 ///
 /// Consumed by the `tauri-plugin-process` crate, which registers this plugin
 /// in its OHOS `setup` so the `ohos.process` declaration flows to ArkTS.
-/// Precedent: `UpdaterBridgePlugin`.
 pub struct ProcessBridgePlugin;
 
 impl BridgePlugin for ProcessBridgePlugin {
@@ -61,20 +62,25 @@ impl_bridge_napi_type!(RestartResponse, "ohos.process.RestartResponse");
 
 // ── Process facade ──────────────────────────────────────────────────────────
 
+/// Pure OHOS platform capability with no Tauri shape, exposed by this plugin
+/// crate. Pairs with the ArkTS HAR `plugins/process`.
+///
 /// Process handle for dispatching app-level process control via the bridge.
 /// Holds a [`BridgeRuntime`] clone obtained from [`OpenHarmonyApp::bridge`].
 ///
-/// Precedent: `Updater` (see `OpenHarmonyApp::updater`). The handle exists so
-/// callers can drop the `tauri::ohos::APP` mutex guard before `.await`ing —
-/// holding a `MutexGuard` across an await point would make the command future
-/// non-`Send`.
+/// The handle exists so callers can drop the `tauri::ohos::APP` mutex guard
+/// before `.await`ing — holding a `MutexGuard` across an await point would
+/// make the command future non-`Send`.
 pub struct Process {
     bridge: BridgeRuntime,
 }
 
 impl Process {
     /// Create a new handle bound to the given app's bridge runtime.
-    pub(crate) fn new(app: &OpenHarmonyApp) -> Result<Self> {
+    ///
+    /// Returns an error if the bridge session is not yet active (call during an
+    /// active `NativeAbility` session).
+    pub fn new(app: &OpenHarmonyApp) -> Result<Self> {
         Ok(Self {
             bridge: app.bridge()?,
         })
@@ -96,5 +102,40 @@ impl Process {
             )
             .await?;
         Ok(response.code)
+    }
+}
+
+pub trait ProcessExt {
+    /// App process control handle. Requires an active `NativeAbility` session.
+    fn process(&self) -> Result<Process>;
+}
+
+impl ProcessExt for OpenHarmonyApp {
+    fn process(&self) -> Result<Process> {
+        Process::new(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openharmony_ability::BridgeNapiType;
+
+    #[test]
+    fn process_plugin_requires_no_contexts() {
+        assert_eq!(ProcessBridgePlugin::ID, "ohos.process");
+        assert!(ProcessBridgePlugin::REQUIRED_CONTEXTS.is_empty());
+    }
+
+    #[test]
+    fn process_types_have_stable_named_napi_contracts() {
+        assert_eq!(
+            <RestartRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.process.RestartRequest"
+        );
+        assert_eq!(
+            <RestartResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.process.RestartResponse"
+        );
     }
 }

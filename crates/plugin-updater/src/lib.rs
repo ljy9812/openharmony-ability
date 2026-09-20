@@ -26,18 +26,16 @@ use napi_derive_ohos::napi;
 use napi_ohos::{Error, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::{
+use openharmony_ability::{
     impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgeContextRequirement,
     BridgeNapiType, BridgePlugin, BridgeRuntime, OpenHarmonyApp,
 };
 
 // ── Plugin identity ────────────────────────────────────────────────────────
 
-/// Core-privileged OHOS capability (not Tauri-shaped).
-///
-/// First-class OHOS ability exposed on par with `RuntimeInitArgs.app`.
-/// Intentionally NOT facade-ized: the API has no Tauri shape (pure OHOS
-/// platform capability). Precedent: `OpenHarmonyApp::updater()`.
+/// Pure OHOS platform capability with no Tauri shape, exposed as a dedicated
+/// plugin crate. Pairs with the ArkTS HAR `plugins/updater`
+/// (`@ohos-rs/ability-plugin-updater`).
 pub struct UpdaterBridgePlugin;
 
 impl BridgePlugin for UpdaterBridgePlugin {
@@ -95,11 +93,8 @@ impl_bridge_napi_type!(
 
 // ── CheckResult (public serde type) ─────────────────────────────────────────
 
-/// Core-privileged OHOS capability (not Tauri-shaped).
-///
-/// First-class OHOS ability exposed on par with `RuntimeInitArgs.app`.
-/// Intentionally NOT facade-ized: the API has no Tauri shape (pure OHOS
-/// platform capability). Precedent: `OpenHarmonyApp::updater()`.
+/// Pure OHOS platform capability with no Tauri shape, exposed by this plugin
+/// crate. Pairs with the ArkTS HAR `plugins/updater`.
 ///
 /// Result from checking for updates via AppGallery.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,11 +109,8 @@ pub struct CheckResult {
 
 // ── Updater facade ───────────────────────────────────────────────────────────
 
-/// Core-privileged OHOS capability (not Tauri-shaped).
-///
-/// First-class OHOS ability exposed on par with `RuntimeInitArgs.app`.
-/// Intentionally NOT facade-ized: the API has no Tauri shape (pure OHOS
-/// platform capability). Precedent: `OpenHarmonyApp::updater()`.
+/// Pure OHOS platform capability with no Tauri shape, exposed by this plugin
+/// crate. Pairs with the ArkTS HAR `plugins/updater`.
 ///
 /// Updater handle for checking and installing updates via AppGallery.
 /// Holds a [`BridgeRuntime`] clone obtained from [`OpenHarmonyApp::bridge`].
@@ -128,8 +120,8 @@ pub struct CheckResult {
 /// `OpenHarmonyApp::updater()` previously returned `Updater` directly (the handle
 /// was zero-sized and relied on global TSFNs). Those TSFNs were never wired up
 /// after the `#[ability]` derive refactor (`set_helper` is never called), so
-/// every call silently failed. The method now returns `Result<Updater>` and the
-/// handle resolves the bridge runtime explicitly. Callers must update:
+/// every call silently failed. The handle now returns `Result<Updater>` and
+/// resolves the bridge runtime explicitly. Callers must update:
 ///
 /// ```ignore
 /// // before
@@ -137,13 +129,19 @@ pub struct CheckResult {
 /// // after
 /// let updater = app.updater()?;
 /// ```
+///
+/// Since the facade moved into this crate (PR #82), `app.updater()` resolves
+/// through [`UpdaterExt`] — the call shape is unchanged.
 pub struct Updater {
     bridge: BridgeRuntime,
 }
 
 impl Updater {
     /// Create a new handle bound to the given app's bridge runtime.
-    pub(crate) fn new(app: &OpenHarmonyApp) -> Result<Self> {
+    ///
+    /// Returns an error if the bridge session is not yet active (call during an
+    /// active `NativeAbility` session).
+    pub fn new(app: &OpenHarmonyApp) -> Result<Self> {
         Ok(Self {
             bridge: app.bridge()?,
         })
@@ -195,6 +193,17 @@ impl Updater {
                 BridgeCallOptions::default(),
             )
             .await
+    }
+}
+
+pub trait UpdaterExt {
+    /// AppGallery updater handle. Requires an active `NativeAbility` session.
+    fn updater(&self) -> Result<Updater>;
+}
+
+impl UpdaterExt for OpenHarmonyApp {
+    fn updater(&self) -> Result<Updater> {
+        Updater::new(self)
     }
 }
 

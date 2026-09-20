@@ -767,6 +767,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "openharmony-ability-plugin-process"
+version = "1.0.0-beta.0"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+]
+
+[[package]]
 name = "openharmony-ability-plugin-resource"
 version = "1.0.0-beta.1"
 dependencies = [
@@ -791,6 +800,17 @@ name = "openharmony-ability-plugin-statusbar"
 version = "1.0.0-beta.0"
 dependencies = [
  "crossbeam-channel",
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "openharmony-ability-plugin-updater"
+version = "1.0.0-beta.0"
+dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
  "openharmony-ability",

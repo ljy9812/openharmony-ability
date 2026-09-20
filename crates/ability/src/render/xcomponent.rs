@@ -244,9 +244,10 @@ pub fn render(
     // initialized" on every startup (noise, not functional bugs). Consumers have
     // migrated to typed bridge facades (WindowClient / ClipboardClient /
     // AutostartClient / plugin-statusbar / plugin-menu) or still call legacy
-    // top-level fns directly (app.updater / HuaweiAccount / opener::reveal_in_dir —
-    // see decoupling task #6 B-group). Do NOT re-add eager `get_helper()` TSFN
-    // inits here — new capability goes through bridge plugins.
+    // top-level fns directly (opener::reveal_in_dir — see decoupling task #6
+    // B-group; the updater / account facades live in the dedicated
+    // plugin-updater / plugin-account crates). Do NOT re-add eager `get_helper()`
+    // TSFN inits here — new capability goes through bridge plugins.
 
     let mut root = RootNode::new(slot);
     let xcomponent_native =
