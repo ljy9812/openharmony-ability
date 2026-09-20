@@ -63,8 +63,9 @@ Rust plugin facades (BridgePlugin) + application business code (run_loop)
 | `crates/plugin-files` | `ohos.files` — file dialogs (open/save/folder) |
 | `crates/plugin-url` | `ohos.url` — `context.openLink` |
 | `crates/plugin-resource` | `ohos.resource` — inbound-only: ArkTS pushes `resourceManager` from Ability-scoped `onInstall`; no outbound actions |
+| `crates/plugin-fault-injection` | Coverage-testing facade for the built-in `ohos.fault-injection` plugin — see the pairing exception below |
 
-Every `crates/plugin-<name>` is paired with an ArkTS HAR in `plugins/<name>` that exports the matching `BridgePluginFactory`; core (`crates/ability`) never imports any `plugin-*` crate.
+Every `crates/plugin-<name>` is paired with an ArkTS HAR in `plugins/<name>` that exports the matching `BridgePluginFactory`; core (`crates/ability`) never imports any `plugin-*` crate. Exception: `crates/plugin-fault-injection` has no ArkTS HAR — the ArkTS half is the `BridgeHost` built-in (`native_ability/src/main/ets/bridge/FaultInjection.ets`), always registered and disabled by default; its Rust side therefore has no `BridgePlugin` type and calls go through `BridgeClient::call_builtin`.
 
 ### Startup Flow
 

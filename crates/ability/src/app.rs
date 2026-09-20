@@ -1139,41 +1139,6 @@ impl OpenHarmonyApp {
         super::process::Process::new(self)
     }
 
-    // ── Fault injection facade (coverage testing only) ─────────────────────────
-    //
-    // Feature-gated: when `fault-injection` is off, these methods do not exist.
-    // `set_fault_rule` auto-enables the registry on first call (idempotent).
-
-    #[cfg(feature = "fault-injection")]
-    pub async fn set_fault_rule(&self, rule: crate::FaultRuleWire) -> Result<()> {
-        let client = self.bridge()?.client();
-        // Enable the registry (idempotent — safe to call on every set_rule).
-        client
-            .call_fault_injection::<crate::FaultNoopRequest, crate::FaultInjectionAck>(
-                "enable",
-                crate::FaultNoopRequest {},
-            )
-            .await?;
-        client
-            .call_fault_injection::<crate::FaultRuleWire, crate::FaultInjectionAck>(
-                "set-rule", rule,
-            )
-            .await?;
-        Ok(())
-    }
-
-    #[cfg(feature = "fault-injection")]
-    pub async fn clear_fault_rules(&self) -> Result<()> {
-        let client = self.bridge()?.client();
-        client
-            .call_fault_injection::<crate::FaultNoopRequest, crate::FaultInjectionAck>(
-                "clear",
-                crate::FaultNoopRequest {},
-            )
-            .await?;
-        Ok(())
-    }
-
     pub fn run_loop<F: FnMut(Event) + 'static>(&self, event_handle: F) {
         if HAS_EVENT.load(std::sync::atomic::Ordering::SeqCst) {
             return;

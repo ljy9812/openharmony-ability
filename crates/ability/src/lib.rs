@@ -25,9 +25,6 @@ mod updater;
 #[cfg(feature = "process")]
 mod process;
 
-#[cfg(feature = "fault-injection")]
-mod fault_injection;
-
 pub mod version;
 
 #[cfg(feature = "window")]
@@ -109,9 +106,6 @@ pub use updater::*;
 
 #[cfg(feature = "process")]
 pub use process::*;
-
-#[cfg(feature = "fault-injection")]
-pub use fault_injection::*;
 
 pub use version::*;
 

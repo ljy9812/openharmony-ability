@@ -20,7 +20,6 @@ updater = []
 process = []
 window = ["dep:ohos-native-window-binding"]
 global_shortcut = []
-fault-injection = []
 
 [dependencies]
 # common dependencies
