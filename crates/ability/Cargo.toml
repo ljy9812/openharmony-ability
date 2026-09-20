@@ -18,7 +18,7 @@ updater = []
 # Process control (restart via appRecovery) — consumed by tauri-plugin-process,
 # which declares `features = ["process"]` on its OHOS target dependency.
 process = []
-window = []
+window = ["dep:ohos-native-window-binding"]
 global_shortcut = []
 fault-injection = []
 
@@ -46,3 +46,6 @@ ohos-arkui-sys = { workspace = true }
 ohos-ime-binding = { workspace = true }
 ohos-display-binding = { workspace = true }
 ohos-resource-manager-binding = { workspace = true }
+
+# cursor-grab NDK FFI (re-exported from the `window` module)
+ohos-native-window-binding = { workspace = true, optional = true }

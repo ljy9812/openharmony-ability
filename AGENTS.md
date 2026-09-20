@@ -55,6 +55,7 @@ Rust plugin facades (BridgePlugin) + application business code (run_loop)
 |-------|---------|
 | `crates/ability` | Core: lifecycle/`run_loop`, bridge transport (`impl_bridge_napi_type!`, `BridgeNapiType`, `BridgePlugin`, `BridgeRuntime`, `BridgeHost`), ArkUI/xcomponent/ime binding re-exports |
 | `crates/derive` | `#[ability]` entry macro |
+| `crates/ohos-native-window-binding` | Dependency-free NDK FFI for `libnative_window_manager.so` (cursor lock, API 22+); re-exported from `crates/ability`'s `window` module — destined for `ohos-rs/ohos-native-bindings` |
 | `crates/plugin-permission` | `ohos.permission` — async permission request |
 | `crates/plugin-app-control` | `ohos.app-control` — sync main-thread terminate |
 | `crates/plugin-window` | `ohos.window` — async avoid-area and multi-window operations |
