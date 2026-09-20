@@ -625,7 +625,6 @@ dependencies = [
  "ohos-arkui-binding",
  "ohos-arkui-sys",
  "ohos-display-binding",
- "ohos-hilog-binding",
  "ohos-ime-binding",
  "ohos-resource-manager-binding",
  "ohos-xcomponent-binding",

@@ -33,14 +33,11 @@ pub mod version;
 #[cfg(feature = "window")]
 pub mod window;
 
-#[cfg(feature = "clipboard")]
-pub mod clipboard;
-
 #[cfg(feature = "global_shortcut")]
 pub mod global_shortcut;
 
 // ─── Logging macros (gated behind "log" feature) ───
-// When the feature is on, delegate to the `log` crate (backed by ohos-hilog-binding on OHOS).
+// When the feature is on, delegate to the `log` crate facade.
 // When off, expand to no-ops — zero overhead, no dependency on `log`.
 
 #[cfg(feature = "log")]
