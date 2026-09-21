@@ -29,7 +29,7 @@ cd rust_example/demo_native && ohrs build --arch arm64
 
 # Forbidden JSON-bridge scan — must stay empty
 rg -n "BridgeJson|call_json|bridgeJson|requireBridgeJson|JSON\.stringify|JSON\.parse" \
-  crates/plugin-* plugins/*/src native_ability
+  crates/plugin-* plugins/*/src native_ability ability_support
 ```
 
 ## Architecture
@@ -48,6 +48,15 @@ crates/ability bridge (BridgeRuntime / BridgeMainThread / PluginLifecycleEvent)
    ▼
 Rust plugin facades (BridgePlugin) + application business code (run_loop)
 ```
+
+### ArkTS Package Layout
+
+The ArkTS side ships as two ohpm workspace packages (PR #82 review 意见②③):
+
+- `native_ability` → `@ohos-rs/ability`: the bridge contract — `NativeAbility`, plugin base classes, call contexts, lifecycle payloads, the `Module` loading contract, and the shared bridge-plugin utilities.
+- `ability_support` → `@ohos-rs/ability-support`: the implementation tree — window management (`WindowManager`, sub-window registry), menu/statusbar helpers, key synthesis, the UI components (`DefaultXComponent`, `MainPage`, `FloatPage`, `MenuBarComponent`), and the module-loading runtime.
+
+`@ohos-rs/ability` depends on `@ohos-rs/ability-support`; the reverse edge is forbidden. The two callbacks the support tree used to make into `BridgeHost` (process-wide sync fan-out, component attach/detach) go through the `NativeBridgePort` interface instead, whose host-backed implementation `BridgeHostRegistry.prepare()` installs at startup.
 
 ### Workspace Crates
 
