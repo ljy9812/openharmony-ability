@@ -4,7 +4,7 @@ import {
   AcceleratorMatcher,
   isClipboardEnabled,
   isZoomHotkeysEnabled,
-} from "../helper/accelerator_matcher";
+} from "@ohos-rs/ability-support";
 import {
   MenuBarComponent,
   getMenuClickHandler,
@@ -13,8 +13,8 @@ import {
 } from "./MenuBarComponent";
 import { KeyCode } from "@kit.InputKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
-import { DOMAIN, MAIN_WINDOW_ID } from "../helper/constants";
-import { synthesizeDomKeyEvent } from "../helper/key_synthesis";
+import { DOMAIN, MAIN_WINDOW_ID } from "@ohos-rs/ability-support";
+import { synthesizeDomKeyEvent } from "@ohos-rs/ability-support";
 import { WindowManager } from "../window/WindowManager";
 import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
 import { invokeNativeBackPressInterceptor } from "../runtime/BackPress";

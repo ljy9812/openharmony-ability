@@ -26,10 +26,10 @@ import {
   getMenuDataCallback,
 } from "../components/MenuBarComponent";
 import { MenuManager, PredefinedActionExecutor, setPredefinedActionExecutor } from "../helper/menu";
-import { AboutMetadataData } from "../helper/menu_types";
+import { AboutMetadataData } from "@ohos-rs/ability-support";
 import { setCurrentAbilityName } from "../helper/StatusBarUtils";
 import { WindowManager, WindowSizeEventWrap, WindowRectEventWrap } from "../window/WindowManager";
-import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "../helper/constants";
+import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "@ohos-rs/ability-support";
 import { setPrimaryWebviewControllerCallback } from "../components/DefaultXComponent";
 import { ProcessInitializer } from "./ProcessInitializer";
 

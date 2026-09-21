@@ -1,5 +1,5 @@
-import { MenuItemData } from "../helper/menu_types";
-import { AcceleratorMatcher } from "../helper/accelerator_matcher";
+import { MenuItemData } from "@ohos-rs/ability-support";
+import { AcceleratorMatcher } from "@ohos-rs/ability-support";
 import { image } from "@kit.ImageKit";
 import { buffer } from "@kit.ArkTS";
 import { SymbolGlyphModifier } from "@kit.ArkUI";

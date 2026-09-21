@@ -1440,7 +1440,7 @@ function BuildWebview(data: ManagedWebview) {
  * Document-start scripts with the key-synthesis shim appended (main window
  * only). The shim suppresses ArkWeb's degenerate native keydown/keyup events
  * so pages see only the synthetic stream from MainPage.onKeyPreIme (see
- * native_ability helper/key_synthesis.ets, openspec ohos-webview-key-synthesis).
+ * ability_support helper/key_synthesis.ets, openspec ohos-webview-key-synthesis).
  *
  * Sub-window (Float) webviews are excluded: they have no key-synthesis wiring
  * (their onKeyPreIme serves other interception purposes, see FloatPage), so

@@ -10,14 +10,14 @@ import {
   AcceleratorMatcher,
   isClipboardEnabled,
   isZoomHotkeysEnabled,
-} from "../helper/accelerator_matcher";
+} from "@ohos-rs/ability-support";
 import { KeyCode, pointer } from "@kit.InputKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { BusinessError, deviceInfo } from "@kit.BasicServicesKit";
 import { window as arkWindow, CursorController } from "@kit.ArkUI";
 import { display } from "@kit.ArkUI";
 import { WindowManager } from "../window/WindowManager";
-import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "../helper/constants";
+import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "@ohos-rs/ability-support";
 
 export const RouteName = "FloatWindow";
 

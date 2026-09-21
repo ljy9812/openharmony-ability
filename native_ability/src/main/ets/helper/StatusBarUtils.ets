@@ -5,7 +5,7 @@ import { image } from "@kit.ImageKit";
 import { statusBarManager } from "@kit.DeskTopExtensionKit";
 import { emitter, BusinessError } from "@kit.BasicServicesKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
-import { DOMAIN } from "./constants";
+import { DOMAIN } from "@ohos-rs/ability-support";
 import { BridgeHostRegistry } from "../bridge/BridgeHost";
 
 // Global state

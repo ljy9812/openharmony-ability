@@ -6,7 +6,7 @@ import { deviceInfo } from "@kit.BasicServicesKit";
 import { Module, AbilityInitContext } from "./type";
 import { Loadable } from "../helper/loadable";
 import { WindowManager } from "../window/WindowManager";
-import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "../helper/constants";
+import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "@ohos-rs/ability-support";
 
 /**
  * ProcessInitializer — process-level initialization, executed only once.

@@ -53,11 +53,7 @@ export {
   PredefinedActionExecutor,
   MenuManager,
 } from "./src/main/ets/helper/menu";
-export type {
-  MenuItemData,
-  AboutMetadataData,
-  PredefinedType,
-} from "./src/main/ets/helper/menu_types";
+export type { MenuItemData, AboutMetadataData, PredefinedType } from "@ohos-rs/ability-support";
 
 // ─── StatusBar helpers (exported for StatusbarPlugin.ets bridge plugin) ─────
 export {
@@ -79,7 +75,7 @@ export {
   notifyKeySynthesisController,
   synthesizeDomKeyEvent,
   KEY_SYNTHESIS_SHIM,
-} from "./src/main/ets/helper/key_synthesis";
+} from "@ohos-rs/ability-support";
 
 // ─── Shared bridge-plugin utilities (issue #87 minor-6) ──────────────────────
 // DOMAIN used to be re-declared in every plugin that logs via hilog; the
@@ -87,7 +83,7 @@ export {
 // were duplicated per plugin with drifting signatures. Plugins import these
 // from "@ohos-rs/ability" instead (pack-plugins.ps1 rewrites that specifier
 // to the internal path when assembling the published HAR).
-export { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "./src/main/ets/helper/constants";
+export { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "@ohos-rs/ability-support";
 export {
   expectBridgeRequestType,
   BridgeAcknowledgement,

@@ -2,7 +2,7 @@ import { UIContext } from "@kit.ArkUI";
 import { FrameNode } from "@ohos.arkui.node";
 import web_webview from "@ohos.web.webview";
 import { hilog } from "@kit.PerformanceAnalysisKit";
-import { DOMAIN } from "../helper/constants";
+import { DOMAIN } from "@ohos-rs/ability-support";
 
 /**
  * Per-window attachment registry, extracted from WindowManager (issue #87 major-5).
