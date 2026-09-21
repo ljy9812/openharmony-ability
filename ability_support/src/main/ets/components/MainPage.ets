@@ -1,10 +1,10 @@
 import { DefaultXComponent } from "./DefaultXComponent";
-import { Module } from "../ability/type";
+import { Module } from "../helper/native_module";
 import {
   AcceleratorMatcher,
   isClipboardEnabled,
   isZoomHotkeysEnabled,
-} from "@ohos-rs/ability-support";
+} from "../helper/accelerator_matcher";
 import {
   MenuBarComponent,
   getMenuClickHandler,
@@ -13,11 +13,11 @@ import {
 } from "./MenuBarComponent";
 import { KeyCode } from "@kit.InputKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
-import { DOMAIN, MAIN_WINDOW_ID } from "@ohos-rs/ability-support";
-import { synthesizeDomKeyEvent } from "@ohos-rs/ability-support";
+import { DOMAIN, MAIN_WINDOW_ID } from "../helper/constants";
+import { synthesizeDomKeyEvent } from "../helper/key_synthesis";
 import { WindowManager } from "../window/WindowManager";
-import { NativeModuleLoader } from "@ohos-rs/ability-support";
-import { invokeNativeBackPressInterceptor } from "@ohos-rs/ability-support";
+import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
+import { invokeNativeBackPressInterceptor } from "../runtime/BackPress";
 
 export const RouteName = "NativeAbility";
 

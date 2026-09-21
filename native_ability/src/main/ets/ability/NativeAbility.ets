@@ -3,7 +3,7 @@ import common from "@ohos.app.ability.common";
 import window from "@ohos.window";
 import webview from "@ohos.web.webview";
 import { hilog } from "@kit.PerformanceAnalysisKit";
-import * as Entry from "../components/MainPage";
+import * as Entry from "@ohos-rs/ability-support";
 import { BridgeHostRegistry } from "../bridge/BridgeHost";
 import { NativeModuleLoader } from "@ohos-rs/ability-support";
 import { AbilityStateCodec } from "../runtime/AbilityStateCodec";
@@ -24,13 +24,17 @@ import {
   setMenuClickHandler,
   setMenuBarRecoverFn,
   getMenuDataCallback,
-} from "../components/MenuBarComponent";
-import { MenuManager, PredefinedActionExecutor, setPredefinedActionExecutor } from "../helper/menu";
+} from "@ohos-rs/ability-support";
+import {
+  MenuManager,
+  PredefinedActionExecutor,
+  setPredefinedActionExecutor,
+} from "@ohos-rs/ability-support";
 import { AboutMetadataData } from "@ohos-rs/ability-support";
-import { setCurrentAbilityName } from "../helper/StatusBarUtils";
-import { WindowManager, WindowSizeEventWrap, WindowRectEventWrap } from "../window/WindowManager";
+import { setCurrentAbilityName } from "@ohos-rs/ability-support";
+import { WindowManager, WindowSizeEventWrap, WindowRectEventWrap } from "@ohos-rs/ability-support";
 import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "@ohos-rs/ability-support";
-import { setPrimaryWebviewControllerCallback } from "../components/DefaultXComponent";
+import { setPrimaryWebviewControllerCallback } from "@ohos-rs/ability-support";
 import { ProcessInitializer } from "./ProcessInitializer";
 
 export const STATE_KEY = "ohos.rs.ability.application.state";

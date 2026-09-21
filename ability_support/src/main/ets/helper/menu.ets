@@ -1,4 +1,4 @@
-import { MenuItemData, PredefinedType, AboutMetadataData } from "@ohos-rs/ability-support";
+import { MenuItemData, PredefinedType, AboutMetadataData } from "./menu_types";
 import web_webview from "@ohos.web.webview";
 import window from "@ohos.window";
 import common from "@ohos.app.ability.common";
@@ -6,9 +6,9 @@ import { Want } from "@kit.AbilityKit";
 import { pasteboard } from "@kit.BasicServicesKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { WindowManager } from "../window/WindowManager";
-import { Module } from "../ability/type";
+import { Module } from "./native_module";
 import { getMenuDataCallback } from "../components/MenuBarComponent";
-import { DOMAIN, NATIVE_MODULE_STORAGE_KEY, MAIN_WINDOW_ID } from "@ohos-rs/ability-support";
+import { DOMAIN, NATIVE_MODULE_STORAGE_KEY, MAIN_WINDOW_ID } from "./constants";
 
 // Global executor singleton — shared by Menu and Tray execution paths
 let globalExecutor: PredefinedActionExecutor | null = null;

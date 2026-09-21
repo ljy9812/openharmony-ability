@@ -1,5 +1,5 @@
 import { DefaultXComponent } from "./DefaultXComponent";
-import { Module } from "../ability/type";
+import { Module } from "../helper/native_module";
 import {
   MenuBarComponent,
   getMenuClickHandler,
@@ -10,14 +10,14 @@ import {
   AcceleratorMatcher,
   isClipboardEnabled,
   isZoomHotkeysEnabled,
-} from "@ohos-rs/ability-support";
+} from "../helper/accelerator_matcher";
 import { KeyCode, pointer } from "@kit.InputKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { BusinessError, deviceInfo } from "@kit.BasicServicesKit";
 import { window as arkWindow, CursorController } from "@kit.ArkUI";
 import { display } from "@kit.ArkUI";
 import { WindowManager } from "../window/WindowManager";
-import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "@ohos-rs/ability-support";
+import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "../helper/constants";
 
 export const RouteName = "FloatWindow";
 

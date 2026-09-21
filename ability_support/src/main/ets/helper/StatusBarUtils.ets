@@ -5,8 +5,8 @@ import { image } from "@kit.ImageKit";
 import { statusBarManager } from "@kit.DeskTopExtensionKit";
 import { emitter, BusinessError } from "@kit.BasicServicesKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
-import { DOMAIN } from "@ohos-rs/ability-support";
-import { BridgeHostRegistry } from "../bridge/BridgeHost";
+import { DOMAIN } from "./constants";
+import { getNativeBridgePort } from "./native_bridge";
 
 // Global state
 let abilityContext: common.UIAbilityContext | null = null;
@@ -62,7 +62,7 @@ const iconClickHandler = (event: emitter.EventData): void => {
       clickType = "leftClick";
     }
     hilog.info(DOMAIN, "StatusBar", "iconClickHandler forwarding clickType=%{public}s", clickType);
-    BridgeHostRegistry.invokeNativeSyncProcessWide(
+    getNativeBridgePort().invokeNativeSyncProcessWide(
       "ohos.statusbar",
       "icon-click",
       "ohos.statusbar.IconClickEvent",
@@ -93,7 +93,7 @@ const menuClickHandler = (event: emitter.EventData): void => {
       return;
     }
     hilog.info(DOMAIN, "StatusBar", "menuClickHandler forwarding menuCode=%{public}s", menuCode);
-    BridgeHostRegistry.invokeNativeSyncProcessWide(
+    getNativeBridgePort().invokeNativeSyncProcessWide(
       "ohos.statusbar",
       "menu-click",
       "ohos.statusbar.MenuClickEvent",

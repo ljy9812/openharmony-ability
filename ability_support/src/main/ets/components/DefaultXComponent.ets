@@ -2,9 +2,9 @@ import { NodeContent } from "@kit.ArkUI";
 import { FrameNode, NodeController } from "@ohos.arkui.node";
 import { UIContext } from "@ohos.arkui.UIContext";
 import { hilog } from "@kit.PerformanceAnalysisKit";
-import { Module } from "../ability/type";
-import { BridgeHostRegistry } from "../bridge/BridgeHost";
-import { NativeModuleLoader } from "@ohos-rs/ability-support";
+import { Module } from "../helper/native_module";
+import { getNativeBridgePort } from "../helper/native_bridge";
+import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
 import { WindowManager } from "../window/WindowManager";
 
 export const RouteName = "NativeAbility";
@@ -156,7 +156,7 @@ export struct DefaultXComponent {
       // before `ui-context-ready`. Keep it inside the render transaction: FrameNode construction
       // failure must release the native RootNode/render owner as well.
       const root = this.nodeController.makeNode(this.getUIContext());
-      await BridgeHostRegistry.attachComponent(
+      await getNativeBridgePort().attachComponent(
         sessionId,
         moduleName,
         renderOwner,
@@ -202,11 +202,8 @@ export struct DefaultXComponent {
     // RootNode owns the ContentSlot handle and must be dropped synchronously while this component
     // still owns a live NodeContent. Host/plugin cleanup may continue asynchronously afterwards.
     attachment.nativeModule.disposeRender(attachment.renderOwner);
-    return BridgeHostRegistry.detachComponent(
-      attachment.sessionId,
-      attachment.moduleName,
-      attachment.renderOwner,
-    )
+    return getNativeBridgePort()
+      .detachComponent(attachment.sessionId, attachment.moduleName, attachment.renderOwner)
       .catch(() => {})
       .finally(() => {
         this.nodeController.disposeRoot();

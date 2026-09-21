@@ -69,3 +69,60 @@ export type {
 // (back-press interceptor); also re-exported by the core index.
 export { NativeModuleLoader } from "./src/main/ets/runtime/NativeModuleLoader";
 export { invokeNativeBackPressInterceptor } from "./src/main/ets/runtime/BackPress";
+
+// ─── UI components (re-exported by the core index for app consumers) ────────
+export {
+  DefaultXComponent,
+  notifyPrimaryWebviewController,
+} from "./src/main/ets/components/DefaultXComponent";
+// Consumed directly by the core package's NativeAbility (webview callback
+// wiring and the Entry route name); not part of the app-facing surface.
+export { setPrimaryWebviewControllerCallback } from "./src/main/ets/components/DefaultXComponent";
+// The @Entry struct itself is not exportable; NativeAbility reaches the route
+// through `import * as Entry` + RouteName, exactly as before the move.
+export { RouteName } from "./src/main/ets/components/MainPage";
+export { WindowManager } from "./src/main/ets/window/WindowManager";
+// Window event payload types re-exported by WindowManager; BridgeHost imports
+// them from this package alongside the manager itself.
+export { WindowSizeEventWrap, WindowRectEventWrap } from "./src/main/ets/window/WindowManager";
+
+// ─── Menu helpers (exported for MenuPlugin.ets bridge plugin) ───────────────
+export {
+  setMenuClickHandler,
+  getMenuClickHandler,
+  unregisterMenuClickHandler,
+  setMenuBarRecoverFn,
+  getMenuBarRecoverFn,
+  unregisterMenuBarRecoverFn,
+  getMenuDataCallback,
+  registerMenuDataCallback,
+  unregisterMenuDataCallback,
+  windowKeyForId,
+  isMenubarVisible,
+} from "./src/main/ets/components/MenuBarComponent";
+export type { MenuDataCallback } from "./src/main/ets/components/MenuBarComponent";
+export {
+  setPredefinedActionExecutor,
+  getPredefinedActionExecutor,
+  PredefinedActionExecutor,
+  MenuManager,
+} from "./src/main/ets/helper/menu";
+
+// ─── StatusBar helpers (exported for StatusbarPlugin.ets bridge plugin) ─────
+export {
+  getAbilityContext,
+  createPixelMapFromRgba,
+  createPixelMapFromRgbaWH,
+  fillMenuItemAbilityName,
+  processMenuItemIcons,
+  reRegisterStatusBarClickHandlers,
+  setCurrentAbilityName,
+  setAbilityContext,
+} from "./src/main/ets/helper/StatusBarUtils";
+
+// ─── Reverse-direction bridge port ───────────────────────────────────────────
+// The core package's BridgeHostRegistry.prepare() installs the host-backed
+// implementation; StatusBarUtils and DefaultXComponent consume it instead of
+// importing the core package (PR #82 har split).
+export { getNativeBridgePort, installNativeBridgePort } from "./src/main/ets/helper/native_bridge";
+export type { NativeBridgePort } from "./src/main/ets/helper/native_bridge";

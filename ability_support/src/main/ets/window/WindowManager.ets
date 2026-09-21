@@ -7,13 +7,13 @@ import { deviceInfo } from "@kit.BasicServicesKit";
 import display from "@ohos.display";
 import * as FloatPage from "../components/FloatPage";
 import { getMenuDataCallback, windowKeyForId } from "../components/MenuBarComponent";
-import { DOMAIN } from "@ohos-rs/ability-support";
+import { DOMAIN } from "../helper/constants";
 import {
   clearClipboardEnabled,
   clearZoomHotkeysEnabled,
   setClipboardEnabled,
   setZoomHotkeysEnabled,
-} from "@ohos-rs/ability-support";
+} from "../helper/accelerator_matcher";
 import web_webview from "@ohos.web.webview";
 import { RectThrottle, WindowRectEventWrap, WindowSizeEventWrap } from "./RectThrottle";
 import { WindowAttachmentRegistry } from "./WindowAttachmentRegistry";

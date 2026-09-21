@@ -27,10 +27,10 @@ export type {
   MainThreadSyncBridgePlugin,
   Module,
 } from "./src/main/ets/ability/type";
-export { DefaultXComponent } from "./src/main/ets/components/DefaultXComponent";
-export { notifyPrimaryWebviewController } from "./src/main/ets/components/DefaultXComponent";
+export { DefaultXComponent } from "@ohos-rs/ability-support";
+export { notifyPrimaryWebviewController } from "@ohos-rs/ability-support";
 export { invokeNativeBackPressInterceptor } from "@ohos-rs/ability-support";
-export { WindowManager } from "./src/main/ets/window/WindowManager";
+export { WindowManager } from "@ohos-rs/ability-support";
 
 // ─── Menu helpers (exported for MenuPlugin.ets bridge plugin) ───────────────
 export {
@@ -45,14 +45,14 @@ export {
   unregisterMenuDataCallback,
   windowKeyForId,
   isMenubarVisible,
-} from "./src/main/ets/components/MenuBarComponent";
-export type { MenuDataCallback } from "./src/main/ets/components/MenuBarComponent";
+} from "@ohos-rs/ability-support";
+export type { MenuDataCallback } from "@ohos-rs/ability-support";
 export {
   setPredefinedActionExecutor,
   getPredefinedActionExecutor,
   PredefinedActionExecutor,
   MenuManager,
-} from "./src/main/ets/helper/menu";
+} from "@ohos-rs/ability-support";
 export type { MenuItemData, AboutMetadataData, PredefinedType } from "@ohos-rs/ability-support";
 
 // ─── StatusBar helpers (exported for StatusbarPlugin.ets bridge plugin) ─────
@@ -65,7 +65,7 @@ export {
   reRegisterStatusBarClickHandlers,
   setCurrentAbilityName,
   setAbilityContext,
-} from "./src/main/ets/helper/StatusBarUtils";
+} from "@ohos-rs/ability-support";
 export type { StatusBarIconRgba } from "./src/main/ets/ability/type";
 
 // ─── Key synthesis helpers (exported for WebviewPlugin.ets bridge plugin) ────

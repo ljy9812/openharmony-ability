@@ -1,6 +1,6 @@
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { window } from "@kit.ArkUI";
-import { DOMAIN } from "@ohos-rs/ability-support";
+import { DOMAIN } from "../helper/constants";
 
 // Phase 3 (design.md D5): typed wrappers replacing ESObject, eliminating
 // arkts-limited-esobj WARN. These carry windowId through the NAPI boundary.

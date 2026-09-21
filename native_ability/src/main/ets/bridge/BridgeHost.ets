@@ -2,7 +2,7 @@ import common from "@ohos.app.ability.common";
 import { FrameNode } from "@ohos.arkui.node";
 import { UIContext } from "@ohos.arkui.UIContext";
 import window from "@ohos.window";
-import { WindowManager, WindowSizeEventWrap, WindowRectEventWrap } from "../window/WindowManager";
+import { WindowManager, WindowSizeEventWrap, WindowRectEventWrap } from "@ohos-rs/ability-support";
 import {
   ApplicationLifecycle,
   BridgeCallContext,
@@ -21,6 +21,7 @@ import {
 import { SerialTaskQueue } from "../runtime/SerialTaskQueue";
 import { CancellableTaskScope, TaskCancellationSignal } from "../runtime/CancellableTaskScope";
 import { FAULT_REGISTRY, FaultInjectionPlugin } from "./FaultInjection";
+import { installNativeBridgePort, NativeBridgePort } from "@ohos-rs/ability-support";
 
 // Upper bound for per-call timeouts (callers opt in via bridgeInvoke's timeoutMs).
 // 5 minutes: interactive flows that put up system UI (e.g. Huawei account login
@@ -1830,6 +1831,49 @@ class BridgeHost {
 }
 
 /**
+ * Host-backed implementation of the support package's NativeBridgePort. Installed by
+ * BridgeHostRegistry.prepare() so StatusBarUtils/DefaultXComponent can call into the bridge
+ * without importing the core package (PR #82 har split reverse-edge inversion).
+ */
+class HostBridgePort implements NativeBridgePort {
+  invokeNativeSyncProcessWide(
+    pluginId: string,
+    event: string,
+    requestTypeName: string,
+    responseTypeName: string,
+    value: ESObject,
+  ): ESObject[] {
+    return BridgeHostRegistry.invokeNativeSyncProcessWide(
+      pluginId,
+      event,
+      requestTypeName,
+      responseTypeName,
+      value,
+    );
+  }
+
+  attachComponent(
+    sessionId: string,
+    moduleName: string,
+    componentOwner: string,
+    uiContext: UIContext,
+    root: FrameNode,
+  ): Promise<void> {
+    return BridgeHostRegistry.attachComponent(
+      sessionId,
+      moduleName,
+      componentOwner,
+      uiContext,
+      root,
+    );
+  }
+
+  detachComponent(sessionId: string, moduleName: string, componentOwner: string): Promise<void> {
+    return BridgeHostRegistry.detachComponent(sessionId, moduleName, componentOwner);
+  }
+}
+
+/**
  * Session registry is transport plumbing only. It is keyed by a NativeAbility-created session
  * instead of a process-global Helper, so stale calls cannot reach a recreated ability instance.
  */
@@ -1844,6 +1888,11 @@ export class BridgeHostRegistry {
     abilityContext: common.UIAbilityContext,
     factories: BridgePluginFactory[],
   ): string {
+    // Invert the support-package reverse edge (PR #82 har split): StatusBarUtils
+    // and DefaultXComponent reach the bridge through the NativeBridgePort this
+    // installs, instead of importing BridgeHostRegistry from the core package.
+    // Every session installs an equivalent adapter; the port is never uninstalled.
+    installNativeBridgePort(new HostBridgePort());
     const sessionId = `bridge-${Date.now()}-${BridgeHostRegistry.nextSession++}`;
     const hosts: Map<string, BridgeHost> = new Map();
     if (moduleNames.length === 0) {
