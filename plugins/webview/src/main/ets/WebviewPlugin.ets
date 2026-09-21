@@ -20,11 +20,13 @@ import {
   BridgeAcknowledgement,
   NATIVE_MODULE_STORAGE_KEY,
   Module,
+} from "@ohos-rs/ability";
+import {
   WindowManager,
   notifyPrimaryWebviewController,
   notifyKeySynthesisController,
   KEY_SYNTHESIS_SHIM,
-} from "@ohos-rs/ability";
+} from "@ohos-rs/ability-support";
 
 const CREATE_REQUEST_TYPE = "ohos.webview.CreateRequest";
 const CREATE_RESPONSE_TYPE = "ohos.webview.CreateResponse";

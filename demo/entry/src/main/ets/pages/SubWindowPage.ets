@@ -1,4 +1,4 @@
-import { DefaultXComponent } from "@ohos-rs/ability";
+import { DefaultXComponent } from "@ohos-rs/ability-support";
 import window from "@ohos.window";
 import { createSubWindowWebview, subWindowKeyboardInset } from "libdemo_sub_native.so";
 import { SUB_WINDOW_NATIVE_MODULE } from "../entryability/EntryAbility";

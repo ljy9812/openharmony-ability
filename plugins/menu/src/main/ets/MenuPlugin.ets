@@ -7,11 +7,13 @@ import {
   BridgeContextRequirement,
   DOMAIN,
   expectBridgeRequestType,
+} from "@ohos-rs/ability";
+import {
   getMenuDataCallback,
   getPredefinedActionExecutor,
   WindowManager,
   type PredefinedType,
-} from "@ohos-rs/ability";
+} from "@ohos-rs/ability-support";
 
 const SET_MENUBAR_REQUEST_TYPE = "ohos.menu.SetMenubarRequest";
 const POPUP_REQUEST_TYPE = "ohos.menu.PopupRequest";

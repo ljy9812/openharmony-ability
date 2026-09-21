@@ -2,15 +2,18 @@ import { statusBarManager } from "@kit.DeskTopExtensionKit";
 import { BusinessError } from "@kit.BasicServicesKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import {
-  type AboutMetadataData,
   AsyncPluginBase,
   BridgeAcknowledgement,
   BridgeCallContext,
   BridgeTypedValue,
   BridgeContextRequirement,
-  createPixelMapFromRgba,
   DOMAIN,
   expectBridgeRequestType,
+  type StatusBarIconRgba,
+} from "@ohos-rs/ability";
+import {
+  type AboutMetadataData,
+  createPixelMapFromRgba,
   fillMenuItemAbilityName,
   getPredefinedActionExecutor,
   processMenuItemIcons,
@@ -18,8 +21,7 @@ import {
   setAbilityContext,
   setCurrentAbilityName,
   type PredefinedType,
-  type StatusBarIconRgba,
-} from "@ohos-rs/ability";
+} from "@ohos-rs/ability-support";
 
 const ADD_REQUEST_TYPE = "ohos.statusbar.AddRequest";
 const REMOVE_REQUEST_TYPE = "ohos.statusbar.RemoveRequest";
