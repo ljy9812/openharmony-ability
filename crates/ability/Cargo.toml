@@ -8,7 +8,7 @@ description = "Binding Rust application on Harmony with Ability"
 [features]
 default = ["log", "window"]
 log = ["dep:log"]
-window = ["dep:ohos-native-window-binding"]
+window = ["dep:ohos-window-manager-binding"]
 global_shortcut = []
 
 [dependencies]
@@ -36,5 +36,6 @@ ohos-ime-binding = { workspace = true }
 ohos-display-binding = { workspace = true }
 ohos-resource-manager-binding = { workspace = true }
 
-# cursor-grab NDK FFI (re-exported from the `window` module)
-ohos-native-window-binding = { workspace = true, optional = true }
+# cursor-grab NDK FFI (re-exported from the `window` module); api-22 feature
+# gates OH_WindowManager_LockCursor/UnlockCursor
+ohos-window-manager-binding = { workspace = true, optional = true, features = ["api-22"] }

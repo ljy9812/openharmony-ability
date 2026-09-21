@@ -238,8 +238,10 @@ pub fn get_last_ui_ability_window_id() -> i64 {
 
 // ─── Cursor grab ─────────────────────────────────────────────────────────────
 // Cursor lock is pure NDK FFI (OH_WindowManager_LockCursor/UnlockCursor,
-// libnative_window_manager.so, API 22+), extracted into the
-// `ohos-native-window-binding` crate (PR #82 review). Re-exported here so
-// `openharmony_ability::window::set_cursor_grab` (tao's call path) and the
-// crate-root glob (`pub use window::*`) both keep resolving.
-pub use ohos_native_window_binding::{set_cursor_grab, CursorGrabError};
+// libnative_window_manager.so, API 22+) via the crates.io
+// `ohos-window-manager-binding` crate (ohos-rs binding family, PR #82
+// review). Re-exported here so `openharmony_ability::window::set_cursor_grab`
+// (tao's call path) and the crate-root glob (`pub use window::*`) both keep
+// resolving.
+mod cursor_grab;
+pub use cursor_grab::{set_cursor_grab, CursorGrabError};

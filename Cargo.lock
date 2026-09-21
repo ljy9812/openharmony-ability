@@ -483,6 +483,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fec24149e03adc316b7aaca40aca577ce05a0db31793bd3ed585bea5fba8382a"
 
 [[package]]
+name = "ohos-image-native-binding"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0de7506ff6218182c1f97b3900831358051dded225909b50a61cf862cebd262b"
+dependencies = [
+ "libc",
+ "napi-sys-ohos",
+ "ohos-enum-derive",
+ "ohos-image-native-sys",
+ "ohos-native-buffer-binding",
+ "ohos-native-buffer-sys",
+ "ohos-resource-manager-sys",
+]
+
+[[package]]
 name = "ohos-image-native-sys"
 version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -521,6 +536,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97c6c1bbab01c0d6ba34d865568342808f12f187f2aa9c906ccb1dc72aeba69f"
 
 [[package]]
+name = "ohos-multi-modal-input-sys"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f898bc22f696dcf94e022f67e8bb84737011e763b608f84e723aa454874cc036"
+dependencies = [
+ "ohos-image-native-sys",
+]
+
+[[package]]
+name = "ohos-native-buffer-binding"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce5cdb283c6dad8483eee311d258c88fbda091d601b1a0ca9f84e6e01e795f16"
+dependencies = [
+ "ohos-native-buffer-sys",
+ "ohos-native-window-sys",
+]
+
+[[package]]
 name = "ohos-native-buffer-sys"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -537,8 +571,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "ohos-native-window-binding"
+name = "ohos-native-window-manager-sys"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06509635f7ffef25be1729c51f6d08a6ce0e48fa5e37e5284676450465724175"
+dependencies = [
+ "ohos-multi-modal-input-sys",
+]
+
+[[package]]
+name = "ohos-native-window-sys"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1118984263856b11ebd9fbfb35911c10d74ef55778a67be06f1bce09fb5325da"
+dependencies = [
+ "ohos-native-buffer-sys",
+]
 
 [[package]]
 name = "ohos-resource-manager-binding"
@@ -586,6 +634,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8849828ec52de80f0b83855c6db6a1b969eed7637b849a534bd17d0de7e41948"
 
 [[package]]
+name = "ohos-window-manager-binding"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19cff69265d03b3d23bf8ce4fa4d6d97cb1a6f9858c44f5987d56ece8114d389"
+dependencies = [
+ "ohos-enum-derive",
+ "ohos-image-native-binding",
+ "ohos-native-window-manager-sys",
+]
+
+[[package]]
 name = "ohos-xcomponent-binding"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -630,8 +689,8 @@ dependencies = [
  "ohos-arkui-sys",
  "ohos-display-binding",
  "ohos-ime-binding",
- "ohos-native-window-binding",
  "ohos-resource-manager-binding",
+ "ohos-window-manager-binding",
  "ohos-xcomponent-binding",
  "ohos-xcomponent-sys",
  "png",

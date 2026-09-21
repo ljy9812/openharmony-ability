@@ -45,7 +45,7 @@ ohos-display-binding = { version = "0.1" }
 ohos-resource-manager-binding = { version = "0.3" }
 ohos-resource-manager-sys = { version = "0.3" }
 ohos-hilog-binding = { version = "0.2" }
-ohos-native-window-binding = { version = "0.1.0", path = "crates/ohos-native-window-binding" }
+ohos-window-manager-binding = { version = "0.1" }
 
 # Bridge runtime and examples use these without pinning versions in member manifests.
 futures-channel = { version = "0.3" }
