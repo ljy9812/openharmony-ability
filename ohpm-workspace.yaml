@@ -4,6 +4,7 @@
 
 packages:
   - "native_ability" # @ohos-rs/ability source package
+  - "ability_support" # @ohos-rs/ability-support plugin support package
   - "plugins/*" # @ohos-rs/ability-plugin-* capability plugins
 
 exclude:

@@ -3,14 +3,12 @@
     "name": "richerfu",
     "email": "southorange0929@foxmail.com",
   },
-  "dependencies": {
-    "@ohos-rs/ability-support": "file:../ability_support",
-  },
-  "description": "Adaptor for OpenHarmony/HarmonyNext native abilities",
+  "dependencies": {},
+  "description": "Support HAR for @ohos-rs/ability: window management, menu/statusbar helpers, key synthesis and UI components",
   "keywords": ["ohos-rs", "NAPI", "Rust", "node-addon", "openharmony", "harmonynext"],
   "license": "MIT OR Apache-2.0",
   "main": "index.ets",
-  "name": "@ohos-rs/ability",
+  "name": "@ohos-rs/ability-support",
   "repository": "https://github.com/harmony-contrib/openharmony-ability.git",
-  "version": "1.0.0-beta.2",
+  "version": "1.0.0-beta.0",
 }
