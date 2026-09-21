@@ -29,7 +29,7 @@ export type {
 } from "./src/main/ets/ability/type";
 export { DefaultXComponent } from "./src/main/ets/components/DefaultXComponent";
 export { notifyPrimaryWebviewController } from "./src/main/ets/components/DefaultXComponent";
-export { invokeNativeBackPressInterceptor } from "./src/main/ets/runtime/BackPress";
+export { invokeNativeBackPressInterceptor } from "@ohos-rs/ability-support";
 export { WindowManager } from "./src/main/ets/window/WindowManager";
 
 // ─── Menu helpers (exported for MenuPlugin.ets bridge plugin) ───────────────

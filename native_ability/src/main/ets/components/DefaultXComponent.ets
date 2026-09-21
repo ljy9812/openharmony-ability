@@ -4,7 +4,7 @@ import { UIContext } from "@ohos.arkui.UIContext";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { Module } from "../ability/type";
 import { BridgeHostRegistry } from "../bridge/BridgeHost";
-import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
+import { NativeModuleLoader } from "@ohos-rs/ability-support";
 import { WindowManager } from "../window/WindowManager";
 
 export const RouteName = "NativeAbility";

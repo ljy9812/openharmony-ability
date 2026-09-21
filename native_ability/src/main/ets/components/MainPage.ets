@@ -16,8 +16,8 @@ import { hilog } from "@kit.PerformanceAnalysisKit";
 import { DOMAIN, MAIN_WINDOW_ID } from "@ohos-rs/ability-support";
 import { synthesizeDomKeyEvent } from "@ohos-rs/ability-support";
 import { WindowManager } from "../window/WindowManager";
-import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
-import { invokeNativeBackPressInterceptor } from "../runtime/BackPress";
+import { NativeModuleLoader } from "@ohos-rs/ability-support";
+import { invokeNativeBackPressInterceptor } from "@ohos-rs/ability-support";
 
 export const RouteName = "NativeAbility";
 

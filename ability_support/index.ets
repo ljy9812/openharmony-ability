@@ -63,3 +63,9 @@ export type {
   BridgeContextRequirement,
   BridgePluginDeclaration,
 } from "./src/main/ets/helper/native_module";
+
+// ─── Module-loading runtime ──────────────────────────────────────────────────
+// Consumed by the core package's NativeAbility (loader) and @Entry pages
+// (back-press interceptor); also re-exported by the core index.
+export { NativeModuleLoader } from "./src/main/ets/runtime/NativeModuleLoader";
+export { invokeNativeBackPressInterceptor } from "./src/main/ets/runtime/BackPress";

@@ -5,7 +5,7 @@ import webview from "@ohos.web.webview";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import * as Entry from "../components/MainPage";
 import { BridgeHostRegistry } from "../bridge/BridgeHost";
-import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
+import { NativeModuleLoader } from "@ohos-rs/ability-support";
 import { AbilityStateCodec } from "../runtime/AbilityStateCodec";
 import { SerialTaskQueue } from "../runtime/SerialTaskQueue";
 import {

@@ -2,7 +2,7 @@ import { describe, beforeAll, beforeEach, afterEach, afterAll, it, expect } from
 import { SerialTaskQueue } from "../main/ets/runtime/SerialTaskQueue";
 import { AbilityStateCodec } from "../main/ets/runtime/AbilityStateCodec";
 import { CancellableTaskScope } from "../main/ets/runtime/CancellableTaskScope";
-import { NativeModuleLoader } from "../main/ets/runtime/NativeModuleLoader";
+import { NativeModuleLoader } from "@ohos-rs/ability-support";
 import common from "@ohos.app.ability.common";
 import window from "@ohos.window";
 import { FrameNode } from "@ohos.arkui.node";
