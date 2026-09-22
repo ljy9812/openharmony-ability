@@ -3,23 +3,27 @@ import { BusinessError } from "@kit.BasicServicesKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import {
   type AboutMetadataData,
+  getPredefinedActionExecutor,
+  type PredefinedType,
+} from "@ohos-rs/ability-plugin-menu";
+import {
   AsyncPluginBase,
   BridgeAcknowledgement,
   BridgeCallContext,
   BridgeTypedValue,
   BridgeContextRequirement,
-  createPixelMapFromRgba,
   DOMAIN,
   expectBridgeRequestType,
+} from "@ohos-rs/ability";
+import {
+  createPixelMapFromRgba,
   fillMenuItemAbilityName,
-  getPredefinedActionExecutor,
   processMenuItemIcons,
   reRegisterStatusBarClickHandlers,
   setAbilityContext,
   setCurrentAbilityName,
-  type PredefinedType,
   type StatusBarIconRgba,
-} from "@ohos-rs/ability";
+} from "./StatusBarUtils";
 
 const ADD_REQUEST_TYPE = "ohos.statusbar.AddRequest";
 const REMOVE_REQUEST_TYPE = "ohos.statusbar.RemoveRequest";

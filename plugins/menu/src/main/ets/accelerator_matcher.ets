@@ -1,5 +1,31 @@
 import { MenuItemData } from "./menu_types";
 
+// NOTE: the per-window clipboard / zoom-hotkey flags that used to live here moved
+// to the core window layer (native_ability/src/main/ets/helper/window_flags.ets):
+// they are window-builder configuration set only by WindowManager.setWebviewFlags,
+// so they must not live in (nor be imported from) the menu package. The menu
+// plugin's key port reads them through the "@ohos-rs/ability" barrel.
+
+// Per-window matcher registry. Each window's MenuBarComponent owns one matcher
+// (rebuilt in place when that window's menubar data changes) and the key port
+// looks the same instance up by windowId — this preserves the per-window
+// accelerator scoping the core pages used to own as private fields. MenuBarComponent
+// unregisters its entry in aboutToDisappear, mirroring its other registries.
+const windowMatchers: Map<number, AcceleratorMatcher> = new Map();
+
+export function getAcceleratorMatcher(windowId: number): AcceleratorMatcher {
+  let matcher = windowMatchers.get(windowId);
+  if (!matcher) {
+    matcher = new AcceleratorMatcher();
+    windowMatchers.set(windowId, matcher);
+  }
+  return matcher;
+}
+
+export function unregisterAcceleratorMatcher(windowId: number): void {
+  windowMatchers.delete(windowId);
+}
+
 const SPECIAL_KEY_MAP: Map<string, string> = new Map([
   ["Escape", "Esc"],
   ["KEYCODE_ESCAPE", "Esc"],
@@ -187,40 +213,4 @@ export class AcceleratorMatcher {
     }
     return text;
   }
-}
-
-// Per-window clipboard flag: windowId -> clipboard enabled (default true = ArkWeb native).
-// Set by WindowManager.setWebviewFlags (from WebviewPlugin.create's payload.clipboard); read by
-// onKeyPreIme to decide whether to block clipboard shortcuts. See ohos-webview-flag-clipboard spec.
-const clipboardEnabledMap: Map<number, boolean> = new Map();
-
-export function setClipboardEnabled(windowId: number, enabled: boolean): void {
-  clipboardEnabledMap.set(windowId, enabled);
-}
-
-export function isClipboardEnabled(windowId: number): boolean {
-  // Default true (ArkWeb native clipboard) when not explicitly set.
-  return clipboardEnabledMap.get(windowId) ?? true;
-}
-
-export function clearClipboardEnabled(windowId: number): void {
-  clipboardEnabledMap.delete(windowId);
-}
-
-// Per-window zoom-hotkeys flag: windowId -> enabled (default true = ArkWeb native zoom).
-// Set by WindowManager.setWebviewFlags (from WebviewPlugin.create's payload.zoomHotkeys); read
-// by onKeyPreIme to decide whether to block zoom hotkeys. See ohos-webview-flag-zoom-hotkeys spec.
-const zoomHotkeysEnabledMap: Map<number, boolean> = new Map();
-
-export function setZoomHotkeysEnabled(windowId: number, enabled: boolean): void {
-  zoomHotkeysEnabledMap.set(windowId, enabled);
-}
-
-export function isZoomHotkeysEnabled(windowId: number): boolean {
-  // Default true (ArkWeb native zoom) when not explicitly set.
-  return zoomHotkeysEnabledMap.get(windowId) ?? true;
-}
-
-export function clearZoomHotkeysEnabled(windowId: number): void {
-  zoomHotkeysEnabledMap.delete(windowId);
 }

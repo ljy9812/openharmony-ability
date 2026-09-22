@@ -5,6 +5,7 @@
   },
   "dependencies": {
     "@ohos-rs/ability": "file:../../native_ability",
+    "@ohos-rs/ability-plugin-menu": "file:../menu",
   },
   "description": "Status bar capability plugin for @ohos-rs/ability",
   "keywords": [

@@ -1,17 +1,6 @@
 import { DefaultXComponent } from "./DefaultXComponent";
 import { Module } from "../ability/type";
-import {
-  AcceleratorMatcher,
-  isClipboardEnabled,
-  isZoomHotkeysEnabled,
-} from "../helper/accelerator_matcher";
-import {
-  MenuBarComponent,
-  getMenuClickHandler,
-  getMenuBarRecoverFn,
-  isMenubarVisible,
-} from "./MenuBarComponent";
-import { KeyCode } from "@kit.InputKit";
+import { getMenuBarPort, getMenuBarSlotBuilder, type MenuBarSlotBuilder } from "./MenuBarSlot";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { DOMAIN, MAIN_WINDOW_ID } from "../helper/constants";
 import { synthesizeDomKeyEvent } from "../helper/key_synthesis";
@@ -33,7 +22,10 @@ struct MainPage {
   @State private nativeModule: Module | null = null;
   @State private resolvedModuleName: string = "";
 
-  private acceleratorMatcher: AcceleratorMatcher = new AcceleratorMatcher();
+  // Menubar composition slot, registered by the menu plugin before any page
+  // content loads (MenuBarSlot.ets). Null when no menu plugin is installed —
+  // core pages carry no menu-package imports either way.
+  private menuBarSlot: MenuBarSlotBuilder | null = getMenuBarSlotBuilder();
 
   async aboutToAppear(): Promise<void> {
     hilog.info(DOMAIN, "MainPage", "=== MainPage aboutToAppear START ===");
@@ -60,10 +52,9 @@ struct MainPage {
   build() {
     Stack() {
       Column() {
-        MenuBarComponent({
-          windowId: this.windowId,
-          acceleratorMatcher: this.acceleratorMatcher,
-        })
+        if (this.menuBarSlot) {
+          this.menuBarSlot.builder({ windowId: this.windowId });
+        }
         Row() {
           Column() {
             if (this.resolvedModuleName !== "") {
@@ -88,46 +79,12 @@ struct MainPage {
         if (this.nativeModule === null) {
           return false;
         }
-        // Block native clipboard shortcuts when with_clipboard(false) (ohos-webview-flag-clipboard)
-        if (
-          event.type === KeyType.Down &&
-          this.acceleratorMatcher.matchesClipboardShortcut(event) &&
-          !isClipboardEnabled(MAIN_WINDOW_ID)
-        ) {
-          return true;
-        }
-        // Block native zoom hotkeys when with_zoom_hotkeys(false) (ohos-webview-flag-zoom-hotkeys)
-        if (
-          event.type === KeyType.Down &&
-          this.acceleratorMatcher.matchesZoomShortcut(event) &&
-          !isZoomHotkeysEnabled(MAIN_WINDOW_ID)
-        ) {
-          return true;
-        }
-        // Accelerator matching (non-clipboard shortcuts)
-        if (event.type === KeyType.Down && this.acceleratorMatcher.matches(event)) {
-          const matchedItem = this.acceleratorMatcher.getMatchedItem();
-          if (matchedItem) {
-            const handler = getMenuClickHandler(MAIN_WINDOW_ID);
-            if (handler) {
-              handler(matchedItem);
-            }
-          }
-          return true;
-        }
-        // ESC to exit fullscreen / restore menubar. All fullscreen entry points
-        // (window-API set_fullscreen AND predefined menu fullscreen) hide the
-        // menubar via WindowManager.setFullscreen (macOS semantics), so the
-        // menubar-invisible condition alone covers every case.
-        if (
-          event.type === KeyType.Down &&
-          event.keyCode === KeyCode.KEYCODE_ESCAPE &&
-          !isMenubarVisible(MAIN_WINDOW_ID)
-        ) {
-          const recoverFn = getMenuBarRecoverFn(MAIN_WINDOW_ID);
-          if (recoverFn) {
-            recoverFn();
-          }
+        // Menu key handling — clipboard / zoom shortcut blocking per window
+        // flags, accelerator dispatch, ESC fullscreen recover — lives in the
+        // menu plugin's MenuBarPort implementation (MenuBarSlot.ets seam).
+        // Consumed events never reach the synthesizer below.
+        const menuPort = getMenuBarPort();
+        if (menuPort !== null && menuPort.onKeyPreIme(event, this.windowId)) {
           return true;
         }
         // ohos-webview-key-synthesis: forward unconsumed pre-IME key events to

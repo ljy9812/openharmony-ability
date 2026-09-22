@@ -1,4 +1,4 @@
-import { MenuItemData, MenuManager } from "../helper/menu";
+import { MenuItemData, MenuManager } from "./menu";
 @Component
 export struct MenuPopup {
   @Prop items: MenuItemData[];

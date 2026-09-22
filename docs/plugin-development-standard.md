@@ -24,10 +24,12 @@
 
 每个插件必须满足以下边界：
 
-- Rust crate 位于 `crates/plugin-<name>`，只能依赖 `openharmony-ability`，不能依赖 ArkTS
+- Rust crate 位于 `crates/plugin-<name>`，依赖 `openharmony-ability`；需要复用其他插件类型时依赖
+  对应的 `plugin-*` crate（如 `plugin-statusbar` 复用 `plugin-menu` 的类型），但不能依赖 ArkTS
   实现或应用页面；对外通过扩展 trait/client 暴露能力。
-- ArkTS HAR 位于 `plugins/<name>`，只能依赖 `@ohos-rs/ability` 和需要的平台 Kit；导出一个
-  `BridgePluginFactory`。
+- ArkTS HAR 位于 `plugins/<name>`，依赖 `@ohos-rs/ability` 和需要的平台 Kit；Rust 侧依赖了兄弟
+  插件 crate 时，HAR 同样依赖对应的 `@ohos-rs/ability-plugin-<name>`（rs 层与 ets 层的依赖
+  方向保持一致）；导出一个 `BridgePluginFactory`。
 - 应用入口显式同时组合 Rust 插件 facade 与 ArkTS factory；core 不能反向 import 任意
   `plugin-*` crate/HAR。
 - 一个插件只能管理自己的资源、回调和节点。布局、业务页面状态和其他插件资源仍由应用拥有。

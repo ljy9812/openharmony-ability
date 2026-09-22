@@ -4,12 +4,6 @@ import { FrameNode } from "@ohos.arkui.node";
 import { UIContext } from "@ohos.arkui.UIContext";
 import resourceManager from "@ohos.resourceManager";
 import window from "@ohos.window";
-import {
-  MenuItemData,
-  MenuCreateOptions,
-  MenuItemCreateOptions,
-  SubmenuCreateOptions,
-} from "../helper/menu_types";
 import { image } from "@kit.ImageKit";
 import { emitter } from "@kit.BasicServicesKit";
 
@@ -217,11 +211,6 @@ export interface Module {
    * modules register schemes through their bridge plugin instead.
    */
   registerCustomProtocol?: () => void;
-}
-
-export interface StatusBarIconRgba {
-  white?: Uint8Array;
-  black?: Uint8Array;
 }
 
 export interface WindowConfig {

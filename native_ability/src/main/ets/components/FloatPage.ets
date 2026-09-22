@@ -1,17 +1,7 @@
 import { DefaultXComponent } from "./DefaultXComponent";
 import { Module } from "../ability/type";
-import {
-  MenuBarComponent,
-  getMenuClickHandler,
-  getMenuBarRecoverFn,
-  isMenubarVisible,
-} from "./MenuBarComponent";
-import {
-  AcceleratorMatcher,
-  isClipboardEnabled,
-  isZoomHotkeysEnabled,
-} from "../helper/accelerator_matcher";
-import { KeyCode, pointer } from "@kit.InputKit";
+import { getMenuBarPort, getMenuBarSlotBuilder, type MenuBarSlotBuilder } from "./MenuBarSlot";
+import { pointer } from "@kit.InputKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { BusinessError, deviceInfo } from "@kit.BasicServicesKit";
 import { window as arkWindow, CursorController } from "@kit.ArkUI";
@@ -48,7 +38,9 @@ struct FloatPage {
   @State @Watch("moveAndSetWindow") windowPosition: Position = { x: 100, y: 100 };
   @State dpiScale: number = 1;
   private cursorController: CursorController | null = null;
-  private acceleratorMatcher: AcceleratorMatcher = new AcceleratorMatcher();
+  // Menubar composition slot, registered by the menu plugin before any page
+  // content loads (MenuBarSlot.ets). Null when no menu plugin is installed.
+  private menuBarSlot: MenuBarSlotBuilder | null = getMenuBarSlotBuilder();
 
   // Resize tracking
   private startWidth: number = 0;
@@ -216,11 +208,8 @@ struct FloatPage {
     Stack() {
       Column() {
         // Menubar (only on desktop when menu items are available and decorations are enabled)
-        if (this.isDesktop && this.decorations) {
-          MenuBarComponent({
-            windowId: this.windowId,
-            acceleratorMatcher: this.acceleratorMatcher,
-          });
+        if (this.isDesktop && this.decorations && this.menuBarSlot) {
+          this.menuBarSlot.builder({ windowId: this.windowId });
         }
         Stack({ alignContent: Alignment.TopEnd }) {
           // 1. WebView content area (full screen)
@@ -567,41 +556,11 @@ struct FloatPage {
     .height("100%")
     .backgroundColor(Color.Transparent)
     .onKeyPreIme((event: KeyEvent) => {
-      // Block native clipboard shortcuts when with_clipboard(false) (ohos-webview-flag-clipboard)
-      if (
-        event.type === KeyType.Down &&
-        this.acceleratorMatcher.matchesClipboardShortcut(event) &&
-        !isClipboardEnabled(this.windowId)
-      ) {
-        return true;
-      }
-      // Block native zoom hotkeys when with_zoom_hotkeys(false) (ohos-webview-flag-zoom-hotkeys)
-      if (
-        event.type === KeyType.Down &&
-        this.acceleratorMatcher.matchesZoomShortcut(event) &&
-        !isZoomHotkeysEnabled(this.windowId)
-      ) {
-        return true;
-      }
-      if (event.type === KeyType.Down && this.acceleratorMatcher.matches(event)) {
-        const matchedItem = this.acceleratorMatcher.getMatchedItem();
-        if (matchedItem) {
-          const handler = getMenuClickHandler(this.windowId);
-          if (handler) {
-            handler(matchedItem);
-          }
-        }
-        return true;
-      }
-      if (
-        event.type === KeyType.Down &&
-        event.keyCode === KeyCode.KEYCODE_ESCAPE &&
-        !isMenubarVisible(this.windowId)
-      ) {
-        const recoverFn = getMenuBarRecoverFn(this.windowId);
-        if (recoverFn) {
-          recoverFn();
-        }
+      // Menu key handling — clipboard / zoom shortcut blocking per window
+      // flags, accelerator dispatch, ESC fullscreen recover — lives in the
+      // menu plugin's MenuBarPort implementation (MenuBarSlot.ets seam).
+      const menuPort = getMenuBarPort();
+      if (menuPort !== null && menuPort.onKeyPreIme(event, this.windowId)) {
         return true;
       }
       return false;

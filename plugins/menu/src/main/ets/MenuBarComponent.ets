@@ -1,5 +1,5 @@
-import { MenuItemData } from "../helper/menu_types";
-import { AcceleratorMatcher } from "../helper/accelerator_matcher";
+import { MenuItemData } from "./menu_types";
+import { AcceleratorMatcher, unregisterAcceleratorMatcher } from "./accelerator_matcher";
 import { image } from "@kit.ImageKit";
 import { buffer } from "@kit.ArkTS";
 import { SymbolGlyphModifier } from "@kit.ArkUI";
@@ -85,9 +85,11 @@ export function isMenubarVisible(windowId: number): boolean {
 @Component
 export struct MenuBarComponent {
   @Prop windowId: number = 0;
-  /** Shared AcceleratorMatcher instance — parent passes its reference,
-   *  this component rebuilds it in-place when menubar data changes.
-   *  Parent reads matched item from it in onKeyPreIme.
+  /** Shared AcceleratorMatcher instance — the parent (this package's slot
+   *  builder, see MenuPlugin.ets) passes the per-window registry instance from
+   *  getAcceleratorMatcher(windowId), and this component rebuilds it in-place
+   *  when menubar data changes. The key port (CoreMenuBarPort) reads matched
+   *  items from the same instance.
    *  Regular property (not @Prop) to share the same reference with parent. */
   acceleratorMatcher: AcceleratorMatcher = new AcceleratorMatcher();
 
@@ -505,6 +507,7 @@ export struct MenuBarComponent {
     unregisterMenuDataCallback(windowKey);
     unregisterMenuClickHandler(this.windowId);
     unregisterMenuBarRecoverFn(this.windowId);
+    unregisterAcceleratorMatcher(this.windowId);
     menubarVisibilityTracker.delete(this.windowId);
 
     // Release all icon PixelMaps

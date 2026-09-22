@@ -67,7 +67,7 @@ Rust plugin facades (BridgePlugin) + application business code (run_loop)
 | `crates/plugin-process` | `ohos.process` — app process control (`appRecovery.restartApp`) |
 | `crates/plugin-updater` | `ohos.updater` — AppGallery update check and download+install |
 
-Every `crates/plugin-<name>` is paired with an ArkTS HAR in `plugins/<name>` that exports the matching `BridgePluginFactory`; core (`crates/ability`) never imports any `plugin-*` crate. Exception: `crates/plugin-fault-injection` has no ArkTS HAR — the ArkTS half is the `BridgeHost` built-in (`native_ability/src/main/ets/bridge/FaultInjection.ets`), always registered and disabled by default; its Rust side therefore has no `BridgePlugin` type and calls go through `BridgeClient::call_builtin`.
+Every `crates/plugin-<name>` is paired with an ArkTS HAR in `plugins/<name>` that exports the matching `BridgePluginFactory`; core (`crates/ability`) never imports any `plugin-*` crate. The dependency direction is mirrored on the ArkTS side: the core HAR (`native_ability`) never imports any `@ohos-rs/ability-plugin-*` package — plugin HARs depend on `@ohos-rs/ability` and on sibling plugin HARs exactly when their Rust crates do (e.g. `plugins/statusbar` -> `plugins/menu`, matching `crates/plugin-statusbar` -> `crates/plugin-menu`), never the reverse. Exception: `crates/plugin-fault-injection` has no ArkTS HAR — the ArkTS half is the `BridgeHost` built-in (`native_ability/src/main/ets/bridge/FaultInjection.ets`), always registered and disabled by default; its Rust side therefore has no `BridgePlugin` type and calls go through `BridgeClient::call_builtin`.
 
 ### Startup Flow
 

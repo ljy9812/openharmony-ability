@@ -1,7 +1,6 @@
 import { AbilityConstant, Configuration, UIAbility, Want } from "@kit.AbilityKit";
 import common from "@ohos.app.ability.common";
 import window from "@ohos.window";
-import webview from "@ohos.web.webview";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import * as Entry from "../components/MainPage";
 import { BridgeHostRegistry } from "../bridge/BridgeHost";
@@ -20,17 +19,9 @@ import {
   BridgeWindowStageEventLifecyclePayload,
   Module,
 } from "./type";
-import {
-  setMenuClickHandler,
-  setMenuBarRecoverFn,
-  getMenuDataCallback,
-} from "../components/MenuBarComponent";
-import { MenuManager, PredefinedActionExecutor, setPredefinedActionExecutor } from "../helper/menu";
-import { AboutMetadataData } from "../helper/menu_types";
-import { setCurrentAbilityName } from "../helper/StatusBarUtils";
+import { getMenuBarPort } from "../components/MenuBarSlot";
 import { WindowManager, WindowSizeEventWrap, WindowRectEventWrap } from "../window/WindowManager";
-import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "../helper/constants";
-import { setPrimaryWebviewControllerCallback } from "../components/DefaultXComponent";
+import { DOMAIN, MAIN_WINDOW_ID, NATIVE_MODULE_STORAGE_KEY } from "../helper/constants";
 import { ProcessInitializer } from "./ProcessInitializer";
 
 export const STATE_KEY = "ohos.rs.ability.application.state";
@@ -107,7 +98,10 @@ export class NativeAbility extends UIAbility {
   }
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
-    setCurrentAbilityName(want.abilityName ?? "");
+    // Current ability name, consumed by the statusbar plugin package's click
+    // handlers (startAbility restore Want). AppStorage contract key — see
+    // StatusBarUtils.ets (plugins/statusbar); core must not import the package.
+    AppStorage.setOrCreate("__openharmony_ability_current_ability_name__", want.abilityName ?? "");
     // Populate AppStorage keys consumed by DeepLinkPlugin.ets (get-initial-uri /
     // get-latest-uri bridge actions, keys INITIAL_WANT_URI_KEY/LATEST_WANT_URI_KEY).
     // Contract documented in DeepLinkPlugin.ets. Was never written before.
@@ -579,10 +573,11 @@ export class NativeAbility extends UIAbility {
           });
           win.on("windowRectChange", (options: window.RectChangeOptions) => {
             // Phase 3 (design.md D3): RECOVER→menubar logic stays synchronous (UI logic,
-            // not throttled — must respond immediately on fullscreen exit).
+            // not throttled — must respond immediately on fullscreen exit). Delivery
+            // goes through the menu plugin's registered port (MenuBarSlot seam):
+            // core must not reach into the menu package's callback registry.
             if (options.reason === window.RectChangeReason.RECOVER) {
-              const cb = getMenuDataCallback("main");
-              cb?.onMenubarVisible?.(true);
+              getMenuBarPort()?.onMenubarVisibility(MAIN_WINDOW_ID, true);
             }
             // Phase 3 (design.md D2/D5): rect dispatch through per-window(0) throttle.
             // Deep-copy rect fields (not system object ref) per design.md D5.
@@ -661,9 +656,9 @@ export class NativeAbility extends UIAbility {
       // flag is stored in WindowManager.registerUIAbilityStage and applied via
       // WindowManager.applyTransparentBackground(windowId) in aboutToAppear.
       try {
-        this.setupMenuPopup(windowStage);
+        this.setupDesktopFlag();
       } catch (menuErr) {
-        hilog.error(DOMAIN, "NativeAbility", "setupMenuPopup threw: %{public}s", String(menuErr));
+        hilog.error(DOMAIN, "NativeAbility", "setupDesktopFlag threw: %{public}s", String(menuErr));
       }
 
       await this.loadWindowStageContent(windowStage);
@@ -789,128 +784,27 @@ export class NativeAbility extends UIAbility {
     }
   }
 
-  private setupMenuPopup(windowStage: window.WindowStage): void {
+  /**
+   * Desktop form-factor probe only. The menu wiring that used to live here
+   * (PredefinedActionExecutor, MenuManager, click/recover handlers, about
+   * dialog, primary webview controller callback) moved to
+   * MenuPlugin.onLifecycle("window-stage-create") in plugins/menu — the plugin
+   * lifecycle fires earlier in the same queue operation, before the pages load.
+   */
+  private setupDesktopFlag(): void {
     const nativeModules = ProcessInitializer.getNativeModules();
     const primaryModule: Module | undefined = nativeModules[0];
     // Probe a live NAPI surface member as the "is this a real openharmony-ability
     // module" guard. This used to probe the onMenuRequest stub — dead code whose
     // registration body never executed (the Rust side discarded the callback);
     // the stub has been deleted (issue #87 major-4), so probe isDesktopDevice
-    // instead, which setupMenuPopup itself needs at the line below.
+    // instead, which is what FloatPage's __openharmony_ability_is_desktop__
+    // AppStorage flag below is derived from.
     if (!primaryModule || typeof primaryModule.isDesktopDevice !== "function") {
       return;
     }
 
     AppStorage.setOrCreate("__openharmony_ability_is_desktop__", primaryModule.isDesktopDevice());
-
-    // Forward menubar item clicks / accelerator key presses to the Rust-side
-    // plugin-menu bridge `menu-click` main-thread event (process-wide broadcast).
-    // plugin-menu decodes MenuClickEvent (typeName "ohos.menu.MenuClickEvent"),
-    // forwards over its MENU_EVENT_SENDER (registered by the menu backend) → the menu backend's
-    // MENU_EVENT_CHANNEL → MenuEvent::send → frontend onEvent callback.
-    // Previously this was `primaryModule.emitMenuEvent` — a legacy NAPI fn that
-    // wrote to a dead sink (openharmony-ability's own MENU_EVENT_CHANNEL with no
-    // consumer), so menubar clicks and accelerator fires silently dropped.
-    // menu plugin is already register_plugin'd (the tray backend's set_ohos_app) + in
-    // EntryAbility.bridgePlugins, so the host is active once the menubar is set.
-    const emitMenuEventFn: (menuId: string, windowId?: string) => void = (menuId, windowId) => {
-      hilog.info(
-        DOMAIN,
-        "NativeAbility",
-        "emitMenuEventFn ENTER menuId=%{public}s windowId=%{public}s",
-        menuId,
-        windowId ?? "main",
-      );
-      try {
-        BridgeHostRegistry.invokeNativeSyncProcessWide(
-          "ohos.menu",
-          "menu-click",
-          "ohos.menu.MenuClickEvent",
-          "std.bool",
-          { menuId, windowId: windowId ?? "main" },
-        );
-        hilog.info(
-          DOMAIN,
-          "NativeAbility",
-          "emitMenuEventFn forwarded menuId=%{public}s ok",
-          menuId,
-        );
-      } catch (e) {
-        hilog.warn(DOMAIN, "NativeAbility", "emitMenuEvent forward failed: %{public}s", String(e));
-      }
-    };
-
-    const executor = new PredefinedActionExecutor((code: number) => {
-      this.context?.terminateSelf();
-    });
-    const mainWindow = windowStage.getMainWindowSync();
-    executor.setWindow(mainWindow);
-    executor.setContext(this.context as common.UIAbilityContext);
-    setPredefinedActionExecutor(executor);
-    executor.setShowAboutFn((metadata: AboutMetadataData) => {
-      const appName = metadata.name ?? "";
-      const appVersion = metadata.version ?? "";
-      const appCopyright = metadata.copyright ?? "";
-      const appAuthors = metadata.authors?.join(", ") ?? "";
-      const appComments = metadata.comments ?? "";
-      const appWebsite = metadata.website ?? "";
-
-      const lines: string[] = [];
-      if (appName) lines.push(appName);
-      if (appVersion) lines.push(`Version: ${appVersion}`);
-      if (appCopyright) lines.push(appCopyright);
-      if (appAuthors) lines.push(`Authors: ${appAuthors}`);
-      if (appComments) lines.push(appComments);
-      if (appWebsite) lines.push(appWebsite);
-      const message = lines.join("\n");
-      const title = appName || "About";
-
-      try {
-        const uiContext = mainWindow.getUIContext();
-        uiContext.showAlertDialog({
-          title: title,
-          message: message,
-          autoCancel: true,
-          confirm: {
-            value: "OK",
-            action: () => {},
-          },
-        });
-      } catch (e) {
-        hilog.error(DOMAIN, "NativeAbility", "Show about dialog failed: %{public}s", String(e));
-      }
-    });
-
-    const menuManager = new MenuManager(executor, emitMenuEventFn);
-
-    setMenuClickHandler(0, (item) => {
-      hilog.info(
-        DOMAIN,
-        "NativeAbility",
-        "menuClickHandler invoked id=%{public}s type=%{public}s",
-        item.id,
-        item.type,
-      );
-      menuManager.handleItemClick(item);
-    });
-
-    setMenuBarRecoverFn(0, () => {
-      // Esc exit from predefined fullscreen: dual-path exit so the title bar /
-      // Dock hover hidden on entry (WindowManager.setFullscreen desktop path)
-      // are restored too. The internal recover() triggers
-      // windowRectChange(RECOVER) → menubar restore (see on("windowRectChange")).
-      WindowManager.getInstance().setFullscreen(0, false);
-    });
-
-    setPrimaryWebviewControllerCallback((controller: ESObject) => {
-      executor.setController(controller as webview.WebviewController);
-    });
-
-    // NOTE (issue #87 major-4): the legacy `primaryModule.onMenuRequest(...)`
-    // registration that used to live here never executed — the Rust-side
-    // on_menu_request stub discarded the callback (`let _ = callback`). All three
-    // of its branches (menubar visibility / popup / menubar json) are served by
-    // the MenuPlugin bridge actions set-menubar / popup / set-menubar-visible.
   }
 
   onMemoryLevel(level: AbilityConstant.MemoryLevel): void {

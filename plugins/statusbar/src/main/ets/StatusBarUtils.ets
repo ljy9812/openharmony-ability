@@ -5,12 +5,33 @@ import { image } from "@kit.ImageKit";
 import { statusBarManager } from "@kit.DeskTopExtensionKit";
 import { emitter, BusinessError } from "@kit.BasicServicesKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
-import { DOMAIN } from "./constants";
-import { BridgeHostRegistry } from "../bridge/BridgeHost";
+import { BridgeHostRegistry, DOMAIN } from "@ohos-rs/ability";
+
+// Current ability name: single AppStorage source of truth. Written by
+// NativeAbility.onCreate (core, AppStorage contract key) and by this package
+// at install (setCurrentAbilityName); read by the statusbar click handlers to
+// build the startAbility Want. AppStorage is used instead of a module global
+// because the writer is core and the reader is this plugin package — the core
+// package must not import the statusbar package (rs<->ets correspondence).
+export const CURRENT_ABILITY_NAME_KEY = "__openharmony_ability_current_ability_name__";
+
+export function setCurrentAbilityName(name: string): void {
+  AppStorage.setOrCreate(CURRENT_ABILITY_NAME_KEY, name);
+}
+
+function currentAbilityName(): string {
+  return AppStorage.get<string>(CURRENT_ABILITY_NAME_KEY) ?? "";
+}
+
+/** RGBA icon payloads for the statusbar bridge (moved from the core type.ets;
+ *  statusbar-domain contract, consumed by StatusbarPlugin's add/update requests). */
+export interface StatusBarIconRgba {
+  white?: Uint8Array;
+  black?: Uint8Array;
+}
 
 // Global state
 let abilityContext: common.UIAbilityContext | null = null;
-let currentAbilityName: string = "";
 export function setAbilityContext(ctx: common.UIAbilityContext): void {
   abilityContext = ctx;
 }
@@ -35,7 +56,7 @@ const iconClickHandler = (event: emitter.EventData): void => {
   if (abilityContext) {
     try {
       const bundleName = abilityContext.abilityInfo.bundleName;
-      const abilityName = currentAbilityName;
+      const abilityName = currentAbilityName();
       const want: Want = { bundleName, abilityName };
       abilityContext
         .startAbility(want)
@@ -150,10 +171,6 @@ function doRegisterStatusBarClickHandlers(reason: string): void {
       err.message,
     );
   }
-}
-
-export function setCurrentAbilityName(name: string): void {
-  currentAbilityName = name;
 }
 
 export function getAbilityContext(): common.UIAbilityContext {
