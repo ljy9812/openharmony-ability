@@ -1,7 +1,0 @@
-{
-  "module": {
-    "name": "ability_support",
-    "type": "har",
-    "deviceTypes": ["default", "tablet", "2in1"],
-  },
-}

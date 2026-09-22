@@ -26,9 +26,8 @@
 
 - Rust crate 位于 `crates/plugin-<name>`，只能依赖 `openharmony-ability`，不能依赖 ArkTS
   实现或应用页面；对外通过扩展 trait/client 暴露能力。
-- ArkTS HAR 位于 `plugins/<name>`，只能依赖 `@ohos-rs/ability`（桥接契约）、
-  `@ohos-rs/ability-support`（支撑树：窗口/菜单/状态栏/键合成/组件）和需要的平台 Kit；
-  导出一个 `BridgePluginFactory`。
+- ArkTS HAR 位于 `plugins/<name>`，只能依赖 `@ohos-rs/ability` 和需要的平台 Kit；导出一个
+  `BridgePluginFactory`。
 - 应用入口显式同时组合 Rust 插件 facade 与 ArkTS factory；core 不能反向 import 任意
   `plugin-*` crate/HAR。
 - 一个插件只能管理自己的资源、回调和节点。布局、业务页面状态和其他插件资源仍由应用拥有。

@@ -5,7 +5,6 @@
   },
   "dependencies": {
     "@ohos-rs/ability": "file:../../native_ability",
-    "@ohos-rs/ability-support": "file:../../ability_support",
   },
   "description": "Menu capability plugin for @ohos-rs/ability",
   "keywords": ["ohos-rs", "NAPI", "Rust", "node-addon", "openharmony", "harmonynext", "menu"],

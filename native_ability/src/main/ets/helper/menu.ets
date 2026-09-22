@@ -6,7 +6,7 @@ import { Want } from "@kit.AbilityKit";
 import { pasteboard } from "@kit.BasicServicesKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { WindowManager } from "../window/WindowManager";
-import { Module } from "./native_module";
+import { Module } from "../ability/type";
 import { getMenuDataCallback } from "../components/MenuBarComponent";
 import { DOMAIN, NATIVE_MODULE_STORAGE_KEY, MAIN_WINDOW_ID } from "./constants";
 

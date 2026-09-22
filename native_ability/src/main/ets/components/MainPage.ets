@@ -1,5 +1,5 @@
 import { DefaultXComponent } from "./DefaultXComponent";
-import { Module } from "../helper/native_module";
+import { Module } from "../ability/type";
 import {
   AcceleratorMatcher,
   isClipboardEnabled,

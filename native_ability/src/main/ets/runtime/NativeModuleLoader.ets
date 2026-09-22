@@ -1,4 +1,4 @@
-import { Module } from "../helper/native_module";
+import { Module } from "../ability/type";
 
 /** Module loading is framework runtime infrastructure, not a capability Helper. */
 export class NativeModuleLoader {

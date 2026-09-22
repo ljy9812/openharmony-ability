@@ -14,8 +14,8 @@ import {
   BridgeContextRequirement,
   AsyncPluginBase,
   DOMAIN,
+  WindowManager,
 } from "@ohos-rs/ability";
-import { WindowManager } from "@ohos-rs/ability-support";
 
 const TAG: string = "WindowPlugin";
 

@@ -3,9 +3,9 @@ import common from "@ohos.app.ability.common";
 import window from "@ohos.window";
 import webview from "@ohos.web.webview";
 import { hilog } from "@kit.PerformanceAnalysisKit";
-import * as Entry from "@ohos-rs/ability-support";
+import * as Entry from "../components/MainPage";
 import { BridgeHostRegistry } from "../bridge/BridgeHost";
-import { NativeModuleLoader } from "@ohos-rs/ability-support";
+import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
 import { AbilityStateCodec } from "../runtime/AbilityStateCodec";
 import { SerialTaskQueue } from "../runtime/SerialTaskQueue";
 import {
@@ -24,17 +24,13 @@ import {
   setMenuClickHandler,
   setMenuBarRecoverFn,
   getMenuDataCallback,
-} from "@ohos-rs/ability-support";
-import {
-  MenuManager,
-  PredefinedActionExecutor,
-  setPredefinedActionExecutor,
-} from "@ohos-rs/ability-support";
-import { AboutMetadataData } from "@ohos-rs/ability-support";
-import { setCurrentAbilityName } from "@ohos-rs/ability-support";
-import { WindowManager, WindowSizeEventWrap, WindowRectEventWrap } from "@ohos-rs/ability-support";
-import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "@ohos-rs/ability-support";
-import { setPrimaryWebviewControllerCallback } from "@ohos-rs/ability-support";
+} from "../components/MenuBarComponent";
+import { MenuManager, PredefinedActionExecutor, setPredefinedActionExecutor } from "../helper/menu";
+import { AboutMetadataData } from "../helper/menu_types";
+import { setCurrentAbilityName } from "../helper/StatusBarUtils";
+import { WindowManager, WindowSizeEventWrap, WindowRectEventWrap } from "../window/WindowManager";
+import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "../helper/constants";
+import { setPrimaryWebviewControllerCallback } from "../components/DefaultXComponent";
 import { ProcessInitializer } from "./ProcessInitializer";
 
 export const STATE_KEY = "ohos.rs.ability.application.state";

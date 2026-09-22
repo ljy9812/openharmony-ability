@@ -17,8 +17,7 @@ OpenHarmony applications are driven by callbacks, so there are two important con
 
 - `crates/ability` — Rust lifecycle/runtime support
 - `crates/derive` — `#[ability]` macro
-- `native_ability` — ArkTS bridge-contract package source (`@ohos-rs/ability`), shared by Rust and C/SDL native modules
-- `ability_support` — ArkTS support package source (`@ohos-rs/ability-support`: window management, menu/statusbar helpers, key synthesis, UI components)
+- `native_ability` — ArkTS package source shared by Rust and C/SDL native modules
 - `package` — packaged ohpm artifact source
 - `demo` — unified Harmony demo project
 - `rust_example/demo_native` — unified native demo implementation
@@ -80,7 +79,7 @@ ohrs build --arch arm64
 
 - Harmony demo project: `demo`
 - Native demo module (Rust example): `rust_example/demo_native/src/lib.rs`
-- ArkTS package sources: `native_ability` (bridge contract, `@ohos-rs/ability`), `ability_support` (support tree, `@ohos-rs/ability-support`)
+- ArkTS package source: `native_ability`
 
 ## License
 

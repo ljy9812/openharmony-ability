@@ -5,8 +5,8 @@ import { hilog } from "@kit.PerformanceAnalysisKit";
 import { deviceInfo } from "@kit.BasicServicesKit";
 import { Module, AbilityInitContext } from "./type";
 import { Loadable } from "../helper/loadable";
-import { WindowManager } from "@ohos-rs/ability-support";
-import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "@ohos-rs/ability-support";
+import { WindowManager } from "../window/WindowManager";
+import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "../helper/constants";
 
 /**
  * ProcessInitializer — process-level initialization, executed only once.

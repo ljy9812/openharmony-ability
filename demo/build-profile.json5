@@ -55,10 +55,6 @@
       "srcPath": "../native_ability",
     },
     {
-      "name": "ability_support",
-      "srcPath": "../ability_support",
-    },
-    {
       "name": "plugin_app_control",
       "srcPath": "../plugins/app-control",
     },

@@ -3,9 +3,7 @@
     "name": "richerfu",
     "email": "southorange0929@foxmail.com",
   },
-  "dependencies": {
-    "@ohos-rs/ability-support": "file:../ability_support",
-  },
+  "dependencies": {},
   "description": "Adaptor for OpenHarmony/HarmonyNext native abilities",
   "keywords": ["ohos-rs", "NAPI", "Rust", "node-addon", "openharmony", "harmonynext"],
   "license": "MIT OR Apache-2.0",
