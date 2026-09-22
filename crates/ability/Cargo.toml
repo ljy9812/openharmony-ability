@@ -9,12 +9,10 @@ description = "Binding Rust application on Harmony with Ability"
 default = ["log", "window"]
 log = ["dep:log"]
 window = ["dep:ohos-window-manager-binding"]
-global_shortcut = []
 
 [dependencies]
 # common dependencies
 futures-channel = { workspace = true }
-crossbeam-channel = { workspace = true }
 uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
