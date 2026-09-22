@@ -1,6 +1,6 @@
 import { DefaultXComponent } from "./DefaultXComponent";
 import { Module } from "../ability/type";
-import { getMenuBarPort, getMenuBarSlotBuilder, type MenuBarSlotBuilder } from "./MenuBarSlot";
+import { getMenuBarPort, MenuBarSlotHost } from "./MenuBarSlot";
 import { pointer } from "@kit.InputKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { BusinessError, deviceInfo } from "@kit.BasicServicesKit";
@@ -38,9 +38,6 @@ struct FloatPage {
   @State @Watch("moveAndSetWindow") windowPosition: Position = { x: 100, y: 100 };
   @State dpiScale: number = 1;
   private cursorController: CursorController | null = null;
-  // Menubar composition slot, registered by the menu plugin before any page
-  // content loads (MenuBarSlot.ets). Null when no menu plugin is installed.
-  private menuBarSlot: MenuBarSlotBuilder | null = getMenuBarSlotBuilder();
 
   // Resize tracking
   private startWidth: number = 0;
@@ -207,9 +204,13 @@ struct FloatPage {
   build() {
     Stack() {
       Column() {
-        // Menubar (only on desktop when menu items are available and decorations are enabled)
-        if (this.isDesktop && this.decorations && this.menuBarSlot) {
-          this.menuBarSlot.builder({ windowId: this.windowId });
+        // Menubar (only on desktop when menu items are available and decorations are enabled).
+        // MenuBarSlotHost reads the slot live — by FloatPage construction the
+        // slot is normally registered already, but the host keeps the late-
+        // registration case (first window, plugin installs at ui-context)
+        // working identically to MainPage.
+        if (this.isDesktop && this.decorations) {
+          MenuBarSlotHost({ windowId: this.windowId })
         }
         Stack({ alignContent: Alignment.TopEnd }) {
           // 1. WebView content area (full screen)

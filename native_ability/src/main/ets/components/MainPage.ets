@@ -1,6 +1,6 @@
 import { DefaultXComponent } from "./DefaultXComponent";
 import { Module } from "../ability/type";
-import { getMenuBarPort, getMenuBarSlotBuilder, type MenuBarSlotBuilder } from "./MenuBarSlot";
+import { getMenuBarPort, MenuBarSlotHost } from "./MenuBarSlot";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { DOMAIN, MAIN_WINDOW_ID } from "../helper/constants";
 import { synthesizeDomKeyEvent } from "../helper/key_synthesis";
@@ -21,11 +21,6 @@ struct MainPage {
 
   @State private nativeModule: Module | null = null;
   @State private resolvedModuleName: string = "";
-
-  // Menubar composition slot, registered by the menu plugin before any page
-  // content loads (MenuBarSlot.ets). Null when no menu plugin is installed —
-  // core pages carry no menu-package imports either way.
-  private menuBarSlot: MenuBarSlotBuilder | null = getMenuBarSlotBuilder();
 
   async aboutToAppear(): Promise<void> {
     hilog.info(DOMAIN, "MainPage", "=== MainPage aboutToAppear START ===");
@@ -52,9 +47,12 @@ struct MainPage {
   build() {
     Stack() {
       Column() {
-        if (this.menuBarSlot) {
-          this.menuBarSlot.builder({ windowId: this.windowId });
-        }
+        // Menubar composition slot (menu plugin; MenuBarSlot.ets seam). The
+        // host reads the slot live and mounts nothing until the plugin
+        // registers it — menu plugins install after page construction
+        // (ui-context requirement), so a construction-time snapshot would
+        // never see the registration.
+        MenuBarSlotHost({ windowId: this.windowId })
         Row() {
           Column() {
             if (this.resolvedModuleName !== "") {
