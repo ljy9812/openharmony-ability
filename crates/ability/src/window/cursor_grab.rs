@@ -26,10 +26,8 @@
 use crate::version;
 
 /// WindowManager C API error code for "capability not supported" (oh_window_comm.h).
-#[cfg(target_env = "ohos")]
 const WM_ERRORCODE_DEVICE_NOT_SUPPORTED: i64 = 801;
 /// WindowManager C API error code for "window state abnormal" (oh_window_comm.h).
-#[cfg(target_env = "ohos")]
 const WM_ERRORCODE_STATE_ABNORMAL: i64 = 1300002;
 
 /// First OpenHarmony base API level that exports the cursor lock symbols
@@ -99,7 +97,6 @@ pub fn set_cursor_grab(
     cursor_grab_impl(real_window_id, grab)
 }
 
-#[cfg(target_env = "ohos")]
 fn cursor_grab_impl(real_window_id: i32, grab: bool) -> std::result::Result<(), CursorGrabError> {
     if version::sdk_api_version() < CURSOR_LOCK_API_LEVEL {
         return Err(CursorGrabError::NotSupported);
@@ -124,12 +121,6 @@ fn cursor_grab_impl(real_window_id: i32, grab: bool) -> std::result::Result<(), 
             None => Err(CursorGrabError::Bridge(e.to_string())),
         },
     }
-}
-
-/// Host stub: the NDK library only exists on OHOS devices.
-#[cfg(not(target_env = "ohos"))]
-fn cursor_grab_impl(_real_window_id: i32, _grab: bool) -> std::result::Result<(), CursorGrabError> {
-    Err(CursorGrabError::NotSupported)
 }
 
 #[cfg(test)]
@@ -165,20 +156,10 @@ mod tests {
         ));
     }
 
-    #[cfg(not(target_env = "ohos"))]
-    #[test]
-    fn host_reports_not_supported() {
-        assert!(matches!(
-            set_cursor_grab(1, true),
-            Err(CursorGrabError::NotSupported)
-        ));
-    }
-
     // On an API < 22 device the version gate fires before any FFI call. On
     // API >= 22 devices the gate passes and the FFI path is exercised by the
     // e2e suite (examples/api `window.setCursorGrab`) — not here, to avoid
     // locking the test runner's cursor.
-    #[cfg(target_env = "ohos")]
     #[test]
     fn ohos_below_api22_returns_not_supported_without_ffi() {
         if version::sdk_api_version() < CURSOR_LOCK_API_LEVEL {

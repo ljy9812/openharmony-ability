@@ -131,10 +131,11 @@ mod tests {
         assert!(sdk_v12 < 14);
     }
 
-    // NAPI-dependent tests: require OHOS device runtime
+    // Pure OnceLock logic — no NAPI dependency (the module used to be
+    // target_env-gated under a stale "NAPI-dependent" note; the gate and the
+    // note were wrong for the same reason: these tests hold no device state).
     // Run via ohos-rust-ut skill:
     //   PACKAGE=openharmony-ability bash .claude/skills/ohos-rust-ut/scripts/run-ut.sh version::
-    #[cfg(target_env = "ohos")]
     mod ohos_device_tests {
         use crate::{distribution_api_version, init, sdk_api_version};
 
