@@ -30,10 +30,9 @@ export function newWindowDialogBuilder(params: {
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .layoutWeight(1)
-      Text("✕")
+      SymbolGlyph($r("sys.symbol.xmark"))
         .fontSize(16)
-        .fontColor("#333333")
-        .fontWeight(FontWeight.Bold)
+        .fontColor(["#333333"])
         .onClick(() => {
           hilog.info(DOMAIN, "NewWindowDialog", "Close button clicked");
           closeDialog();

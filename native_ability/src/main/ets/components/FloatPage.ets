@@ -237,9 +237,9 @@ struct FloatPage {
               // interception is in WindowManager.minimizeWindow (getDecorationFlag check)
               if (this.decorations) {
                 Button() {
-                  Text("—")
-                    .fontSize(16)
-                    .fontColor("#666666")
+                  SymbolGlyph($r("sys.symbol.minus"))
+                    .fontSize(20)
+                    .fontColor(["#666666"])
                 }
                 .width(32)
                 .height(32)
@@ -264,9 +264,9 @@ struct FloatPage {
               // interception is in WindowManager.maximizeWindow (getDecorationFlag check)
               if (this.decorations) {
                 Button() {
-                  Text(this.isMaximized ? "❐" : "□")
-                    .fontSize(14)
-                    .fontColor("#666666")
+                  SymbolGlyph(this.isMaximized ? $r("sys.symbol.square_and_square") : $r("sys.symbol.square"))
+                    .fontSize(20)
+                    .fontColor(["#666666"])
                 }
                 .width(32)
                 .height(32)

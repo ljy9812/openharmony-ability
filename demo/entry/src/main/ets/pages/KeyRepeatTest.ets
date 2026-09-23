@@ -17,9 +17,9 @@ struct KeyRepeatTest {
           .fontColor(Color.White)
           .fontWeight(FontWeight.Bold)
         Blank()
-        Text("✕")
+        SymbolGlyph($r("sys.symbol.xmark"))
           .fontSize(24)
-          .fontColor(Color.White)
+          .fontColor([Color.White])
           .onClick(() => {
             this.keyTestLog = [];
             this.pressedKeys.clear();
