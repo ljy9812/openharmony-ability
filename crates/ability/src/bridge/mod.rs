@@ -821,30 +821,6 @@ impl BridgeClient {
             .await
     }
 
-    /// Calls an action on an ArkTS built-in plugin that has no Rust `BridgePlugin` type.
-    ///
-    /// Built-in ArkTS plugins (currently `ohos.fault-injection`, installed unconditionally by
-    /// `BridgeHost`) cannot be addressed by [`BridgeClient::call_async`], which requires a
-    /// Rust-side `BridgePlugin` registration. This method dispatches by plugin id string and
-    /// otherwise behaves identically to `call_raw`: named N-API request/response types,
-    /// identifier validation (`validate_wire_call`) and the caller-supplied timeout policy.
-    /// Prefer `call_async` for any plugin that does have a Rust `BridgePlugin` type — it
-    /// additionally validates the plugin contract.
-    pub async fn call_builtin<Request, Response>(
-        &self,
-        plugin_id: &str,
-        action: &str,
-        request: Request,
-        options: BridgeCallOptions,
-    ) -> Result<Response>
-    where
-        Request: BridgeNapiType,
-        Response: BridgeNapiType,
-    {
-        self.call_raw::<Request, Response>(plugin_id, action, request, options)
-            .await
-    }
-
     pub(crate) async fn call_raw<Request, Response>(
         &self,
         plugin_id: &str,

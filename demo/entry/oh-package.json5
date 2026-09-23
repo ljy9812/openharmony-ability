@@ -20,6 +20,7 @@
     "@ohos-rs/ability-plugin-clipboard": "file:../../plugins/clipboard",
     "@ohos-rs/ability-plugin-global-shortcut": "file:../../plugins/global-shortcut",
     "@ohos-rs/ability-plugin-deep-link": "file:../../plugins/deep-link",
+    "@ohos-rs/ability-plugin-fault-injection": "file:../../plugins/faultinjection",
     "@ohos-rs/ability-plugin-autostart": "file:../../plugins/autostart",
     "@ohos-rs/ability-plugin-menu": "file:../../plugins/menu",
     "@ohos-rs/ability-plugin-statusbar": "file:../../plugins/statusbar",

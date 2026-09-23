@@ -62,12 +62,12 @@ Rust plugin facades (BridgePlugin) + application business code (run_loop)
 | `crates/plugin-files` | `ohos.files` — file dialogs (open/save/folder) |
 | `crates/plugin-url` | `ohos.url` — `context.openLink` |
 | `crates/plugin-resource` | `ohos.resource` — inbound-only: ArkTS pushes `resourceManager` from Ability-scoped `onInstall`; no outbound actions |
-| `crates/plugin-fault-injection` | Coverage-testing facade for the built-in `ohos.fault-injection` plugin — see the pairing exception below |
+| `crates/plugin-fault-injection` | `ohos.fault-injection` — coverage-testing fault injection through the generic `BridgeHost` dispatch-hook seam (`registerDispatchHook`) |
 | `crates/plugin-account` | `ohos.account` — Huawei Account one-tap login (login / silentLogin / logout) |
 | `crates/plugin-process` | `ohos.process` — app process control (`appRecovery.restartApp`) |
 | `crates/plugin-updater` | `ohos.updater` — AppGallery update check and download+install |
 
-Every `crates/plugin-<name>` is paired with an ArkTS HAR in `plugins/<name>` that exports the matching `BridgePluginFactory`; core (`crates/ability`) never imports any `plugin-*` crate. The dependency direction is mirrored on the ArkTS side: the core HAR (`native_ability`) never imports any `@ohos-rs/ability-plugin-*` package — plugin HARs depend on `@ohos-rs/ability` and on sibling plugin HARs exactly when their Rust crates do (e.g. `plugins/statusbar` -> `plugins/menu`, matching `crates/plugin-statusbar` -> `crates/plugin-menu`), never the reverse. Exception: `crates/plugin-fault-injection` has no ArkTS HAR — the ArkTS half is the `BridgeHost` built-in (`native_ability/src/main/ets/bridge/FaultInjection.ets`), always registered and disabled by default; its Rust side therefore has no `BridgePlugin` type and calls go through `BridgeClient::call_builtin`.
+Every `crates/plugin-<name>` is paired with an ArkTS HAR in `plugins/<name>` that exports the matching `BridgePluginFactory`; core (`crates/ability`) never imports any `plugin-*` crate. The dependency direction is mirrored on the ArkTS side: the core HAR (`native_ability`) never imports any `@ohos-rs/ability-plugin-*` package — plugin HARs depend on `@ohos-rs/ability` and on sibling plugin HARs exactly when their Rust crates do (e.g. `plugins/statusbar` -> `plugins/menu`, matching `crates/plugin-statusbar` -> `crates/plugin-menu`), never the reverse. Cross-cutting interception (fault injection) is not a built-in: a plugin registers a `BridgeDispatchHook` via `BridgePluginContext.registerDispatchHook` during `onInstall`, and `BridgeHost` consults the session's hooks before every plugin invocation.
 
 ### Startup Flow
 

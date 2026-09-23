@@ -6,6 +6,7 @@ import { AccountPlugin } from "@ohos-rs/ability-plugin-account";
 import { UpdaterPlugin } from "@ohos-rs/ability-plugin-updater";
 import { GlobalShortcutPlugin } from "@ohos-rs/ability-plugin-global-shortcut";
 import { DeepLinkPlugin } from "@ohos-rs/ability-plugin-deep-link";
+import { FaultInjectionPlugin } from "@ohos-rs/ability-plugin-fault-injection";
 import { AutostartPlugin } from "@ohos-rs/ability-plugin-autostart";
 import { FilesPlugin } from "@ohos-rs/ability-plugin-files";
 import { PermissionPlugin } from "@ohos-rs/ability-plugin-permission";
@@ -45,6 +46,7 @@ export default class EntryAbility extends NativeAbility {
     new LazyPlugin(() => new ClipboardPlugin()),
     new LazyPlugin(() => new GlobalShortcutPlugin()),
     new LazyPlugin(() => new DeepLinkPlugin()),
+    new LazyPlugin(() => new FaultInjectionPlugin()),
     new LazyPlugin(() => new AutostartPlugin()),
     new LazyPlugin(() => new MenuPlugin()),
     new LazyPlugin(() => new StatusbarPlugin()),

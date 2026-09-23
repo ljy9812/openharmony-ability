@@ -14,6 +14,7 @@ export type {
   BridgeBindings,
   BridgeCallContext,
   BridgeContextRequirement,
+  BridgeDispatchHook,
   BridgeLifecycleEvent,
   BridgeLifecycleKind,
   BridgeLifecyclePayload,

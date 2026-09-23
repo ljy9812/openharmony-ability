@@ -1,30 +1,42 @@
 //! Fault injection facade for coverage testing.
 //!
 //! This crate is the Rust half of the `ohos.fault-injection` test tooling. Its
-//! ArkTS half is a **built-in** plugin (`native_ability/src/main/ets/bridge/
-//! FaultInjection.ets`) installed unconditionally by `BridgeHost` — that is a
-//! deliberate design: the fault registry must be reachable without a
-//! Rust-side registration round-trip, `FAULT_REGISTRY.enabled` defaults to
-//! `false`, and `match()` short-circuits on its first line, so production
-//! builds pay zero overhead. This is why the crate deviates from the usual
-//! `crates/plugin-<name>` ↔ `plugins/<name>` HAR pairing: there is no HAR to
-//! pair with, and no Rust `BridgePlugin` type either (without a Rust-side
-//! registration, `BridgeClient::call_async` does not apply) — calls go through
-//! [`BridgeClient::call_builtin`] by the built-in plugin id.
+//! ArkTS half is the [`plugins/faultinjection`] HAR
+//! (`@ohos-rs/ability-plugin-fault-injection`), installed on demand like every
+//! other bridge plugin: the app lists a `FaultInjectionPlugin` factory in
+//! `NativeAbility#bridgePlugins` and registers the [`FaultInjectionBridgePlugin`]
+//! declaration here. Interception runs through the generic `BridgeHost`
+//! dispatch-hook seam: the ArkTS plugin registers one hook on install, and the
+//! host consults it before every plugin invocation while the registry is
+//! enabled. `FAULT_REGISTRY.enabled` defaults to `false` and `match()`
+//! short-circuits on its first line, so production builds that never call
+//! "enable" pay zero overhead.
 //!
 //! Only this facade calls the "enable" action to turn injection on; when no
-//! rule is ever installed, the ArkTS registry stays disabled.
+//! rule is ever installed, the registry stays disabled.
 
 use napi_derive_ohos::napi;
 use napi_ohos::Result;
 use openharmony_ability::{
-    impl_bridge_napi_type, BridgeCallOptions, BridgeClient, BridgeNapiType, OpenHarmonyApp,
+    impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgeClient, BridgeContextRequirement,
+    BridgeNapiType, BridgePlugin, OpenHarmonyApp,
 };
 use serde::{Deserialize, Serialize};
 
-/// Built-in ArkTS plugin id — installed unconditionally by `BridgeHost`
-/// (see `native_ability/src/main/ets/bridge/FaultInjection.ets`).
-pub const FAULT_INJECTION_PLUGIN_ID: &str = "ohos.fault-injection";
+// ── Plugin identity ────────────────────────────────────────────────────────
+
+/// Bridge plugin identity for the ArkTS `FaultInjectionPlugin`
+/// (`plugins/faultinjection`, `@ohos-rs/ability-plugin-fault-injection`).
+pub struct FaultInjectionBridgePlugin;
+
+impl BridgePlugin for FaultInjectionBridgePlugin {
+    type Mode = AsyncBridge;
+
+    const ID: &'static str = "ohos.fault-injection";
+    const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] = &[];
+}
+
+// ── Request / Response contracts ────────────────────────────────────────────
 
 /// Empty request marker for the "enable" / "disable" / "clear" actions.
 /// The ArkTS plugin ignores the request value for these actions.
@@ -72,7 +84,9 @@ pub struct FaultInjectionAck {
 
 impl_bridge_napi_type!(FaultInjectionAck, "ohos.fault-injection.Ack");
 
-/// Coverage-testing facade for the built-in fault-injection plugin.
+// ── Facade client ───────────────────────────────────────────────────────────
+
+/// Coverage-testing facade for the fault-injection plugin.
 #[derive(Clone)]
 pub struct FaultInjectionClient {
     client: BridgeClient,
@@ -91,8 +105,7 @@ impl FaultInjectionClient {
         Response: BridgeNapiType,
     {
         self.client
-            .call_builtin::<Request, Response>(
-                FAULT_INJECTION_PLUGIN_ID,
+            .call_async::<FaultInjectionBridgePlugin, Request, Response>(
                 action,
                 request,
                 BridgeCallOptions::default(),
@@ -123,7 +136,10 @@ impl FaultInjectionClient {
 }
 
 pub trait FaultInjectionExt {
-    /// Coverage-testing fault injection against the built-in ArkTS plugin.
+    /// Coverage-testing fault injection against the `ohos.fault-injection`
+    /// plugin. The plugin must be registered
+    /// (`register_plugin(FaultInjectionBridgePlugin)`) and its ArkTS factory
+    /// listed in `NativeAbility#bridgePlugins`.
     fn fault_injection(&self) -> Result<FaultInjectionClient>;
 }
 
@@ -138,8 +154,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn builtin_plugin_id_is_stable() {
-        assert_eq!(FAULT_INJECTION_PLUGIN_ID, "ohos.fault-injection");
+    fn bridge_plugin_contract_is_stable() {
+        assert_eq!(FaultInjectionBridgePlugin::ID, "ohos.fault-injection");
+        assert!(FaultInjectionBridgePlugin::REQUIRED_CONTEXTS.is_empty());
     }
 
     #[test]

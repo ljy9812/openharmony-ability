@@ -371,6 +371,34 @@ export interface BridgePluginContext {
     responseTypeName: string,
     value: ESObject,
   ) => ESObject[];
+  /**
+   * Registers a cross-cutting dispatch hook on this host. The hook runs before EVERY plugin
+   * invocation on the host — including the registering plugin's own calls. Throwing from a
+   * hook member fails the intercepted call; an async hook may return a Promise to delay
+   * async dispatch. Hooks live for the Ability session: they are dropped when the host
+   * disposes, so plugins typically register in `onInstall` and never unregister.
+   */
+  registerDispatchHook: (hook: BridgeDispatchHook) => void;
+}
+
+/**
+ * Cross-cutting observer for bridge dispatch, registered via
+ * `BridgePluginContext.registerDispatchHook`. The two members mirror the two
+ * dispatch paths; a hook is consulted before every plugin invocation on the
+ * host that registered it.
+ */
+export interface BridgeDispatchHook {
+  /**
+   * Async dispatch: runs after the call is admitted and before `invokeAsync`.
+   * Throw (synchronously or from the returned Promise) to fail the call;
+   * return a Promise that resolves later to delay it.
+   */
+  onDispatchAsync: (pluginId: string, action: string) => void | Promise<void>;
+  /**
+   * Sync-main-thread dispatch: runs before `invokeSync`. Throw to fail the
+   * call. Must not return a Promise — the sync path cannot await one.
+   */
+  onDispatchSync: (pluginId: string, action: string) => void;
 }
 
 // Extends BridgePluginHookContext (not BridgePluginContext directly) so the

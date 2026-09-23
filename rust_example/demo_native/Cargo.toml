@@ -22,6 +22,7 @@ openharmony-ability-plugin-webview = { workspace = true }
 openharmony-ability-plugin-window = { workspace = true }
 openharmony-ability-plugin-global-shortcut = { workspace = true }
 openharmony-ability-plugin-deep-link = { workspace = true }
+openharmony-ability-plugin-fault-injection = { workspace = true }
 openharmony-ability-plugin-autostart = { workspace = true }
 ohos-hilog-binding = { workspace = true }
 futures-channel = { workspace = true }

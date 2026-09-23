@@ -103,6 +103,7 @@ dependencies = [
  "openharmony-ability-plugin-app-control",
  "openharmony-ability-plugin-autostart",
  "openharmony-ability-plugin-deep-link",
+ "openharmony-ability-plugin-fault-injection",
  "openharmony-ability-plugin-files",
  "openharmony-ability-plugin-global-shortcut",
  "openharmony-ability-plugin-permission",

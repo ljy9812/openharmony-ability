@@ -38,7 +38,7 @@
 //! infrastructure that has had zero initialization points since the
 //! `#[ability]` derive refactor, so it could only ever return `false`.
 //! When syscap querying is actually needed, add a `can-i-use` bridge
-//! action (see the fault-injection built-in plugin for the pattern).
+//! action (see the fault-injection plugin for the pattern).
 
 use std::sync::OnceLock;
 

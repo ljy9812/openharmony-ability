@@ -3,7 +3,7 @@ name = "openharmony-ability-plugin-fault-injection"
 version = "1.0.0-beta.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "Coverage-testing facade for the BridgeHost built-in ohos.fault-injection plugin"
+description = "Coverage-testing fault injection bridge plugin (pairs with plugins/faultinjection)"
 
 [dependencies]
 openharmony-ability = { workspace = true }

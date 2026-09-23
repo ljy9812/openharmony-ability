@@ -15,12 +15,12 @@ import {
   BridgePlugin,
   BridgePluginContext,
   BridgePluginDeclaration,
+  BridgeDispatchHook,
   BridgePluginFactory,
   BridgePluginHookContext,
 } from "../ability/type";
 import { SerialTaskQueue } from "../runtime/SerialTaskQueue";
 import { CancellableTaskScope, TaskCancellationSignal } from "../runtime/CancellableTaskScope";
-import { FAULT_REGISTRY, FaultInjectionPlugin } from "./FaultInjection";
 
 // Upper bound for per-call timeouts (callers opt in via bridgeInvoke's timeoutMs).
 // 5 minutes: interactive flows that put up system UI (e.g. Huawei account login
@@ -263,6 +263,10 @@ class BridgeHost {
   private readonly moduleName: string;
   private readonly abilityContext: common.UIAbilityContext;
   private readonly pluginFactories: BridgePluginFactory[];
+  // Cross-cutting dispatch hooks registered by plugins (registerDispatchHook).
+  // Consulted before every plugin invocation on this host — see the two
+  // dispatch points in invokeAsyncInternal / invokeSyncInternal.
+  private readonly dispatchHooks: BridgeDispatchHook[] = [];
   private pluginsConfigured: boolean = false;
   private applicationLifecycle?: ApplicationLifecycle;
   // One native module owns one DefaultXComponent/root tree. Multiple components in an Ability
@@ -281,7 +285,6 @@ class BridgeHost {
     this.abilityContext = abilityContext;
     this.pluginFactories = pluginFactories;
     this.installNodeSurfacePlugin();
-    this.installFaultInjectionPlugin();
   }
 
   /**
@@ -359,21 +362,6 @@ class BridgeHost {
    */
   private installNodeSurfacePlugin(): void {
     const plugin = new NodeSurfacePlugin(this);
-    this.plugins.set(plugin.id, {
-      plugin,
-      installed: false,
-      installAttempted: false,
-    });
-  }
-
-  /**
-   * Installs the built-in fault-injection plugin. It is always registered so the
-   * "enable"/"set-rule"/"clear" actions are available, but `FAULT_REGISTRY.enabled`
-   * defaults to `false` — production builds never call "enable", so `match()` is a
-   * no-op (first-line short-circuit) with negligible overhead.
-   */
-  private installFaultInjectionPlugin(): void {
-    const plugin = new FaultInjectionPlugin();
     this.plugins.set(plugin.id, {
       plugin,
       installed: false,
@@ -939,27 +927,12 @@ class BridgeHost {
       .then(async (): Promise<BridgeTypedValue> => {
         await this.ensureActive(entry, callState);
         this.assertCallActive(pluginId, action, callState, "before invocation");
-        // ── Fault injection point A (async path) ──
-        // match() returns undefined when disabled (production) or no rule applies.
-        const fault = FAULT_REGISTRY.match(pluginId, action);
-        if (fault !== undefined) {
-          if (fault.kind === "error") {
-            throw new Error(`${fault.code}:${fault.message ?? "fault-injected"}`);
-          }
-          if (fault.kind === "exception") {
-            throw new Error(fault.message ?? "fault-injected exception");
-          }
-          if (fault.kind === "delay") {
-            await new Promise<void>((r) => setTimeout(r, fault.ms ?? 0));
-            // delay falls through to normal invokeAsync
-          }
-          if (fault.kind === "timeout") {
-            // P1 audit fix: throw instead of returning a pending Promise.
-            // A pending Promise would leak callState — removeActiveCall is bound
-            // in operation's .finally, which never settles. Throwing causes
-            // operation reject → .finally runs → cleanup proceeds normally.
-            throw new Error(`Bridge call '${pluginId}.${action}' timed out after injected timeout`);
-          }
+        // ── Dispatch hooks (async path) ──
+        // Cross-cutting hooks registered via registerDispatchHook (e.g. the
+        // fault-injection plugin) run before invocation: a throw fails the
+        // call, a returned Promise delays it.
+        for (const hook of this.dispatchHooks) {
+          await hook.onDispatchAsync(pluginId, action);
         }
         const result = await asyncPlugin.invokeAsync(
           action,
@@ -1018,17 +991,11 @@ class BridgeHost {
       cancelled: false,
       cancelListeners: [],
     };
-    // ── Fault injection point B (sync path) ──
-    // Sync path only supports error/exception — delay/timeout would block the
-    // NAPI callback thread. match() returns undefined when disabled or no rule.
-    const syncFault = FAULT_REGISTRY.match(pluginId, action);
-    if (syncFault !== undefined) {
-      if (syncFault.kind === "error") {
-        throw new Error(`${syncFault.code}:${syncFault.message ?? "fault-injected"}`);
-      }
-      if (syncFault.kind === "exception") {
-        throw new Error(syncFault.message ?? "fault-injected exception");
-      }
+    // ── Dispatch hooks (sync path) ──
+    // Same cross-cutting hooks as the async path, sync member: a throw fails
+    // the call. The sync member cannot delay — see BridgeDispatchHook.
+    for (const hook of this.dispatchHooks) {
+      hook.onDispatchSync(pluginId, action);
     }
     const result = syncPlugin.invokeSync(
       action,
@@ -1350,7 +1317,26 @@ class BridgeHost {
           responseTypeName,
           value,
         ),
+      registerDispatchHook: (hook: BridgeDispatchHook): void =>
+        this.registerDispatchHook(pluginId, hook),
     };
+  }
+
+  /**
+   * Adds a cross-cutting dispatch hook for this host. Idempotent per hook
+   * instance; hooks are dropped with the host (session lifetime), so plugins
+   * register in `onInstall` and never unregister.
+   */
+  private registerDispatchHook(ownerPluginId: string, hook: BridgeDispatchHook): void {
+    if (this.dispatchHooks.includes(hook)) {
+      return;
+    }
+    if (this.closing || this.disposed) {
+      throw new Error(
+        `Bridge plugin '${ownerPluginId}' cannot register a dispatch hook on a closing host`,
+      );
+    }
+    this.dispatchHooks.push(hook);
   }
 
   private callContext(
