@@ -100,7 +100,8 @@ export function getMenuBarPort(): MenuBarPort | null {
 @Component
 export struct MenuBarSlotHost {
   @Prop windowId: number = 0;
-  @StorageLink("__openharmony_ability_menu_slot_version__") @Watch("onSlotRegistered")
+  @StorageLink("__openharmony_ability_menu_slot_version__")
+  @Watch("onSlotRegistered")
   slotVersion: number = 0;
   @State private slot: MenuBarSlotBuilder | null = null;
 
@@ -115,7 +116,7 @@ export struct MenuBarSlotHost {
 
   build() {
     if (this.slot) {
-      this.slot.builder({ windowId: this.windowId })
+      this.slot.builder({ windowId: this.windowId });
     }
   }
 }

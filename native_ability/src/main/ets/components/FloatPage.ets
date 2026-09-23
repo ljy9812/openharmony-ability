@@ -210,7 +210,7 @@ struct FloatPage {
         // registration case (first window, plugin installs at ui-context)
         // working identically to MainPage.
         if (this.isDesktop && this.decorations) {
-          MenuBarSlotHost({ windowId: this.windowId })
+          MenuBarSlotHost({ windowId: this.windowId });
         }
         Stack({ alignContent: Alignment.TopEnd }) {
           // 1. WebView content area (full screen)
@@ -264,7 +264,9 @@ struct FloatPage {
               // interception is in WindowManager.maximizeWindow (getDecorationFlag check)
               if (this.decorations) {
                 Button() {
-                  SymbolGlyph(this.isMaximized ? $r("sys.symbol.square_and_square") : $r("sys.symbol.square"))
+                  SymbolGlyph(
+                    this.isMaximized ? $r("sys.symbol.square_and_square") : $r("sys.symbol.square"),
+                  )
                     .fontSize(20)
                     .fontColor(["#666666"])
                 }
