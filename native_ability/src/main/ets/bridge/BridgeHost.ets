@@ -1382,6 +1382,8 @@ class BridgeHost {
         value: ESObject,
       ): ESObject[] =>
         context.invokeNativeSyncProcessWide(event, requestTypeName, responseTypeName, value),
+      registerDispatchHook: (hook: BridgeDispatchHook): void =>
+        this.registerDispatchHook(pluginId, hook),
     };
   }
 
@@ -1425,6 +1427,8 @@ class BridgeHost {
         value: ESObject,
       ): ESObject[] =>
         base.invokeNativeSyncProcessWide(event, requestTypeName, responseTypeName, value),
+      registerDispatchHook: (hook: BridgeDispatchHook): void =>
+        this.registerDispatchHook(base.pluginId, hook),
     };
   }
 

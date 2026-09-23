@@ -262,6 +262,14 @@ export declare function createComposedDemoWebview(): Promise<void>;
  */
 export declare function createDemoWebview(): Promise<void>;
 
+/**
+ * End-to-end self-check for the fault-injection plugin (migrated from the former BridgeHost
+ * built-in): arms an error rule on `demo.login/authorize` and expects the injected marker on
+ * the async dispatch path, does the same for `demo.main-thread/inspect` through the
+ * sync-from-worker path, then verifies clean retries after clearing the registry.
+ */
+export declare function demoFaultInjectionCheck(): Promise<string>;
+
 /** PR #65 capability demo: open-file dialog through `ohos.files`. */
 export declare function demoFileDialogOpen(): Promise<Array<string>>;
 
