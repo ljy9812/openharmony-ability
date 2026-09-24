@@ -128,14 +128,7 @@ export class AcceleratorMatcher {
     if (!event.getModifierKeyState) {
       return false;
     }
-    const result = event.getModifierKeyState([modifier]);
-    if (typeof result === "boolean") {
-      return result;
-    }
-    if (result && typeof result === "object") {
-      return !!result[modifier];
-    }
-    return false;
+    return event.getModifierKeyState([modifier]);
   }
 
   getMatchedItem(): MenuItemData | null {

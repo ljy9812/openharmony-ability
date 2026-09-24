@@ -91,6 +91,7 @@ pub struct OpenHarmonyAppInner {
     render_owner: Option<String>,
     touch_input_delivery: TouchInputDelivery,
     surface_active: bool,
+    sub_surfaces: HashMap<i64, SubRenderSurface>,
 
     state: Vec<u8>,
     save_state: bool,
@@ -125,7 +126,7 @@ pub struct OpenHarmonyAppInner {
     /// window); every listener runs on every decor change under the lock.
     pub(crate) decor_change_callbacks: Vec<(u64, DecorChangeListener)>,
     next_decor_cb_id: u64,
-    pub(crate) avoid_areas: HashMap<AvoidAreaType, AvoidArea>,
+    pub(crate) avoid_areas: HashMap<(i64, AvoidAreaType), AvoidArea>,
     pub(crate) init_context: AbilityInitContext,
     // ─── Session state (migrated from module-level statics, issue #87 major-9) ───
     // These four carried session semantics while living at module scope, which is
@@ -139,6 +140,16 @@ pub struct OpenHarmonyAppInner {
     pub(crate) continuation_restore: bool,
     /// Continuation payload JSON from a continuation-restore launch (drained on take).
     pub(crate) continuation_data: String,
+}
+
+#[derive(Clone)]
+struct SubRenderSurface {
+    owner: String,
+    raw_window: Option<RawWindow>,
+    xcomponent: XComponent,
+    gestures: RenderGestures,
+    rect: Rect,
+    active: bool,
 }
 
 impl PartialEq for OpenHarmonyAppInner {
@@ -191,6 +202,7 @@ impl OpenHarmonyAppInner {
             render_owner: None,
             touch_input_delivery: TouchInputDelivery::default(),
             surface_active: false,
+            sub_surfaces: HashMap::new(),
             state: vec![],
             save_state: false,
             id,
@@ -359,7 +371,7 @@ impl OpenHarmonyAppInner {
         // NOTE: deactivate_surface intentionally does NOT reset window_rects — that
         // preserves the asymmetric semantics (only full release clears the rect cache).
         self.window_rects.remove(&0);
-        self.avoid_areas.clear();
+        self.avoid_areas.retain(|(window_id, _), _| *window_id != 0);
         Some(surface_was_active)
     }
 
@@ -384,15 +396,43 @@ impl OpenHarmonyAppInner {
     }
 
     pub fn avoid_area(&self, area_type: AvoidAreaType) -> Option<AvoidArea> {
-        self.avoid_areas.get(&area_type).copied()
+        self.avoid_area_for(0, area_type)
+    }
+
+    pub fn avoid_area_for(&self, window_id: i64, area_type: AvoidAreaType) -> Option<AvoidArea> {
+        self.avoid_areas.get(&(window_id, area_type)).copied()
     }
 
     pub fn avoid_areas(&self) -> HashMap<AvoidAreaType, AvoidArea> {
-        self.avoid_areas.clone()
+        self.avoid_areas
+            .iter()
+            .filter_map(|(&(window_id, kind), &area)| (window_id == 0).then_some((kind, area)))
+            .collect()
     }
 
     pub fn native_window(&self) -> Option<RawWindow> {
         self.raw_window
+    }
+
+    pub fn native_window_for(&self, window_id: i64) -> Option<RawWindow> {
+        if window_id == 0 {
+            self.raw_window
+        } else {
+            self.sub_surfaces
+                .get(&window_id)
+                .and_then(|surface| surface.raw_window)
+        }
+    }
+
+    pub fn content_rect_for(&self, window_id: i64) -> Rect {
+        if window_id == 0 {
+            self.rect
+        } else {
+            self.sub_surfaces
+                .get(&window_id)
+                .map(|s| s.rect)
+                .unwrap_or_default()
+        }
     }
 
     pub fn scale(&self) -> f32 {
@@ -497,6 +537,7 @@ pub struct OpenHarmonyApp {
     pub(crate) event_loop: EventLoop,
     pub(crate) back_press_interceptor: BackPressInterceptor,
     pub(crate) ime: Arc<RefCell<Option<IME>>>,
+    pub(crate) sub_ime: Arc<RefCell<HashMap<i64, IME>>>,
     bridge_session: Arc<RwLock<Option<ActiveBridgeSession>>>,
     bridge_plugins: Arc<BridgePluginRegistry>,
     is_keyboard_show: Arc<Mutex<bool>>,
@@ -549,6 +590,7 @@ impl OpenHarmonyApp {
             back_press_interceptor: Arc::new(RefCell::new(None)),
             #[allow(clippy::arc_with_non_send_sync)]
             ime: Arc::new(RefCell::new(None)),
+            sub_ime: Arc::new(RefCell::new(HashMap::new())),
             bridge_session: Arc::new(RwLock::new(None)),
             bridge_plugins: Arc::new(BridgePluginRegistry::default()),
             is_keyboard_show: Arc::new(Mutex::new(false)),
@@ -690,6 +732,7 @@ impl OpenHarmonyApp {
     pub(crate) fn begin_render(
         &self,
         owner: &str,
+        window_id: i64,
         xcomponent: XComponent,
     ) -> Result<TouchInputDelivery> {
         let bridge_active = self
@@ -706,8 +749,27 @@ impl OpenHarmonyApp {
             .inner
             .write()
             .map_err(|_| Error::from_reason("Failed to claim native render owner"))?;
-        inner.claim_render_owner(owner)?;
-        inner.xcomponent = Some(xcomponent);
+        if window_id == 0 {
+            inner.claim_render_owner(owner)?;
+            inner.xcomponent = Some(xcomponent);
+        } else {
+            if inner.sub_surfaces.contains_key(&window_id) {
+                return Err(Error::from_reason(
+                    "Window already has an active XComponent render",
+                ));
+            }
+            inner.sub_surfaces.insert(
+                window_id,
+                SubRenderSurface {
+                    owner: owner.to_owned(),
+                    raw_window: None,
+                    xcomponent,
+                    gestures: RenderGestures::default(),
+                    rect: Rect::default(),
+                    active: false,
+                },
+            );
+        }
         Ok(inner.touch_input_delivery)
     }
 
@@ -716,12 +778,15 @@ impl OpenHarmonyApp {
             .inner
             .write()
             .map_err(|_| Error::from_reason("Failed to store native render gestures"))?;
-        if !inner.owns_render(owner) {
+        if inner.owns_render(owner) {
+            inner.render_gestures.replace(gestures);
+        } else if let Some(surface) = inner.sub_surfaces.values().find(|s| s.owner == owner) {
+            surface.gestures.replace(gestures);
+        } else {
             return Err(Error::from_reason(
-                "Cannot attach gestures to a stale DefaultXComponent render owner",
+                "Cannot attach gestures to a stale render owner",
             ));
         }
-        inner.render_gestures.replace(gestures);
         Ok(())
     }
 
@@ -733,32 +798,104 @@ impl OpenHarmonyApp {
     ) -> bool {
         self.inner
             .write()
-            .map(|mut inner| inner.activate_surface(owner, raw_window, rect))
+            .map(|mut inner| {
+                if inner.owns_render(owner) {
+                    inner.activate_surface(owner, raw_window, rect)
+                } else if let Some(surface) =
+                    inner.sub_surfaces.values_mut().find(|s| s.owner == owner)
+                {
+                    if surface.active {
+                        return false;
+                    }
+                    surface.raw_window = raw_window;
+                    surface.rect = rect;
+                    surface.active = true;
+                    true
+                } else {
+                    false
+                }
+            })
             .unwrap_or(false)
     }
 
     pub(crate) fn update_render_surface_rect(&self, owner: &str, rect: Rect) -> bool {
         self.inner
             .write()
-            .map(|mut inner| inner.update_surface_rect(owner, rect))
+            .map(|mut inner| {
+                if inner.owns_render(owner) {
+                    inner.update_surface_rect(owner, rect)
+                } else if let Some(surface) =
+                    inner.sub_surfaces.values_mut().find(|s| s.owner == owner)
+                {
+                    if !surface.active {
+                        return false;
+                    }
+                    surface.rect = rect;
+                    true
+                } else {
+                    false
+                }
+            })
             .unwrap_or(false)
     }
 
     pub(crate) fn is_render_surface_active(&self, owner: &str) -> bool {
         self.inner
             .read()
-            .map(|inner| inner.owns_render(owner) && inner.surface_active)
+            .map(|inner| {
+                (inner.owns_render(owner) && inner.surface_active)
+                    || inner
+                        .sub_surfaces
+                        .values()
+                        .any(|s| s.owner == owner && s.active)
+            })
             .unwrap_or(false)
     }
 
+    pub(crate) fn render_window_id(&self, owner: &str) -> Option<i64> {
+        self.inner.read().ok().and_then(|inner| {
+            if inner.owns_render(owner) {
+                Some(0)
+            } else {
+                inner
+                    .sub_surfaces
+                    .iter()
+                    .find_map(|(id, surface)| (surface.owner == owner).then_some(*id))
+            }
+        })
+    }
+
     pub(crate) fn deactivate_render_surface(&self, owner: &str) -> bool {
+        let window_id = self.render_window_id(owner);
         let deactivated = self
             .inner
             .write()
-            .map(|mut inner| inner.deactivate_surface(owner))
+            .map(|mut inner| {
+                if inner.owns_render(owner) {
+                    inner.deactivate_surface(owner)
+                } else if let Some(surface) =
+                    inner.sub_surfaces.values_mut().find(|s| s.owner == owner)
+                {
+                    let active = surface.active;
+                    surface.active = false;
+                    surface.raw_window = None;
+                    surface.rect = Rect::default();
+                    active
+                } else {
+                    false
+                }
+            })
             .unwrap_or(false);
         if deactivated {
-            self.ime.borrow_mut().take();
+            match window_id {
+                Some(0) => {
+                    self.ime.borrow_mut().take();
+                }
+                Some(id) => {
+                    self.sub_ime.borrow_mut().remove(&id);
+                }
+                None => {}
+            }
         }
         deactivated
     }
@@ -767,23 +904,54 @@ impl OpenHarmonyApp {
     /// from an old DefaultXComponent cannot clear a replacement component's native state.
     #[doc(hidden)]
     pub fn release_render(&self, owner: &str) {
-        let surface_was_active = self
-            .inner
-            .write()
-            .ok()
-            .and_then(|mut inner| inner.release_render_owner(owner));
-        let Some(surface_was_active) = surface_was_active else {
+        let released = self.inner.write().ok().and_then(|mut inner| {
+            if inner.owns_render(owner) {
+                inner.release_render_owner(owner).map(|active| (0, active))
+            } else {
+                let id = inner
+                    .sub_surfaces
+                    .iter()
+                    .find_map(|(id, surface)| (surface.owner == owner).then_some(*id))?;
+                let surface = inner.sub_surfaces.remove(&id)?;
+                surface.gestures.release(Some(&surface.xcomponent));
+                surface
+                    .xcomponent
+                    .native_xcomponent()
+                    .unregister_callbacks();
+                inner.window_rects.remove(&id);
+                inner
+                    .avoid_areas
+                    .retain(|(window_id, _), _| *window_id != id);
+                Some((id, surface.active))
+            }
+        });
+        let Some((window_id, surface_was_active)) = released else {
             return;
         };
-        self.ime.borrow_mut().take();
+        if window_id == 0 {
+            self.ime.borrow_mut().take();
+        } else {
+            self.sub_ime.borrow_mut().remove(&window_id);
+        }
         if surface_was_active {
-            self.dispatch_surface_destroy();
+            if window_id == 0 {
+                self.dispatch_surface_destroy();
+            } else if let Some(ref mut handler) = *self.event_loop.borrow_mut() {
+                handler(Event::SubWindowSurfaceDestroy(window_id));
+            }
         }
     }
 
     pub(crate) fn dispatch_surface_destroy(&self) {
         if let Some(ref mut handler) = *self.event_loop.borrow_mut() {
             handler(Event::SurfaceDestroy);
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn dispatch_sub_window_closed(&self, window_id: i64) {
+        if let Some(ref mut handler) = *self.event_loop.borrow_mut() {
+            handler(Event::SubWindowClosed(window_id));
         }
     }
 
@@ -923,20 +1091,34 @@ impl OpenHarmonyApp {
     }
 
     pub fn show_keyboard(&self) {
+        self.show_keyboard_for(0);
+    }
+    pub fn show_keyboard_for(&self, window_id: i64) {
         let _guard = self
             .is_keyboard_show
             .lock()
             .expect("Failed to lock is_keyboard_show");
-        if let Some(ime) = self.ime.borrow().as_ref() {
+        if window_id == 0 {
+            if let Some(ime) = self.ime.borrow().as_ref() {
+                ime.show_keyboard();
+            }
+        } else if let Some(ime) = self.sub_ime.borrow().get(&window_id) {
             ime.show_keyboard();
         }
     }
     pub fn hide_keyboard(&self) {
+        self.hide_keyboard_for(0);
+    }
+    pub fn hide_keyboard_for(&self, window_id: i64) {
         let _guard = self
             .is_keyboard_show
             .lock()
             .expect("Failed to lock is_keyboard_show");
-        if let Some(ime) = self.ime.borrow().as_ref() {
+        if window_id == 0 {
+            if let Some(ime) = self.ime.borrow().as_ref() {
+                ime.hide_keyboard();
+            }
+        } else if let Some(ime) = self.sub_ime.borrow().get(&window_id) {
             ime.hide_keyboard();
         }
     }
@@ -1070,11 +1252,44 @@ impl OpenHarmonyApp {
         self.inner.read().unwrap().avoid_area(area_type)
     }
 
+    pub fn avoid_area_for(&self, window_id: i64, area_type: AvoidAreaType) -> Option<AvoidArea> {
+        self.inner
+            .read()
+            .unwrap()
+            .avoid_area_for(window_id, area_type)
+    }
+
     pub fn avoid_areas(&self) -> HashMap<AvoidAreaType, AvoidArea> {
         self.inner.read().unwrap().avoid_areas()
     }
     pub fn native_window(&self) -> Option<RawWindow> {
         self.inner.read().unwrap().native_window()
+    }
+
+    pub fn native_window_for(&self, window_id: i64) -> Option<RawWindow> {
+        self.inner.read().unwrap().native_window_for(window_id)
+    }
+
+    pub fn content_rect_for(&self, window_id: i64) -> Rect {
+        self.inner.read().unwrap().content_rect_for(window_id)
+    }
+
+    /// Runs `callback` while the render XComponent for `window_id` is retained.
+    /// The component may be absent before its surface is mounted or after teardown.
+    pub fn with_xcomponent_for<R>(
+        &self,
+        window_id: i64,
+        callback: impl FnOnce(&XComponent) -> R,
+    ) -> Option<R> {
+        let inner = self.inner.read().ok()?;
+        if window_id == 0 {
+            inner.xcomponent.as_ref().map(callback)
+        } else {
+            inner
+                .sub_surfaces
+                .get(&window_id)
+                .map(|surface| callback(&surface.xcomponent))
+        }
     }
 
     /// Get current app scale
@@ -1287,6 +1502,7 @@ pub fn notify_window_status(window_id: i32, status: i32) {
             poisoned.into_inner().push((window_id, status));
         }
     }
+    OpenHarmonyWaker::new().wake();
 }
 
 /// Drain all pending window status changes.
@@ -1597,13 +1813,37 @@ mod tests {
         );
         inner
             .avoid_areas
-            .insert(AvoidAreaType::Keyboard, AvoidArea::default());
+            .insert((0, AvoidAreaType::Keyboard), AvoidArea::default());
 
         assert_eq!(inner.release_render_owner("owner"), Some(false));
         // release_render_owner clears key 0 (main window); sub-window rects would persist
         // until their own destruction path runs. Assert key 0 is gone.
         assert!(!inner.window_rects.contains_key(&0));
         assert!(inner.avoid_areas.is_empty());
+    }
+
+    #[test]
+    fn avoid_areas_are_isolated_by_window_id() {
+        let mut inner = OpenHarmonyAppInner::new();
+        let main = AvoidArea {
+            visible: true,
+            ..Default::default()
+        };
+        let child = AvoidArea::default();
+        inner.avoid_areas.insert((0, AvoidAreaType::Keyboard), main);
+        inner
+            .avoid_areas
+            .insert((7, AvoidAreaType::Keyboard), child);
+
+        assert_eq!(inner.avoid_area(AvoidAreaType::Keyboard), Some(main));
+        assert_eq!(
+            inner.avoid_area_for(7, AvoidAreaType::Keyboard),
+            Some(child)
+        );
+        assert_eq!(
+            inner.avoid_areas(),
+            [(AvoidAreaType::Keyboard, main)].into()
+        );
     }
 
     #[test]

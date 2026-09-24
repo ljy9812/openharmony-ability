@@ -1,3 +1,4 @@
+use napi_derive_ohos::napi;
 use napi_ohos::{
     bindgen_prelude::Function, threadsafe_function::ThreadsafeFunction, Env, Result, Status,
 };
@@ -12,9 +13,74 @@ type ImeCallback = (
     ThreadsafeFunction<u32, (), u32, Status, false>,
     ThreadsafeFunction<i32, (), i32, Status, false>,
     ThreadsafeFunction<i32, (), i32, Status, false>,
+    ThreadsafeFunction<PreviewTextEventData, (), PreviewTextEventData, Status, false>,
+    ThreadsafeFunction<bool, (), bool, Status, false>,
 );
 
+#[napi(object)]
+#[derive(Clone)]
+pub struct PreviewTextEventData {
+    pub text: String,
+    pub start: i32,
+    pub end: i32,
+}
+
+fn dispatch_ime_input(app: &OpenHarmonyApp, owner: &str, event: InputEvent) {
+    if let Some(ref mut handler) = *app.event_loop.borrow_mut() {
+        match app.render_window_id(owner) {
+            Some(0) => handler(Event::Input(event)),
+            Some(window_id) => handler(Event::SubWindowInput { window_id, event }),
+            None => {}
+        }
+    }
+}
+
 pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result<ImeCallback> {
+    let on_preview_app = app.clone();
+    let on_preview_owner = render_owner.clone();
+    let preview_callback: Function<PreviewTextEventData, ()> =
+        env.create_function_from_closure("ime_preview_callback", move |ctx| {
+            if !on_preview_app.is_render_surface_active(&on_preview_owner) {
+                return Ok(());
+            }
+            let Some(data) = ctx.first_arg::<PreviewTextEventData>().ok() else {
+                crate::warn!("ime_preview_callback: invalid preview, dropping event");
+                return Ok(());
+            };
+            dispatch_ime_input(
+                &on_preview_app,
+                &on_preview_owner,
+                InputEvent::Ime(ImeEvent::PreviewTextEvent {
+                    text: data.text,
+                    start: data.start,
+                    end: data.end,
+                }),
+            );
+            Ok(())
+        })?;
+    let preview_callback_tsfn = preview_callback
+        .build_threadsafe_function()
+        .callee_handled::<false>()
+        .build()?;
+
+    let on_finish_app = app.clone();
+    let on_finish_owner = render_owner.clone();
+    let finish_callback: Function<bool, ()> =
+        env.create_function_from_closure("ime_finish_preview_callback", move |_ctx| {
+            if on_finish_app.is_render_surface_active(&on_finish_owner) {
+                dispatch_ime_input(
+                    &on_finish_app,
+                    &on_finish_owner,
+                    InputEvent::Ime(ImeEvent::FinishPreviewEvent),
+                );
+            }
+            Ok(())
+        })?;
+    let finish_callback_tsfn = finish_callback
+        .build_threadsafe_function()
+        .callee_handled::<false>()
+        .build()?;
+
     // insert event
     let on_insert_text_app = app.clone();
     let on_insert_text_owner = render_owner.clone();
@@ -30,11 +96,11 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result
                 crate::warn!("ime_insert_callback: first_arg missing/invalid, dropping event");
                 return Ok(());
             };
-            if let Some(ref mut h) = *on_insert_text_app.event_loop.borrow_mut() {
-                h(Event::Input(InputEvent::Ime(ImeEvent::TextInputEvent(
-                    TextInputEventData { text: s },
-                ))))
-            }
+            dispatch_ime_input(
+                &on_insert_text_app,
+                &on_insert_text_owner,
+                InputEvent::Ime(ImeEvent::TextInputEvent(TextInputEventData { text: s })),
+            );
             Ok(())
         })?;
 
@@ -60,15 +126,11 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result
             };
 
             let status = KeyboardStatus::from(value);
-            if matches!(status, KeyboardStatus::Hide) {
-                // Keep native IME lifecycle aligned with hide callbacks.
-                on_ime_hide_app.hide_keyboard();
-            }
-            if let Some(ref mut h) = *on_ime_hide_app.event_loop.borrow_mut() {
-                h(Event::Input(InputEvent::Ime(ImeEvent::ImeStatusEvent(
-                    status,
-                ))))
-            }
+            dispatch_ime_input(
+                &on_ime_hide_app,
+                &on_ime_hide_owner,
+                InputEvent::Ime(ImeEvent::ImeStatusEvent(status)),
+            );
             Ok(())
         })?;
 
@@ -89,11 +151,11 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result
                 crate::warn!("on_backspace_callback: first_arg missing/invalid, dropping event");
                 return Ok(());
             };
-            if let Some(ref mut h) = *on_backspace_app.event_loop.borrow_mut() {
-                h(Event::Input(InputEvent::Ime(ImeEvent::BackspaceEvent(
-                    value,
-                ))))
-            }
+            dispatch_ime_input(
+                &on_backspace_app,
+                &on_backspace_owner,
+                InputEvent::Ime(ImeEvent::BackspaceEvent(value)),
+            );
             Ok(())
         })?;
 
@@ -114,9 +176,11 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result
                 crate::warn!("on_ime_enter_callback: first_arg missing/invalid, dropping event");
                 return Ok(());
             };
-            if let Some(ref mut h) = *on_ime_enter_app.event_loop.borrow_mut() {
-                h(Event::Input(InputEvent::Ime(ImeEvent::EnterEvent(value))))
-            }
+            dispatch_ime_input(
+                &on_ime_enter_app,
+                &on_ime_enter_owner,
+                InputEvent::Ime(ImeEvent::EnterEvent(value)),
+            );
             Ok(())
         })?;
 
@@ -130,5 +194,7 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result
         on_ime_hide_callback_tsfn,
         on_backspace_callback_tsfn,
         on_ime_enter_callback_tsfn,
+        preview_callback_tsfn,
+        finish_callback_tsfn,
     ))
 }

@@ -167,7 +167,7 @@ export class UpdaterPlugin extends AsyncPluginBase {
         error.code,
         error.message,
       );
-      throw error;
+      throw error as Error;
     }
   }
 
@@ -188,7 +188,7 @@ export class UpdaterPlugin extends AsyncPluginBase {
         error.code,
         error.message,
       );
-      throw error;
+      throw error as Error;
     }
   }
 }

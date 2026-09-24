@@ -1,5 +1,5 @@
 import window from "@ohos.window";
-import { deviceInfo } from "@kit.BasicServicesKit";
+import { BusinessError, deviceInfo } from "@kit.BasicServicesKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 // Static imports are REQUIRED here: dynamic import('@kit.NotificationKit') /
 // ('@kit.IMEKit') fail to load their native so on device (libnotificationkit.z.so
@@ -37,6 +37,7 @@ const TITLE_REQUEST_TYPE = "ohos.window.TitleRequest";
 const LIMITS_REQUEST_TYPE = "ohos.window.LimitsRequest";
 const IME_POSITION_REQUEST_TYPE = "ohos.window.ImePositionRequest";
 const DRAGGABLE_REQUEST_TYPE = "ohos.window.DraggableRequest";
+const KEEP_SCREEN_ON_REQUEST_TYPE = "ohos.window.KeepScreenOnRequest";
 const CURSOR_ICON_REQUEST_TYPE = "ohos.window.CursorIconRequest";
 const CURSOR_VISIBLE_REQUEST_TYPE = "ohos.window.CursorVisibleRequest";
 const DECORATION_FLAGS_REQUEST_TYPE = "ohos.window.DecorationFlagsRequest";
@@ -147,6 +148,11 @@ interface ImePositionRequest {
 interface WindowDraggableRequest {
   windowId: number;
   enable: boolean;
+}
+
+interface WindowKeepScreenOnRequest {
+  windowId: number;
+  on: boolean;
 }
 
 interface CursorIconRequest {
@@ -467,6 +473,19 @@ function parseDraggableRequest(payload: BridgeTypedValue): WindowDraggableReques
   return request;
 }
 
+function parseKeepScreenOnRequest(payload: BridgeTypedValue): WindowKeepScreenOnRequest {
+  if (payload.typeName !== KEEP_SCREEN_ON_REQUEST_TYPE || typeof payload.value !== "object") {
+    throw new Error(
+      `ohos.window.set-keep-screen-on requires bridge type ${KEEP_SCREEN_ON_REQUEST_TYPE}`,
+    );
+  }
+  const request = payload.value as WindowKeepScreenOnRequest;
+  if (!isWindowId(request?.windowId) || typeof request.on !== "boolean") {
+    throw new Error("set-keep-screen-on requires a valid windowId and boolean on");
+  }
+  return request;
+}
+
 function parseCursorIconRequest(payload: BridgeTypedValue): CursorIconRequest {
   if (payload.typeName !== CURSOR_ICON_REQUEST_TYPE || typeof payload.value !== "object") {
     throw new Error(`ohos.window.set-cursor-icon requires bridge type ${CURSOR_ICON_REQUEST_TYPE}`);
@@ -552,9 +571,10 @@ export class WindowPlugin extends AsyncPluginBase {
         if (request.transparent && deviceInfo.sdkApiVersion >= 20) {
           try {
             created.setWindowContainerColor("#00000000", "#00000000");
-          } catch (containerErr: any) {
-            if (containerErr.code !== 801) {
-              // 801 = API not supported; other errors logged but non-fatal
+          } catch (containerErr) {
+            const error = containerErr as BusinessError;
+            if (error.code !== 801) {
+              hilog.warn(DOMAIN, TAG, "setWindowContainerColor failed: %{public}s", String(error));
             }
           }
         }
@@ -751,65 +771,56 @@ export class WindowPlugin extends AsyncPluginBase {
       // context, so hilog is safe everywhere here.
       const request = parseWindowIdRequest(payload);
       const notifId = ++attentionNotifId;
-      const doPublish = (): void => {
-        notificationManager
-          .publish({
-            id: notifId,
-            content: {
-              contentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
-              normal: { title: "Tauri App", text: "请查看应用窗口" as string },
-            } as ESObject,
-          } as ESObject)
-          .then(() => {
-            hilog.info(
-              DOMAIN,
-              TAG,
-              "request-user-attention: published OK (id=%{public}d, window=%{public}d)",
-              notifId,
-              request.windowId,
-            );
-          })
-          .catch((err: ESObject) => {
-            const code = err && (err as ESObject).code ? (err as ESObject).code : -1;
-            hilog.warn(
-              DOMAIN,
-              TAG,
-              "request-user-attention: publish failed id=%{public}d code=%{public}s",
-              notifId,
-              String(code),
-            );
-            // 1600004 = notification not enabled → pop the system authorization
-            // dialog (requestEnableNotification) and retry once.
-            if (code === 1600004) {
-              // The no-arg overload is deprecated since API 12; this UIAbilityContext
-              // overload (@since 12) is the SDK's documented replacement, but oxk's
-              // arkts/system-api-version flags the shared name regardless of overload
-              // and ignores suppression comments — ESObject type-erasure is the only
-              // working silence. The ArkTS compiler rejects namespace casts; the demo's
-              // strict ArkTS build is pre-existing red, lint is the CI gate.
-              (notificationManager as ESObject)
-                .requestEnableNotification(context.abilityContext)
-                .then(() => {
-                  hilog.info(
-                    DOMAIN,
-                    TAG,
-                    "request-user-attention: enabled, retry publish (id=%{public}d)",
-                    notifId,
-                  );
-                  doPublish();
-                })
-                .catch((e2: ESObject) => {
-                  hilog.warn(
-                    DOMAIN,
-                    TAG,
-                    "request-user-attention: requestEnableNotification failed: %{public}s",
-                    JSON.stringify(e2),
-                  );
-                });
-            }
-          });
+      const notification: notificationManager.NotificationRequest = {
+        id: notifId,
+        content: {
+          notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
+          normal: { title: "Tauri App", text: "请查看应用窗口" },
+        },
       };
-      doPublish();
+      const doPublish = async (retry: boolean): Promise<void> => {
+        try {
+          await notificationManager.publish(notification);
+          hilog.info(
+            DOMAIN,
+            TAG,
+            "request-user-attention: published OK (id=%{public}d, window=%{public}d)",
+            notifId,
+            request.windowId,
+          );
+        } catch (err) {
+          const code = (err as BusinessError).code ?? -1;
+          hilog.warn(
+            DOMAIN,
+            TAG,
+            "request-user-attention: publish failed id=%{public}d code=%{public}s",
+            notifId,
+            String(code),
+          );
+          // 1600004 = notification not enabled → pop the system authorization
+          // dialog (requestEnableNotification) and retry once.
+          if (code === 1600004 && !retry) {
+            try {
+              await notificationManager.requestEnableNotification(context.abilityContext);
+              hilog.info(
+                DOMAIN,
+                TAG,
+                "request-user-attention: enabled, retry publish (id=%{public}d)",
+                notifId,
+              );
+              await doPublish(true);
+            } catch (e2) {
+              hilog.warn(
+                DOMAIN,
+                TAG,
+                "request-user-attention: requestEnableNotification failed: %{public}s",
+                JSON.stringify(e2),
+              );
+            }
+          }
+        }
+      };
+      void doPublish(false);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
@@ -842,7 +853,7 @@ export class WindowPlugin extends AsyncPluginBase {
           value: new ImePositionResponse(true, 0, "OK"),
         };
       } catch (error) {
-        const code = error && (error as ESObject).code ? (error as ESObject).code : -1;
+        const code = (error as BusinessError).code ?? -1;
         // 12800009 = input method client detached — no focused editor; caller decides severity.
         hilog.warn(
           DOMAIN,
@@ -875,6 +886,17 @@ export class WindowPlugin extends AsyncPluginBase {
       } catch (error) {
         throw new Error(`set-draggable failed: ${String(error)}`);
       }
+    }
+
+    if (action === "set-keep-screen-on") {
+      const request = parseKeepScreenOnRequest(payload);
+      const win = WindowManager.getInstance().getWindow(request.windowId);
+      if (!win) {
+        throw new Error(`set-keep-screen-on: window ${request.windowId} not found`);
+      }
+      await win.setWindowKeepScreenOn(request.on);
+      this.assertCallActive(context);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "get-real-window-id") {
