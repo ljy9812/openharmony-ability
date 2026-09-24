@@ -59,8 +59,11 @@ function parseDialogOptions(payload: BridgeTypedValue): FileDialogOptions {
     throw new Error("file-dialog.filters must be an array");
   }
   if (request.suggestedName != null) {
-    if (typeof request.suggestedName !== "string" ||
-      request.dialogType !== "save-file" || request.suggestedName.trim().length === 0) {
+    if (
+      typeof request.suggestedName !== "string" ||
+      request.dialogType !== "save-file" ||
+      request.suggestedName.trim().length === 0
+    ) {
       throw new Error("file-dialog.suggestedName requires a save-file dialog and a non-empty name");
     }
   }

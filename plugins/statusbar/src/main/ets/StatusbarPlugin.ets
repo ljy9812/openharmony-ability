@@ -158,7 +158,9 @@ export class StatusbarPlugin extends AsyncPluginBase {
       let statusBarGroupMenu: statusBarManager.StatusBarGroupMenu[] = [];
       if (request.menuJson) {
         try {
-          statusBarGroupMenu = JSON.parse(request.menuJson) as statusBarManager.StatusBarGroupMenu[];
+          statusBarGroupMenu = JSON.parse(
+            request.menuJson,
+          ) as statusBarManager.StatusBarGroupMenu[];
         } catch (e) {
           hilog.warn(
             DOMAIN,
