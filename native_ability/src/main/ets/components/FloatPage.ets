@@ -221,195 +221,190 @@ struct FloatPage {
   build() {
     Stack() {
       Column() {
+        // The floating window draws its own title controls. Keep them above the
+        // menubar, matching the main window's system title bar and menubar order.
+        // decorations=false on desktop retains a transparent drag bar.
+        if (this.windowClass && (this.decorations || this.isDesktop)) {
+          Row() {
+            // Title text (left, occupies remaining space)
+            Row() {
+              Text(this.title)
+                .fontSize(13)
+                .fontColor("#333333")
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .margin({ left: 12 })
+            }
+            .height(40)
+            .layoutWeight(1)
+            .onTouch((event: TouchEvent) => this.startMoveFromTitle(event))
+
+            // Minimize button — always visible when decorations=true;
+            // interception is in WindowManager.minimizeWindow (getDecorationFlag check)
+            if (this.decorations) {
+              Button() {
+                SymbolGlyph($r("sys.symbol.minus"))
+                  .fontSize(20)
+                  .fontColor(["#666666"])
+              }
+              .width(32)
+              .height(32)
+              .borderRadius(16)
+              .backgroundColor("#f0f0f0")
+              .margin({ top: 4, right: 4 })
+              .onClick(() => {
+                try {
+                  WindowManager.getInstance().minimizeWindow(this.windowId);
+                } catch (err) {
+                  hilog.warn(
+                    DOMAIN,
+                    "FloatPage",
+                    "minimize failed: %{public}s",
+                    JSON.stringify(err),
+                  );
+                }
+              });
+            }
+
+            // Maximize/restore button — always visible when decorations=true;
+            // interception is in WindowManager.maximizeWindow (getDecorationFlag check)
+            if (this.decorations) {
+              Button() {
+                SymbolGlyph(
+                  this.isMaximized ? $r("sys.symbol.square_and_square") : $r("sys.symbol.square"),
+                )
+                  .fontSize(20)
+                  .fontColor(["#666666"])
+              }
+              .width(32)
+              .height(32)
+              .borderRadius(16)
+              .backgroundColor("#f0f0f0")
+              .margin({ top: 4, right: 4 })
+              .onClick(() => {
+                try {
+                  if (this.isMaximized) {
+                    // recover() switches MAXIMIZE/FULL_SCREEN → FLOATING (API11+) — the
+                    // documented inverse of maximize(). restore() is main-window-only
+                    // (restores a minimized MAIN window on 2in1, API14+); on a maximized
+                    // Float sub-window it is the wrong API. Mirrors tao set_maximized(false)
+                    // → recover_window (plugin-window bridge).
+                    WindowManager.getInstance().recoverWindow(this.windowId);
+                  } else {
+                    WindowManager.getInstance().maximizeWindow(this.windowId);
+                  }
+                  // isMaximized is driven by windowStatusChange (G9) — no optimistic
+                  // toggle here, so the icon always reflects the actual system state
+                  // once the status-change callback fires (also covers system/tao triggers).
+                } catch (err) {
+                  hilog.warn(
+                    DOMAIN,
+                    "FloatPage",
+                    "maximize/restore failed: %{public}s",
+                    JSON.stringify(err),
+                  );
+                }
+              });
+            }
+
+            // Close button — always visible when decorations=true;
+            // interception is in WindowManager.destroyWindow (getDecorationFlag check)
+            if (this.decorations) {
+              Button() {
+                Image($r("sys.media.ohos_ic_public_cancel"))
+                  .width(20)
+                  .height(20)
+                  .fillColor("#666666")
+              }
+              .width(32)
+              .height(32)
+              .borderRadius(16)
+              .backgroundColor("#f0f0f0")
+              .margin({ top: 4, right: 8 })
+              .onClick(async () => {
+                hilog.info(
+                  DOMAIN,
+                  "FloatPage",
+                  "Close button clicked for window %{public}d",
+                  this.windowId,
+                );
+                if (this.closeNotified) {
+                  return;
+                }
+                // Check closable flag BEFORE anything else (问题四: 拦截 API 执行路径)
+                // Must be before notifyWindowClose — otherwise Rust triggers close event chain.
+                if (!WindowManager.getInstance().getDecorationFlag(this.windowId, "closable")) {
+                  hilog.warn(
+                    DOMAIN,
+                    "FloatPage",
+                    "Close blocked: closable flag not set (window %{public}d)",
+                    this.windowId,
+                  );
+                  return;
+                }
+                this.closeNotified = true;
+                try {
+                  // Notify Rust event loop before destroying the OHOS window,
+                  // so CloseRequested → Destroyed → WindowsStore cleanup can run.
+                  const nativeModule: Module | undefined =
+                    AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+                  if (this.nativeModuleName && nativeModule?.notifyNativeWindowClose) {
+                    nativeModule.notifyNativeWindowClose(this.windowId);
+                  }
+                  if (nativeModule && typeof nativeModule.notifyWindowClose === "function") {
+                    nativeModule.notifyWindowClose(this.windowId);
+                    hilog.info(
+                      DOMAIN,
+                      "FloatPage",
+                      "Window %{public}d close notified via NAPI",
+                      this.windowId,
+                    );
+                  } else {
+                    hilog.warn(
+                      DOMAIN,
+                      "FloatPage",
+                      "NAPI notifyWindowClose not available for window %{public}d",
+                      this.windowId,
+                    );
+                  }
+
+                  // removeWindow BEFORE destroyWindow so that aboutToDisappear
+                  // sees the window as already handled (consistent with ArkHelper.onCloseWindow)
+                  WindowManager.getInstance().removeWindow(this.windowId);
+                  if (this.windowClass) {
+                    await this.windowClass.destroyWindow();
+                    hilog.info(
+                      DOMAIN,
+                      "FloatPage",
+                      "Window %{public}d destroyed and cleaned up",
+                      this.windowId,
+                    );
+                  }
+                } catch (e) {
+                  hilog.error(
+                    DOMAIN,
+                    "FloatPage",
+                    "Failed to close window %{public}d: %{public}s",
+                    this.windowId,
+                    JSON.stringify(e),
+                  );
+                }
+              });
+            }
+          }
+          .width("100%")
+          .height(40);
+        }
+
         // Menubar (only on desktop when menu items are available and decorations are enabled).
-        // MenuBarSlotHost reads the slot live — by FloatPage construction the
-        // slot is normally registered already, but the host keeps the late-
-        // registration case (first window, plugin installs at ui-context)
-        // working identically to MainPage.
+        // MenuBarSlotHost reads the slot live, including late plugin registration.
         if (this.isDesktop && this.decorations) {
           MenuBarSlotHost({ windowId: this.windowId });
         }
-        Stack({ alignContent: Alignment.TopEnd }) {
-          // 1. WebView content area (full screen)
+        Stack() {
           DefaultXComponent({ moduleName: this.nativeModuleName, windowId: this.windowId })
             .width("100%")
             .height("100%")
-
-          // 2. Top drag control area + right close button
-          //    - decorations=true: drag bar + close button (all platforms)
-          //    - decorations=false on desktop: transparent drag bar only (no close button)
-          if (this.windowClass && (this.decorations || this.isDesktop)) {
-            Row() {
-              // Title text (left, occupies remaining space)
-              Row() {
-                Text(this.title)
-                  .fontSize(13)
-                  .fontColor("#333333")
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .margin({ left: 12 })
-              }
-              .height(40)
-              .layoutWeight(1)
-              .onTouch((event: TouchEvent) => this.startMoveFromTitle(event))
-
-              // Minimize button — always visible when decorations=true;
-              // interception is in WindowManager.minimizeWindow (getDecorationFlag check)
-              if (this.decorations) {
-                Button() {
-                  SymbolGlyph($r("sys.symbol.minus"))
-                    .fontSize(20)
-                    .fontColor(["#666666"])
-                }
-                .width(32)
-                .height(32)
-                .borderRadius(16)
-                .backgroundColor("#f0f0f0")
-                .margin({ top: 4, right: 4 })
-                .onClick(() => {
-                  try {
-                    WindowManager.getInstance().minimizeWindow(this.windowId);
-                  } catch (err) {
-                    hilog.warn(
-                      DOMAIN,
-                      "FloatPage",
-                      "minimize failed: %{public}s",
-                      JSON.stringify(err),
-                    );
-                  }
-                });
-              }
-
-              // Maximize/restore button — always visible when decorations=true;
-              // interception is in WindowManager.maximizeWindow (getDecorationFlag check)
-              if (this.decorations) {
-                Button() {
-                  SymbolGlyph(
-                    this.isMaximized ? $r("sys.symbol.square_and_square") : $r("sys.symbol.square"),
-                  )
-                    .fontSize(20)
-                    .fontColor(["#666666"])
-                }
-                .width(32)
-                .height(32)
-                .borderRadius(16)
-                .backgroundColor("#f0f0f0")
-                .margin({ top: 4, right: 4 })
-                .onClick(() => {
-                  try {
-                    if (this.isMaximized) {
-                      // recover() switches MAXIMIZE/FULL_SCREEN → FLOATING (API11+) — the
-                      // documented inverse of maximize(). restore() is main-window-only
-                      // (restores a minimized MAIN window on 2in1, API14+); on a maximized
-                      // Float sub-window it is the wrong API. Mirrors tao set_maximized(false)
-                      // → recover_window (plugin-window bridge).
-                      WindowManager.getInstance().recoverWindow(this.windowId);
-                    } else {
-                      WindowManager.getInstance().maximizeWindow(this.windowId);
-                    }
-                    // isMaximized is driven by windowStatusChange (G9) — no optimistic
-                    // toggle here, so the icon always reflects the actual system state
-                    // once the status-change callback fires (also covers system/tao triggers).
-                  } catch (err) {
-                    hilog.warn(
-                      DOMAIN,
-                      "FloatPage",
-                      "maximize/restore failed: %{public}s",
-                      JSON.stringify(err),
-                    );
-                  }
-                });
-              }
-
-              // Close button — always visible when decorations=true;
-              // interception is in WindowManager.destroyWindow (getDecorationFlag check)
-              if (this.decorations) {
-                Button() {
-                  Image($r("sys.media.ohos_ic_public_cancel"))
-                    .width(20)
-                    .height(20)
-                    .fillColor("#666666")
-                }
-                .width(32)
-                .height(32)
-                .borderRadius(16)
-                .backgroundColor("#f0f0f0")
-                .margin({ top: 4, right: 8 })
-                .onClick(async () => {
-                  hilog.info(
-                    DOMAIN,
-                    "FloatPage",
-                    "Close button clicked for window %{public}d",
-                    this.windowId,
-                  );
-                  if (this.closeNotified) {
-                    return;
-                  }
-                  // Check closable flag BEFORE anything else (问题四: 拦截 API 执行路径)
-                  // Must be before notifyWindowClose — otherwise Rust triggers close event chain.
-                  if (!WindowManager.getInstance().getDecorationFlag(this.windowId, "closable")) {
-                    hilog.warn(
-                      DOMAIN,
-                      "FloatPage",
-                      "Close blocked: closable flag not set (window %{public}d)",
-                      this.windowId,
-                    );
-                    return;
-                  }
-                  this.closeNotified = true;
-                  try {
-                    // Notify Rust event loop before destroying the OHOS window,
-                    // so CloseRequested → Destroyed → WindowsStore cleanup can run.
-                    const nativeModule: Module | undefined =
-                      AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
-                    if (this.nativeModuleName && nativeModule?.notifyNativeWindowClose) {
-                      nativeModule.notifyNativeWindowClose(this.windowId);
-                    }
-                    if (nativeModule && typeof nativeModule.notifyWindowClose === "function") {
-                      nativeModule.notifyWindowClose(this.windowId);
-                      hilog.info(
-                        DOMAIN,
-                        "FloatPage",
-                        "Window %{public}d close notified via NAPI",
-                        this.windowId,
-                      );
-                    } else {
-                      hilog.warn(
-                        DOMAIN,
-                        "FloatPage",
-                        "NAPI notifyWindowClose not available for window %{public}d",
-                        this.windowId,
-                      );
-                    }
-
-                    // removeWindow BEFORE destroyWindow so that aboutToDisappear
-                    // sees the window as already handled (consistent with ArkHelper.onCloseWindow)
-                    WindowManager.getInstance().removeWindow(this.windowId);
-                    if (this.windowClass) {
-                      await this.windowClass.destroyWindow();
-                      hilog.info(
-                        DOMAIN,
-                        "FloatPage",
-                        "Window %{public}d destroyed and cleaned up",
-                        this.windowId,
-                      );
-                    }
-                  } catch (e) {
-                    hilog.error(
-                      DOMAIN,
-                      "FloatPage",
-                      "Failed to close window %{public}d: %{public}s",
-                      this.windowId,
-                      JSON.stringify(e),
-                    );
-                  }
-                });
-              }
-            }
-            .width("100%")
-            .height(40)
-            .align(Alignment.TopEnd);
-          }
         }
         .layoutWeight(1)
         .width("100%")
