@@ -316,13 +316,8 @@ export class GlobalShortcutPlugin extends AsyncPluginBase {
     }
 
     try {
-      // inputConsumer is API 14+ while the repo lint floor is 12; the guard above
-      // rejects older devices at runtime. oxk's arkts/system-api-version ignores every
-      // suppression-comment form (verified exhaustively) and cannot see runtime guards,
-      // so the call is type-erased via ESObject. The ArkTS compiler rejects namespace
-      // casts (arkts-no-ns-as-obj) — the demo's strict ArkTS build is pre-existing red
-      // (163 errors on the adaptation branch alone); lint is the CI gate, so lint wins.
-      (inputConsumer as ESObject).on("hotkeyChange", hotkeyOptions, callback);
+      // The API 14+ call is guarded above for devices on the API 12 baseline.
+      inputConsumer.on("hotkeyChange", hotkeyOptions, callback);
       this.registeredHotkeys.set(id, { options: hotkeyOptions, callback });
       hilog.info(
         DOMAIN,
@@ -376,7 +371,7 @@ export class GlobalShortcutPlugin extends AsyncPluginBase {
     try {
       // API 14+ (see registerHotkey); entries only exist after a successful
       // register, so the register-time guard has already covered the floor.
-      (inputConsumer as ESObject).off("hotkeyChange", entry.options, entry.callback);
+      inputConsumer.off("hotkeyChange", entry.options, entry.callback);
       hilog.info(DOMAIN, "GlobalShortcut", "Unregistered hotkey id=%{public}d", id);
     } catch (err) {
       const error = err as BusinessError;

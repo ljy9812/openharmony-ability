@@ -26,6 +26,7 @@
     "@ohos-rs/ability-plugin-statusbar": "file:../../plugins/statusbar",
     "@ohos-rs/ability-plugin-process": "file:../../plugins/process",
     "@ohos-rs/ability-plugin-account": "file:../../plugins/account",
+    "@ohos-rs/ability-plugin-accessibility": "file:../../plugins/accessibility",
     "@ohos-rs/ability-plugin-updater": "file:../../plugins/updater",
   },
 }
