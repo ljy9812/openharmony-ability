@@ -590,6 +590,7 @@ impl OpenHarmonyApp {
             back_press_interceptor: Arc::new(RefCell::new(None)),
             #[allow(clippy::arc_with_non_send_sync)]
             ime: Arc::new(RefCell::new(None)),
+            #[allow(clippy::arc_with_non_send_sync)]
             sub_ime: Arc::new(RefCell::new(HashMap::new())),
             bridge_session: Arc::new(RwLock::new(None)),
             bridge_plugins: Arc::new(BridgePluginRegistry::default()),
