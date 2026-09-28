@@ -3,7 +3,7 @@ import { FrameNode } from "@ohos.arkui.node";
 import { common } from "@kit.AbilityKit";
 import pointer from "@ohos.multimodalInput.pointer";
 import { hilog } from "@kit.PerformanceAnalysisKit";
-import { deviceInfo } from "@kit.BasicServicesKit";
+import { BusinessError, deviceInfo } from "@kit.BasicServicesKit";
 import display from "@ohos.display";
 import * as FloatPage from "../components/FloatPage";
 import { getMenuBarPort } from "../components/MenuBarSlot";
@@ -22,6 +22,17 @@ import { WindowAttachmentRegistry } from "./WindowAttachmentRegistry";
 // existing importers (`import {...} from "../window/WindowManager"`) keep working.
 export { WindowRectEventWrap, WindowSizeEventWrap } from "./RectThrottle";
 
+export interface WindowFocusEventWrap {
+  windowId: number;
+  focused: boolean;
+}
+
+export interface WindowAvoidAreaEventWrap {
+  windowId: number;
+  type: number;
+  area: object;
+}
+
 interface WindowEntry {
   window: window.Window;
   storage?: LocalStorage;
@@ -29,6 +40,7 @@ interface WindowEntry {
   // destroyWindow/removeWindow can call win.off("windowRectChange", handler) to avoid
   // leaking the listener past window destruction.
   rectChangeHandler?: (options: window.RectChangeOptions) => void;
+  avoidAreaChangeHandler?: (options: window.AvoidAreaOptions) => void;
   // Phase 3 (design.md D4): set to true just before destroyWindow()/closeWindow Float
   // path calls win.destroyWindow(). throttledRectDispatch checks this to discard
   // in-flight events for a window being torn down (no consumers left).
@@ -38,6 +50,7 @@ interface WindowEntry {
 // Encapsulates all parameters for sub-window creation, replacing a 10-arg signature.
 export interface SubWindowOptions {
   name: string;
+  nativeModuleName?: string;
   windowId: number;
   width?: number;
   height?: number;
@@ -121,6 +134,8 @@ export class WindowManager {
   // wrapped options carry the windowId (main window = 0, sub-window = the createSubWindow
   // windowId parameter).
   private rectChangeCallback?: (options: WindowRectEventWrap) => void;
+  private focusChangeCallback?: (options: WindowFocusEventWrap) => void;
+  private avoidAreaChangeCallback?: (options: WindowAvoidAreaEventWrap) => void;
 
   private constructor(context: common.UIAbilityContext) {
     this.context = context;
@@ -305,13 +320,14 @@ export class WindowManager {
             "applyTransparentBackground: windowId=%{public}d setWindowContainerColor transparent OK (active=transparent inactive=white)",
             wid,
           );
-        } catch (containerErr: any) {
+        } catch (containerErr) {
+          const error = containerErr as BusinessError;
           hilog.warn(
             DOMAIN,
             "WindowManager",
             "applyTransparentBackground: windowId=%{public}d setWindowContainerColor failed: code=%{public}d",
             wid,
-            containerErr.code,
+            error.code,
           );
         }
       }
@@ -335,6 +351,9 @@ export class WindowManager {
         this.lastFocusedWindow = win;
         this.lastFocusedWindowId = windowId;
         hilog.info(DOMAIN, "WindowManager", "Last focused window updated: id=%{public}d", windowId);
+        this.focusChangeCallback?.({ windowId, focused: true });
+      } else if (eventType === window.WindowEventType.WINDOW_INACTIVE) {
+        this.focusChangeCallback?.({ windowId, focused: false });
       }
 
       // Consume pending action when system foreground transition completes
@@ -1351,17 +1370,15 @@ export class WindowManager {
   }
 
   async createSubWindow(opts: SubWindowOptions): Promise<number> {
-    const {
-      name,
-      windowId,
-      width = 800,
-      height = 600,
-      x = 100,
-      y = 100,
-      decorations = true,
-      transparent = false,
-      backgroundColor,
-    } = opts;
+    const name = opts.name;
+    const windowId = opts.windowId;
+    const width = opts.width ?? 800;
+    const height = opts.height ?? 600;
+    const x = opts.x ?? 100;
+    const y = opts.y ?? 100;
+    const decorations = opts.decorations ?? true;
+    const transparent = opts.transparent ?? false;
+    const backgroundColor = opts.backgroundColor;
 
     // Validate windowId: sub-window ID must be greater than 0
     if (windowId <= 0) {
@@ -1375,7 +1392,8 @@ export class WindowManager {
     }
 
     // Check if windowStage has been set
-    if (!this.uiAbilityStages.has(0)) {
+    const mainStage = this.uiAbilityStages.get(0);
+    if (!mainStage) {
       hilog.error(DOMAIN, "WindowManager", "WindowStage not set. Call setWindowStage() first.");
       throw new Error("WindowStage not set");
     }
@@ -1406,10 +1424,10 @@ export class WindowManager {
           decorEnabled: false,
           maximizeSupported: true,
         };
-        win = await this.uiAbilityStages.get(0)?.createSubWindowWithOptions(name, opts);
+        win = await mainStage.createSubWindowWithOptions(name, opts);
       } else {
         // API<19: maximizeSupported does not exist in the SDK typings — plain path.
-        win = await this.uiAbilityStages.get(0)?.createSubWindow(name);
+        win = await mainStage.createSubWindow(name);
       }
       hilog.info(DOMAIN, "WindowManager", `Sub-window created successfully: %{public}d`, windowId);
     } catch (err) {
@@ -1419,12 +1437,13 @@ export class WindowManager {
         `Failed to create sub-window: %{public}s`,
         JSON.stringify(err),
       );
-      throw err;
+      throw err as Error;
     }
 
     // Use LocalStorage to pass windowId and decorations, ensuring isolation between windows
     let storage = new LocalStorage();
     storage.setOrCreate("windowId", windowId);
+    storage.setOrCreate("nativeModuleName", opts.nativeModuleName ?? "");
     storage.setOrCreate("decorations", decorations);
     // D group decoration flags default (all available; setDecorationFlags updates them)
     storage.setOrCreate("closable", true);
@@ -1497,6 +1516,29 @@ export class WindowManager {
       }
     }
 
+    const avoidAreaChangeHandler = (options: window.AvoidAreaOptions): void => {
+      this.avoidAreaChangeCallback?.({
+        windowId,
+        type: options.type,
+        area: options.area,
+      });
+    };
+    try {
+      win.on("avoidAreaChange", avoidAreaChangeHandler);
+      const entry = this.windows.get(windowId);
+      if (entry) {
+        entry.avoidAreaChangeHandler = avoidAreaChangeHandler;
+      }
+    } catch (error) {
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "Failed to register avoidAreaChange for sub-window %{public}d: %{public}s",
+        windowId,
+        String(error),
+      );
+    }
+
     // Register focus tracking for sub-window
     this.registerFocusTracking(win, windowId);
 
@@ -1544,7 +1586,7 @@ export class WindowManager {
         windowId,
         JSON.stringify(err),
       );
-      throw err;
+      throw err as Error;
     }
 
     try {
@@ -1573,14 +1615,15 @@ export class WindowManager {
               windowId,
               deviceInfo.sdkApiVersion,
             );
-          } catch (containerErr: any) {
-            if (containerErr.code === 801) {
+          } catch (containerErr) {
+            const error = containerErr as BusinessError;
+            if (error.code === 801) {
               hilog.debug(
                 DOMAIN,
                 "WindowManager",
                 "setWindowContainerColor not supported (error 801)",
               );
-            } else if (containerErr.code === 201) {
+            } else if (error.code === 201) {
               hilog.error(
                 DOMAIN,
                 "WindowManager",
@@ -1591,7 +1634,7 @@ export class WindowManager {
                 DOMAIN,
                 "WindowManager",
                 `Float window container color failed: code=%{public}d`,
-                containerErr.code,
+                error.code,
               );
             }
           }
@@ -1635,7 +1678,7 @@ export class WindowManager {
         `Failed to resize/move/show window: %{public}s`,
         JSON.stringify(err),
       );
-      throw err;
+      throw err as Error;
     }
 
     return windowId;
@@ -1862,6 +1905,22 @@ export class WindowManager {
     this.rectChangeCallback = cb;
   }
 
+  registerFocusChangeCallback(cb: (options: WindowFocusEventWrap) => void): void {
+    this.focusChangeCallback = cb;
+  }
+
+  unregisterFocusChangeCallback(): void {
+    this.focusChangeCallback = undefined;
+  }
+
+  registerAvoidAreaChangeCallback(cb: (options: WindowAvoidAreaEventWrap) => void): void {
+    this.avoidAreaChangeCallback = cb;
+  }
+
+  unregisterAvoidAreaChangeCallback(): void {
+    this.avoidAreaChangeCallback = undefined;
+  }
+
   unregisterRectChangeCallback(): void {
     this.rectChangeCallback = undefined;
   }
@@ -1903,6 +1962,10 @@ export class WindowManager {
   // Register component root for a sub-window (called by DefaultXComponent sub-window mode)
   registerComponentRoot(windowId: number, root: FrameNode): void {
     this.attachments.registerComponentRoot(windowId, root);
+  }
+
+  unregisterComponentRoot(windowId: number): void {
+    this.attachments.unregisterComponentRoot(windowId);
   }
 
   // Static facade over WindowAttachmentRegistry.onComponentRootRegistered (used by
@@ -1968,6 +2031,19 @@ export class WindowManager {
           `off windowRectChange failed for %{public}d: %{public}s`,
           windowId,
           String(e),
+        );
+      }
+    }
+    if (entry?.avoidAreaChangeHandler) {
+      try {
+        entry.window.off("avoidAreaChange", entry.avoidAreaChangeHandler);
+      } catch (error) {
+        hilog.warn(
+          DOMAIN,
+          "WindowManager",
+          "off avoidAreaChange failed for %{public}d: %{public}s",
+          windowId,
+          String(error),
         );
       }
     }

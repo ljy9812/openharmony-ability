@@ -111,11 +111,9 @@ export class AutostartPlugin extends AsyncPluginBase {
    * This ArkTS method is only called when the version check passes.
    */
   private async queryAutostartStatus(): Promise<boolean> {
-    // getAutoStartupStatusForSelf is API 21+ while the repo lint floor is 12; the
-    // Rust side gates this action on sdk_api_version >= 21 (see the doc comment
-    // above), so the ESObject access only side-steps the guard-blind lint check.
+    // The Rust side gates this API 21+ action on sdk_api_version >= 21.
     try {
-      return (await (autoStartupManager as ESObject).getAutoStartupStatusForSelf()) as boolean;
+      return await autoStartupManager.getAutoStartupStatusForSelf();
     } catch (err) {
       const error = err as BusinessError;
       if (error.code === 801) {

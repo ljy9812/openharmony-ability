@@ -70,6 +70,12 @@ interface WebInterceptRequestEvent {
   request: WebResourceRequest;
 }
 
+interface WebviewSetCookieRequest {
+  id: string;
+  url: string;
+  value: string;
+}
+
 /** Optional static ArkWeb API resolved dynamically to preserve the API-12 package baseline. */
 interface WebviewDebuggingApi {
   setWebDebuggingAccess?: (enabled: boolean) => void;
@@ -1012,7 +1018,7 @@ function notifyPrintState(
 // the task callback ("UnregisterPrintTaskCallback: The job is not completed")
 // and no terminal event (succeed/fail/cancel) is ever delivered to the app.
 // Entries are cleared on the first terminal state.
-const activePrintTasks = new Map<string, ESObject>();
+const activePrintTasks = new Map<string, print.PrintTask>();
 
 /**
  * Synchronous https intercept handler for ArkWeb's `onInterceptRequest`.
@@ -1314,6 +1320,7 @@ function BuildWebview(data: ManagedWebview) {
         .width("100%")
         .height("100%")
         .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
+        .hitTestBehavior(HitTestMode.Block)
         .backgroundColor(
           data.transparent === true ? Color.Transparent : (data.style.backgroundColor ?? undefined),
         )
@@ -1382,6 +1389,7 @@ function BuildWebview(data: ManagedWebview) {
       .width("100%")
       .height("100%")
       .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
+      .hitTestBehavior(HitTestMode.Block)
       // Transparent windows: force Web background to transparent so vibrancy/blur
       // effects are visible through the Web component. Without this, the Web renders
       // with its default opaque background, hiding any blur effect.
@@ -2397,7 +2405,7 @@ class WebviewSurface {
         return new WebviewCaptureResponse(pngBase64, info.size.width, info.size.height);
       } catch (e) {
         console.error(`[WebviewPlugin] PNG packing failed: ${String(e)}`);
-        throw e;
+        throw e as Error;
       } finally {
         try {
           packer.release();
@@ -2478,7 +2486,7 @@ class WebviewSurface {
         }
       };
 
-      const attempt = (retriesLeft: number) => {
+      const attempt = (retriesLeft: number): void => {
         if (settled) return;
         try {
           controller.webPageSnapshot(
@@ -2511,7 +2519,8 @@ class WebviewSurface {
                 this.releasePixelMap(result.imagePixelMap);
                 return;
               }
-              done(() => resolve(result.imagePixelMap));
+              const pixelMap = result.imagePixelMap;
+              done(() => resolve(pixelMap));
             },
           );
         } catch (e) {
@@ -2634,7 +2643,7 @@ class WebviewSurface {
       // Static named import from @kit.BasicServicesKit (API 12 / SDK 5.0.0, 2in1 supported).
       // The prior dynamic import("@ohos.print") resolved printMod.print to a non-function —
       // the kit-level named export `print` is the correct entrypoint per Huawei docs.
-      const task = (await print.print([fileUriStr], ctx)) as ESObject;
+      const task = await print.print([fileUriStr], ctx);
       if (!task) {
         hilog.error(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "printPdf: print() returned no PrintTask");
         cleanup();
@@ -2670,19 +2679,9 @@ class WebviewSurface {
           );
         }
         try {
-          task.on("fail", (err: BusinessError) => {
-            hilog.error(
-              PRINT_LOG_DOMAIN,
-              PRINT_LOG_TAG,
-              "PrintTask 'fail': %{public}s",
-              String(err?.message ?? err),
-            );
-            notifyPrintState(
-              this.pluginContext,
-              id,
-              "fail",
-              String(err?.message ?? err) || undefined,
-            );
+          task.on("fail", () => {
+            hilog.error(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "PrintTask 'fail'");
+            notifyPrintState(this.pluginContext, id, "fail");
             activePrintTasks.delete(id);
             cleanup();
           });
@@ -2908,7 +2907,7 @@ export class WebviewPlugin extends AsyncPluginBase {
       ) {
         throw new Error(`ohos.webview.set-cookie requires bridge type ${SET_COOKIE_REQUEST_TYPE}`);
       }
-      const request = payload.value as { id: string; url: string; value: string };
+      const request = payload.value as WebviewSetCookieRequest;
       if (!request?.id?.trim()) {
         throw new Error("WebView set-cookie id must not be empty");
       }

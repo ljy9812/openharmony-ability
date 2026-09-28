@@ -36,7 +36,7 @@ quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
 ohos-arkui-binding = { version = "0.3" }
-ohos-xcomponent-binding = { version = "0.4" }
+ohos-xcomponent-binding = { version = "0.4", features = ["multi_mode", "accessibility", "api-15"] }
 ohos-xcomponent-sys = { version = "0.1" }
 ohos-arkui-sys = { version = "0.1" }
 ohos-ime-binding = { version = "0.3" }
@@ -59,3 +59,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync", "time"] }
 png = "0.17"
+
+[patch.crates-io]
+ohos-xcomponent-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "c05f75ebc489ad2a8c7f7b314aac38a27fb24836" }
+ohos-xcomponent-sys = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "c05f75ebc489ad2a8c7f7b314aac38a27fb24836" }
+ohos-arkui-input-sys = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "c05f75ebc489ad2a8c7f7b314aac38a27fb24836" }
+ohos-arkui-input-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "c05f75ebc489ad2a8c7f7b314aac38a27fb24836" }

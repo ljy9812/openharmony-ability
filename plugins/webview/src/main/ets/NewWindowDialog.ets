@@ -9,7 +9,12 @@ import { DOMAIN } from "@ohos-rs/ability";
 // dialog force-closes the first. This matches typical browser popup behavior.
 // If multi-dialog support is needed, refactor to a Map<number, DialogSession>.
 let currentPrompt: Object | null = null;
-let currentNode: ComponentContent<Record<string, ESObject>> | null = null;
+let currentNode: ComponentContent<NewWindowDialogParams> | null = null;
+
+interface NewWindowDialogParams {
+  controller: web_webview.WebviewController;
+  url: string;
+}
 
 /**
  * Builder function for the new window dialog content.
@@ -17,10 +22,7 @@ let currentNode: ComponentContent<Record<string, ESObject>> | null = null;
  * multiWindowAccess is disabled to prevent infinite nesting.
  */
 @Builder
-export function newWindowDialogBuilder(params: {
-  controller: web_webview.WebviewController;
-  url: string;
-}) {
+export function newWindowDialogBuilder(params: NewWindowDialogParams) {
   Column() {
     // Title bar with close button
     Row() {
@@ -95,13 +97,14 @@ export function buildNewWindowContent(
   uiContext: UIContext,
   controller: web_webview.WebviewController,
   url: string,
-): ComponentContent<Record<string, ESObject>> {
+): ComponentContent<NewWindowDialogParams> {
   // Close any existing dialog first.
   closeDialog();
-  return new ComponentContent(uiContext, wrapBuilder(newWindowDialogBuilder), {
+  const params: NewWindowDialogParams = {
     controller: controller,
     url: url,
-  });
+  };
+  return new ComponentContent(uiContext, wrapBuilder(newWindowDialogBuilder), params);
 }
 
 /**
@@ -111,7 +114,7 @@ export function buildNewWindowContent(
  */
 export function showNewWindowDialog(
   uiContext: UIContext,
-  contentNode: ComponentContent<Record<string, ESObject>>,
+  contentNode: ComponentContent<NewWindowDialogParams>,
 ): void {
   try {
     const prompt = uiContext.getPromptAction();

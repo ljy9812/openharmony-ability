@@ -119,6 +119,10 @@
       "srcPath": "../plugins/account",
     },
     {
+      "name": "plugin_accessibility",
+      "srcPath": "../plugins/accessibility",
+    },
+    {
       "name": "plugin_updater",
       "srcPath": "../plugins/updater",
     },

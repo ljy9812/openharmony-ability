@@ -155,10 +155,10 @@ export class StatusbarPlugin extends AsyncPluginBase {
         moduleName: request.moduleName,
         loadingStatus: request.loadingStatus,
       };
-      let statusBarGroupMenu: ESObject[][] = [];
+      let statusBarGroupMenu: statusBarManager.StatusBarGroupMenu[] = [];
       if (request.menuJson) {
         try {
-          statusBarGroupMenu = JSON.parse(request.menuJson) as ESObject[][];
+          statusBarGroupMenu = JSON.parse(request.menuJson) as statusBarManager.StatusBarGroupMenu[];
         } catch (e) {
           hilog.warn(
             DOMAIN,
@@ -331,9 +331,9 @@ export class StatusbarPlugin extends AsyncPluginBase {
         throw new Error("update-menu.menuJson must be a non-empty string");
       }
       const abilityContext = context.abilityContext;
-      let statusBarGroupMenu: ESObject[][] = [];
+      let statusBarGroupMenu: statusBarManager.StatusBarGroupMenu[] = [];
       try {
-        statusBarGroupMenu = JSON.parse(request.menuJson) as ESObject[][];
+        statusBarGroupMenu = JSON.parse(request.menuJson) as statusBarManager.StatusBarGroupMenu[];
       } catch (e) {
         throw new Error(`update-menu: failed to parse menuJson: ${String(e)}`);
       }

@@ -83,6 +83,10 @@ class AccessibilityStateChangedEvent {
   }
 }
 
+interface AccessibilityEventAcknowledgement {
+  accepted: boolean;
+}
+
 export class AccessibilityPlugin extends AsyncPluginBase {
   readonly id = "ohos.accessibility";
   readonly requires: BridgeContextRequirement[] = ["ability"];
@@ -123,16 +127,14 @@ export class AccessibilityPlugin extends AsyncPluginBase {
       // third-party read-only call is actually rejected is unresolved — surface whatever
       // BusinessError the system throws instead of swallowing it.
       let enabled = false;
-      // isScreenReaderOpenSync is API 18+ while the repo lint floor is 12; older
-      // devices surface a clear error instead of the raw BusinessError from a
-      // missing API. The ESObject access side-steps the (guard-blind) lint check.
+      // isScreenReaderOpenSync is API 18+ while the repo baseline is API 12.
       if (deviceInfo.sdkApiVersion < 18) {
         throw new Error(
           `isScreenReaderOpenSync requires API 18+ (current ${deviceInfo.sdkApiVersion})`,
         );
       }
       try {
-        enabled = (accessibility as ESObject).isScreenReaderOpenSync() as boolean;
+        enabled = accessibility.isScreenReaderOpenSync();
       } catch (e) {
         const err = e as BusinessError;
         throw new Error(`isScreenReaderOpenSync failed: code=${err.code} msg=${err.message}`);
@@ -224,8 +226,8 @@ export class AccessibilityPlugin extends AsyncPluginBase {
         STATE_CHANGED_EVENT_TYPE,
         EVENT_ACKNOWLEDGEMENT_TYPE,
         new AccessibilityStateChangedEvent(enabled) as ESObject,
-      ) as ESObject;
-      if (response === null || typeof response !== "object") {
+      ) as AccessibilityEventAcknowledgement;
+      if (response?.accepted !== true) {
         throw new Error("Invalid accessibility-state-changed acknowledgement");
       }
     } catch (e) {

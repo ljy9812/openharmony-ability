@@ -30,6 +30,17 @@ export interface StatusBarIconRgba {
   black?: Uint8Array;
 }
 
+interface StatusBarClickData {
+  iconClickType?: string;
+  menuCode?: string;
+}
+
+interface MenuIconPayload extends statusBarManager.StatusBarMenuItemOptions {
+  iconRgba?: Uint8Array;
+  iconWidth?: number;
+  iconHeight?: number;
+}
+
 // Global state
 let abilityContext: common.UIAbilityContext | null = null;
 export function setAbilityContext(ctx: common.UIAbilityContext): void {
@@ -77,8 +88,8 @@ const iconClickHandler = (event: emitter.EventData): void => {
   // through rightMenuClick), so fall back to "leftClick" when the field is
   // absent. Emission is unconditional — Rust/frontend decides what to do.
   try {
-    const data = event?.data as ESObject;
-    let clickType = data?.iconClickType as string;
+    const data = event.data as StatusBarClickData | undefined;
+    let clickType = data?.iconClickType ?? "";
     if (clickType === undefined || clickType === null || clickType === "") {
       clickType = "leftClick";
     }
@@ -106,9 +117,9 @@ const menuClickHandler = (event: emitter.EventData): void => {
   // dispatching rightMenuClick to this handler (receiver wiring / notifyOnly path).
   hilog.info(DOMAIN, "StatusBar", "menuClickHandler ENTER");
   try {
-    const data = event?.data as ESObject;
+    const data = event.data as StatusBarClickData | undefined;
     hilog.info(DOMAIN, "StatusBar", "menuClickHandler raw data: %{public}s", String(data));
-    const menuCode = data?.menuCode as string;
+    const menuCode = data?.menuCode ?? "";
     if (menuCode === undefined || menuCode === null || menuCode === "") {
       hilog.warn(DOMAIN, "StatusBar", "menuClickHandler: no menuCode in event");
       return;
@@ -280,7 +291,10 @@ export function createPixelMapFromRgbaWH(
   }
 }
 
-export function fillMenuItemAbilityName(groups: ESObject[][], abilityName: string): void {
+export function fillMenuItemAbilityName(
+  groups: statusBarManager.StatusBarGroupMenu[],
+  abilityName: string,
+): void {
   for (const group of groups) {
     for (const item of group) {
       if (item.menuAction && (!item.menuAction.abilityName || item.menuAction.abilityName === "")) {
@@ -304,34 +318,41 @@ export function fillMenuItemAbilityName(groups: ESObject[][], abilityName: strin
   }
 }
 
-export function processMenuItemIcons(groups: ESObject[][]): void {
+function processMenuIconOptions(
+  options: statusBarManager.StatusBarMenuItemOptions,
+): statusBarManager.StatusBarMenuItemOptions {
+  const payload = options as MenuIconPayload;
+  if (!payload.iconRgba) {
+    return options;
+  }
+  const width = payload.iconWidth || 24;
+  const height = payload.iconHeight || 24;
+  const pixelMap = createPixelMapFromRgbaWH(payload.iconRgba, width, height);
+  const processed: statusBarManager.StatusBarMenuItemOptions = {};
+  if (pixelMap) {
+    processed.icon = { white: pixelMap, black: pixelMap };
+  } else if (options.icon) {
+    processed.icon = options.icon;
+  }
+  if (options.selected !== undefined) {
+    processed.selected = options.selected;
+  }
+  if (options.selectedIcon) {
+    processed.selectedIcon = options.selectedIcon;
+  }
+  return processed;
+}
+
+export function processMenuItemIcons(groups: statusBarManager.StatusBarGroupMenu[]): void {
   for (const group of groups) {
     for (const item of group) {
-      if (item.options && item.options.iconRgba) {
-        const rgba = item.options.iconRgba as Uint8Array;
-        const w = (item.options.iconWidth as number) || 24;
-        const h = (item.options.iconHeight as number) || 24;
-        const pm = createPixelMapFromRgbaWH(rgba, w, h);
-        if (pm) {
-          item.options.icon = { white: pm, black: pm };
-        }
-        delete item.options.iconRgba;
-        delete item.options.iconWidth;
-        delete item.options.iconHeight;
+      if (item.options) {
+        item.options = processMenuIconOptions(item.options);
       }
       if (item.subMenu) {
         for (const sub of item.subMenu) {
-          if (sub.options && sub.options.iconRgba) {
-            const rgba = sub.options.iconRgba as Uint8Array;
-            const w = (sub.options.iconWidth as number) || 24;
-            const h = (sub.options.iconHeight as number) || 24;
-            const pm = createPixelMapFromRgbaWH(rgba, w, h);
-            if (pm) {
-              sub.options.icon = { white: pm, black: pm };
-            }
-            delete sub.options.iconRgba;
-            delete sub.options.iconWidth;
-            delete sub.options.iconHeight;
+          if (sub.options) {
+            sub.options = processMenuIconOptions(sub.options);
           }
         }
       }

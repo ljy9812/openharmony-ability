@@ -50,6 +50,7 @@ interface ComponentAttachment {
   moduleName: string;
   renderOwner: string;
   nativeModule: Module;
+  nativeSubWindow: boolean;
 }
 
 /**
@@ -106,6 +107,30 @@ export struct DefaultXComponent {
       return;
     }
 
+    if (moduleName && this.windowId > 0) {
+      const nativeModule = await NativeModuleLoader.load(moduleName, this.loadMode);
+      if (generation !== this.appearanceGeneration) {
+        return;
+      }
+      if (!nativeModule.renderWindow) {
+        throw new Error(`Native module '${moduleName}' does not support sub-window rendering`);
+      }
+      const renderOwner = `${this.bridgeSessionId}:${moduleName}:${nextRenderOwnerId++}`;
+      nativeModule.renderWindow(this.rootSlot, renderOwner, this.windowId);
+      if (generation !== this.appearanceGeneration) {
+        nativeModule.disposeRender(renderOwner);
+        return;
+      }
+      this.attachment = {
+        sessionId: this.bridgeSessionId,
+        moduleName,
+        renderOwner,
+        nativeModule,
+        nativeSubWindow: true,
+      };
+      return;
+    }
+
     if (!moduleName) {
       throw new Error("DefaultXComponent.moduleName is required");
     }
@@ -149,6 +174,7 @@ export struct DefaultXComponent {
       moduleName,
       renderOwner,
       nativeModule,
+      nativeSubWindow: false,
     };
     this.attachment = attachment;
     try {
@@ -181,7 +207,7 @@ export struct DefaultXComponent {
   aboutToDisappear(): void {
     // Sub-window mode cleanup: unregister component root and dispose FrameNode
     if (!this.moduleName.trim() && this.windowId > 0) {
-      WindowManager.getInstance().registerComponentRoot(this.windowId, undefined as any);
+      WindowManager.getInstance().unregisterComponentRoot(this.windowId);
       this.nodeController.disposeRoot();
       return;
     }
@@ -202,6 +228,10 @@ export struct DefaultXComponent {
     // RootNode owns the ContentSlot handle and must be dropped synchronously while this component
     // still owns a live NodeContent. Host/plugin cleanup may continue asynchronously afterwards.
     attachment.nativeModule.disposeRender(attachment.renderOwner);
+    if (attachment.nativeSubWindow) {
+      this.nodeController.disposeRoot();
+      return Promise.resolve();
+    }
     return BridgeHostRegistry.detachComponent(
       attachment.sessionId,
       attachment.moduleName,
@@ -215,20 +245,22 @@ export struct DefaultXComponent {
 
   build() {
     Stack() {
-      // ContentSlot stays below the plugin tree exactly as before: the XComponent/RS render root
-      // is the base layer, and the session plugin tree overlays it with the legacy transparent
-      // hit-test policy.
+      // ContentSlot is the GPUI input surface. These full-window layout nodes must not take
+      // touches from it. Interactive plugin content blocks the lower layer at its own bounds.
       ContentSlot(this.rootSlot)
       Row() {
         Column() {
           NodeContainer(this.nodeController)
             .height("100%")
             .width("100%")
+            .hitTestBehavior(HitTestMode.None)
         }
         .width("100%")
+        .hitTestBehavior(HitTestMode.None)
         .backgroundColor(Color.Transparent)
       }
       .height("100%")
+      .hitTestBehavior(HitTestMode.None)
       .backgroundColor(Color.Transparent)
     }.backgroundColor(Color.Transparent);
   }
