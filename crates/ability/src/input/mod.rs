@@ -6,12 +6,16 @@ use ohos_arkui_binding::{
     },
     gesture::gesture_data::GestureInputData,
 };
-use ohos_ime_binding::KeyboardStatus;
+use ohos_ime_binding::{Action, Direction, KeyboardStatus};
 use ohos_xcomponent_binding::{KeyEventData, MouseEventData, TouchEventData};
 
+pub(crate) mod drag;
 mod ime;
+pub use drag::{DragInputData, DragPhase, DragResponse, NativeFileDrag};
+mod keyboard;
 mod text_input;
 pub use ime::*;
+pub use keyboard::{KeyboardEventData, KeyboardEventResponse, KeyboardInputDelivery};
 pub use text_input::*;
 
 #[derive(Clone)]
@@ -41,15 +45,21 @@ pub enum XComponentInputEvent {
 }
 
 /// Owned ArkUI input and gesture semantics attached to the XComponent node.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ArkUiInputEvent {
+    /// Pointer identity only; the existing XComponent callback delivers the input itself.
+    Pointer(PointerInputData),
+    Drag(DragInputData),
+    /// State-only snapshot before IME processing; do not dispatch another key press.
+    KeyPreIme(KeyboardEventData),
+    Key(KeyboardEventData),
     Axis(AxisEventData),
     Gesture(GestureEvent),
 }
 
 /// Controls which touch representation is delivered to the application.
 ///
-/// Mouse and key input remain XComponent events, while wheel and touchpad axis input remains an
+/// Mouse input remains XComponent events, while wheel and touchpad axis input remains an
 /// ArkUI event regardless of this setting. Configure delivery before the first render starts.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum TouchInputDelivery {
@@ -202,6 +212,10 @@ pub enum ImeEvent {
     PreviewTextEvent { text: String, start: i32, end: i32 },
     FinishPreviewEvent,
     BackspaceEvent(i32),
+    DeleteForwardEvent(i32),
+    MoveCursorEvent(Direction),
+    SelectionEvent { start: i32, end: i32 },
+    ExtendActionEvent(Action),
     ImeStatusEvent(KeyboardStatus),
     EnterEvent(i32),
 }
@@ -215,6 +229,10 @@ impl Debug for ImeEvent {
             }
             ImeEvent::FinishPreviewEvent => write!(f, "FinishPreviewEvent"),
             ImeEvent::BackspaceEvent(len) => write!(f, "BackspaceEvent: delete length is {}", len),
+            ImeEvent::DeleteForwardEvent(len) => write!(f, "DeleteForwardEvent: {len}"),
+            ImeEvent::MoveCursorEvent(direction) => write!(f, "MoveCursorEvent: {direction:?}"),
+            ImeEvent::SelectionEvent { start, end } => write!(f, "SelectionEvent: {start}..{end}"),
+            ImeEvent::ExtendActionEvent(action) => write!(f, "ExtendActionEvent: {action:?}"),
             ImeEvent::ImeStatusEvent(status) => write!(f, "ImeStatusEvent: {:?}", status),
             ImeEvent::EnterEvent(key) => write!(f, "EnterEvent: {:?}", key),
         }

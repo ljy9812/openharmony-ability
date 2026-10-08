@@ -18,14 +18,14 @@ use ohos_display_binding::{
     default_display_height, default_display_refresh_rate, default_display_scaled_density,
     default_display_width,
 };
-use ohos_ime_binding::IME;
+use ohos_ime_binding::{EnterKey, InputType, Rect as ImeCursorRect, TextState, IME};
 use ohos_xcomponent_binding::RawWindow;
 
 use crate::{
     bridge::MainThreadBridgeEndpoint, AvoidArea, AvoidAreaType, BridgeMainThread,
     BridgeMainThreadEvent, BridgePlugin, BridgePluginDeclaration, BridgePluginRegistry,
-    BridgeRuntime, Configuration, Event, MainThreadScheduler, OpenHarmonyWaker,
-    PluginLifecycleEvent, Rect, TouchInputDelivery,
+    BridgeRuntime, Configuration, Event, KeyboardInputDelivery, MainThreadScheduler,
+    OpenHarmonyWaker, PluginLifecycleEvent, Rect, TouchInputDelivery,
 };
 
 static ID: AtomicI64 = AtomicI64::new(0);
@@ -91,6 +91,7 @@ pub struct OpenHarmonyAppInner {
     render_owner: Option<String>,
     touch_input_delivery: TouchInputDelivery,
     frame_input_delivery: HashMap<i64, crate::render::FrameDeliveryState>,
+    keyboard_input_delivery: KeyboardInputDelivery,
     surface_active: bool,
     sub_surfaces: HashMap<i64, SubRenderSurface>,
 
@@ -203,6 +204,7 @@ impl OpenHarmonyAppInner {
             render_owner: None,
             touch_input_delivery: TouchInputDelivery::default(),
             frame_input_delivery: HashMap::new(),
+            keyboard_input_delivery: KeyboardInputDelivery::default(),
             surface_active: false,
             sub_surfaces: HashMap::new(),
             state: vec![],
@@ -534,6 +536,7 @@ impl OpenHarmonyAppInner {
 }
 
 type EventLoop = Arc<RefCell<Option<Box<dyn FnMut(Event)>>>>;
+type PostInputQueue = Arc<RefCell<Vec<Box<dyn FnOnce()>>>>;
 type BackPressInterceptor = Arc<RefCell<Option<Box<dyn FnMut() -> bool>>>>;
 type DecorChangeListener = std::sync::Arc<dyn Fn(i32) -> bool + Send + Sync>;
 
@@ -549,6 +552,7 @@ struct ActiveBridgeSession {
 pub struct OpenHarmonyApp {
     pub(crate) inner: Arc<RwLock<OpenHarmonyAppInner>>,
     pub(crate) event_loop: EventLoop,
+    post_input: PostInputQueue,
     pub(crate) back_press_interceptor: BackPressInterceptor,
     pub(crate) ime: Arc<RefCell<Option<IME>>>,
     pub(crate) sub_ime: Arc<RefCell<HashMap<i64, IME>>>,
@@ -600,6 +604,10 @@ impl OpenHarmonyApp {
             inner: Arc::new(RwLock::new(OpenHarmonyAppInner::new())),
             #[allow(clippy::arc_with_non_send_sync)]
             event_loop: Arc::new(RefCell::new(None)),
+            // Native drag can reenter XComponent input synchronously. Run it
+            // only after the current event-loop handler releases its borrow.
+            #[allow(clippy::arc_with_non_send_sync)]
+            post_input: Arc::new(RefCell::new(Vec::new())),
             #[allow(clippy::arc_with_non_send_sync)]
             back_press_interceptor: Arc::new(RefCell::new(None)),
             #[allow(clippy::arc_with_non_send_sync)]
@@ -610,6 +618,19 @@ impl OpenHarmonyApp {
             bridge_session: Arc::new(RwLock::new(None)),
             bridge_plugins: Arc::new(BridgePluginRegistry::default()),
             is_keyboard_show: Arc::new(Mutex::new(false)),
+        }
+    }
+
+    /// Runs native actions after the current XComponent input callback returns.
+    /// This queue is only accessed on the N-API UI thread.
+    pub fn queue_after_input(&self, action: impl FnOnce() + 'static) {
+        self.post_input.borrow_mut().push(Box::new(action));
+    }
+
+    pub(crate) fn drain_after_input(&self) {
+        let actions = std::mem::take(&mut *self.post_input.borrow_mut());
+        for action in actions {
+            action();
         }
     }
 
@@ -845,6 +866,33 @@ impl OpenHarmonyApp {
         self.inner
             .read()
             .map(|inner| inner.touch_input_delivery)
+            .unwrap_or_default()
+    }
+
+    /// Selects the keyboard stream before any main or child render starts.
+    pub fn set_keyboard_input_delivery(&self, delivery: KeyboardInputDelivery) -> Result<()> {
+        if delivery == KeyboardInputDelivery::ArkUi && crate::version::sdk_api_version() < 14 {
+            return Err(Error::from_reason(
+                "ArkUI keyboard delivery requires API 14",
+            ));
+        }
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|_| Error::from_reason("Failed to configure keyboard input delivery"))?;
+        if inner.render_owner.is_some() || !inner.sub_surfaces.is_empty() {
+            return Err(Error::from_reason(
+                "Keyboard input delivery cannot change during an active render",
+            ));
+        }
+        inner.keyboard_input_delivery = delivery;
+        Ok(())
+    }
+
+    pub fn keyboard_input_delivery(&self) -> KeyboardInputDelivery {
+        self.inner
+            .read()
+            .map(|inner| inner.keyboard_input_delivery)
             .unwrap_or_default()
     }
 
@@ -1229,17 +1277,55 @@ impl OpenHarmonyApp {
         self.show_keyboard_for(0);
     }
     pub fn show_keyboard_for(&self, window_id: i64) {
+        let _ = self.try_show_keyboard_for(window_id);
+    }
+
+    /// Attach/show the editor belonging to this window on the N-API main thread.
+    pub fn try_show_keyboard_for(&self, window_id: i64) -> Result<()> {
         let _guard = self
             .is_keyboard_show
             .lock()
             .expect("Failed to lock is_keyboard_show");
+        self.with_ime_for(window_id, |ime| ime.try_show_keyboard())?
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Retain and apply native editor attributes. Call only on the N-API main thread.
+    /// Inactive editors retain the hint without changing another window's session.
+    pub fn configure_ime_for(
+        &self,
+        window_id: i64,
+        enter_key: EnterKey,
+        input_type: InputType,
+    ) -> Result<()> {
+        self.with_ime_for(window_id, |ime| {
+            ime.try_update_configuration(enter_key, input_type)
+        })?
+        .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Update the native IME cursor using absolute physical screen coordinates.
+    /// Call only on the N-API main thread.
+    pub fn update_ime_cursor_for(&self, window_id: i64, rect: ImeCursorRect) -> Result<()> {
+        self.with_ime_for(window_id, |ime| ime.try_update_cursor(rect))?
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Retain text and selection for this window's native editor. Main thread only.
+    pub fn update_ime_text_state_for(&self, window_id: i64, state: TextState) -> Result<()> {
+        self.with_ime_for(window_id, |ime| ime.try_update_text_state(state))?
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    fn with_ime_for<T>(&self, window_id: i64, callback: impl FnOnce(&IME) -> T) -> Result<T> {
         if window_id == 0 {
-            if let Some(ime) = self.ime.borrow().as_ref() {
-                ime.show_keyboard();
-            }
-        } else if let Some(ime) = self.sub_ime.borrow().get(&window_id) {
-            ime.show_keyboard();
+            self.ime.borrow().as_ref().map(callback)
+        } else {
+            self.sub_ime.borrow().get(&window_id).map(callback)
         }
+        .ok_or_else(|| {
+            Error::from_reason(format!("Native IME is not ready for window {window_id}"))
+        })
     }
     pub fn hide_keyboard(&self) {
         self.hide_keyboard_for(0);

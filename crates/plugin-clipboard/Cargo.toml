@@ -1,4 +1,5 @@
 [package]
+workspace = "../.."
 name = "openharmony-ability-plugin-clipboard"
 version = "1.0.0-beta.0"
 edition = "2021"

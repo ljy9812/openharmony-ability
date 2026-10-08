@@ -73,6 +73,7 @@ export struct DefaultXComponent {
   private nodeController = new BridgeRootNodeController();
   @StorageProp("bridgeSessionId") bridgeSessionId: string = "";
   @StorageProp("loadMode") loadMode: "async" | "sync" = "async";
+  @State private blurRadius: number = 0;
   private appearanceGeneration: number = 0;
   private attachment?: ComponentAttachment;
   private releasePromise: Promise<void> = Promise.resolve();
@@ -128,6 +129,7 @@ export struct DefaultXComponent {
         nativeModule,
         nativeSubWindow: true,
       };
+      this.attachSurfaceBlur();
       return;
     }
 
@@ -143,7 +145,7 @@ export struct DefaultXComponent {
     // Apply transparent background + container color for main windows that were
     // created with transparent=true. This was dead code after the pluginize refactor
     // (the old aboutToAppear called it, but the new one didn't). Without this,
-    // backgroundBlurStyle on transparent windows has no visible effect because
+    // backdrop blur on transparent windows has no visible effect because
     // the container remains opaque.
     hilog.debug(
       0xa01999,
@@ -189,6 +191,7 @@ export struct DefaultXComponent {
         this.getUIContext(),
         root,
       );
+      this.attachSurfaceBlur();
       if (generation !== this.appearanceGeneration) {
         await this.releasePromise;
       }
@@ -211,6 +214,7 @@ export struct DefaultXComponent {
       this.nodeController.disposeRoot();
       return;
     }
+    WindowManager.getInstance().unregisterSurfaceBlurCallback(this.windowId);
     this.appearanceGeneration += 1;
     this.releasePromise = this.releaseAttachment(this.attachment);
   }
@@ -243,8 +247,23 @@ export struct DefaultXComponent {
       });
   }
 
+  private attachSurfaceBlur(): void {
+    const manager = WindowManager.getInstance();
+    this.blurRadius = manager.getPendingBlur(this.windowId);
+    manager.registerSurfaceBlurCallback(this.windowId, (radius: number): void => {
+      this.blurRadius = radius;
+    });
+  }
+
   build() {
     Stack() {
+      // Blur the pixels behind this window before the transparent GPUI surface is composed.
+      Row()
+        .width("100%")
+        .height("100%")
+        .hitTestBehavior(HitTestMode.None)
+        .backgroundColor(Color.Transparent)
+        .backdropBlur(this.blurRadius)
       // ContentSlot is the GPUI input surface. These full-window layout nodes must not take
       // touches from it. Interactive plugin content blocks the lower layer at its own bounds.
       ContentSlot(this.rootSlot)

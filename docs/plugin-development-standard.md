@@ -211,6 +211,12 @@ export { LoginPlugin };
 | --- | --- | --- |
 | `ohos.app-control` / `terminate` | `ohos.app_control.TerminateRequest { code }` → `ohos.app_control.TerminateResponse { accepted }` | sync / `ability` |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest { permissions }` → `ohos.permission.PermissionResponse { codes }` | async / `ability` |
+| `ohos.url` / `check-scheme` | `ohos.url.SchemeRequest { scheme }` → `ohos.url.SchemeResponse { declared }` | async / `ability`；校验当前 Ability 安装清单中的 `viewData` scheme，无法运行时修改清单 |
+| `ohos.clipboard` / `write-records` | `ohos.clipboard.WriteRecordsRequest { records: Record[] }` → `ohos.clipboard.WriteTextResponse { accepted }` | async / `ability`；1..512 个文本（可带 metadata）、图片或文件 URI 记录，保持顺序 |
+| `ohos.clipboard` / `read-records` | `ohos.clipboard.ReadTextRequest {}` → `ohos.clipboard.ReadRecordsResponse { records: Record[] }` | async / `ability`；`Record { text?, metadata?, encodedImage?, uri? }` 每条仅一种主内容；需要 READ_PASTEBOARD 的 ACL 和运行时授权 |
+| `ohos.clipboard` / 入站 `changed` | `ohos.clipboard.ChangedEvent {}` → `std.bool` | 系统 pasteboard update 使 Rust revision 递增；监听随插件生命周期释放 |
+| `ohos.window` / `show-prompt` | `ohos.window.PromptRequest { windowId, message, detail?, level, buttons, cancelIndex?, anchor?: PromptAnchor }` → `ohos.window.PromptResponse { index }` | async / `ui-context`；`PromptAnchor { x, y }` 为窗口内容逻辑坐标；原生弹窗取消、调用取消和销毁均释放组件 |
+| `ohos.window` / `get-window-stack` | `ohos.window.StackRequest { displayId, windowIds }` → `ohos.window.StackResponse { windowIds }` | async / `ui-context`；从 SDK 可见窗口顺序中筛选请求的本应用窗口，顶部在前 |
 | `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest { areaType }` → `ohos.window.AvoidAreaResponse { area }` | async / `ui-context`；查询当前 component 所在窗口 |
 | `ohos.window` / `create-os-window` | `ohos.window.CreateRequest { name, width, height, x, y, decorations, transparent, backgroundColor }` → `ohos.window.CreateResponse { windowId }` | async / `ui-context` |
 | `ohos.window` / `set-decorations`、`set-background-color`、`set-blur`、`focus`、`set-focusable`、`move-to`、`resize`、`minimize`、`maximize`、`restore`、`recover`、`show`、`destroy-window` | `ohos.window.*Request { windowId, ... }` → `ohos.window.Acknowledgement { accepted }` | async / `ui-context` |

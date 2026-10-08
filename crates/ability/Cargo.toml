@@ -1,5 +1,6 @@
 [package]
 name = "openharmony-ability"
+workspace = "../.."
 version = "1.0.0-beta.2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -13,6 +14,7 @@ window = ["dep:ohos-window-manager-binding"]
 [dependencies]
 # common dependencies
 futures-channel = { workspace = true }
+libloading = { workspace = true }
 uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -26,10 +28,13 @@ napi-ohos = { workspace = true, features = ["napi8"] }
 napi-derive-ohos = { workspace = true }
 
 # for xcomponent native render
-ohos-arkui-binding = { workspace = true, features = ["napi"] }
+# 0.3.x's API-14 key enums/HTML helpers need its API-20 import gates.
+# The keyboard delivery implementation itself calls only API-14 functions.
+ohos-arkui-binding = { workspace = true, features = ["napi", "api-20"] }
 ohos-xcomponent-binding = { workspace = true }
 ohos-xcomponent-sys = { workspace = true }
-ohos-arkui-sys = { workspace = true }
+ohos-arkui-sys = { workspace = true, features = ["api-14"] }
+ohos-udmf-sys.workspace = true
 ohos-ime-binding = { workspace = true }
 ohos-display-binding = { workspace = true }
 ohos-resource-manager-binding = { workspace = true }

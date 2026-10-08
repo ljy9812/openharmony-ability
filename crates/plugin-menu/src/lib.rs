@@ -89,11 +89,16 @@ pub struct MenuItemData {
 // ownership in the menu consumer (the consumer) without plugin-menu depending on the menu consumer.
 
 static MENU_EVENT_SENDER: OnceLock<Sender<String>> = OnceLock::new();
+static MENU_OPEN_EVENT_SENDER: OnceLock<Sender<()>> = OnceLock::new();
 
 /// Called by the menu consumer at startup to register its menu event channel sender.
 /// Idempotent: the first registration wins, later calls are ignored.
 pub fn register_menu_event_sender(sender: Sender<String>) {
     let _ = MENU_EVENT_SENDER.set(sender);
+}
+
+pub fn register_menu_open_event_sender(sender: Sender<()>) {
+    let _ = MENU_OPEN_EVENT_SENDER.set(sender);
 }
 
 // ─── Per-window visibility / content state cache ──────────────────────────────
@@ -125,6 +130,13 @@ impl BridgePlugin for MenuBridgePlugin {
                 let click: MenuClickEvent = event.decode()?;
                 if let Some(sender) = MENU_EVENT_SENDER.get() {
                     let _ = sender.send(click.menu_id);
+                }
+                event.respond(true)
+            }
+            "menu-open" => {
+                let _: MenuOpenEvent = event.decode()?;
+                if let Some(sender) = MENU_OPEN_EVENT_SENDER.get() {
+                    let _ = sender.send(());
                 }
                 event.respond(true)
             }
@@ -207,6 +219,14 @@ pub struct MenuClickEvent {
 }
 
 impl_bridge_napi_type!(MenuClickEvent, "ohos.menu.MenuClickEvent");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct MenuOpenEvent {
+    pub window_id: String,
+}
+
+impl_bridge_napi_type!(MenuOpenEvent, "ohos.menu.MenuOpenEvent");
 
 // ─── Worker-safe client facade ───────────────────────────────────────────────
 
@@ -361,6 +381,10 @@ mod tests {
         assert_eq!(
             <MenuClickEvent as BridgeNapiType>::TYPE_NAME,
             "ohos.menu.MenuClickEvent"
+        );
+        assert_eq!(
+            <MenuOpenEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.menu.MenuOpenEvent"
         );
     }
 

@@ -34,6 +34,8 @@ export class WindowAttachmentRegistry {
   // applyWindowBlur is called AFTER a WebviewPlugin webview already exists, this fires
   // so the live Web component's backdropBlur is refreshed via node.update().
   private blurRefreshCallbacks: Map<number, (radius: number) => void> = new Map();
+  // The native XComponent is independent of WebView and needs its own listener.
+  private surfaceBlurCallbacks: Map<number, (radius: number) => void> = new Map();
   // Callback registry for plugins that need to react to componentRoot registration.
   // Used by WebviewPlugin to replay deferred webview creates (timing race: webview
   // bridge create arrives ~3ms after TSFN dispatch, but FloatPage.aboutToAppear
@@ -156,6 +158,18 @@ export class WindowAttachmentRegistry {
     this.blurRefreshCallbacks.delete(Number(windowId));
   }
 
+  registerSurfaceBlurCallback(windowId: number, cb: (radius: number) => void): void {
+    this.surfaceBlurCallbacks.set(Number(windowId), cb);
+  }
+
+  unregisterSurfaceBlurCallback(windowId: number): void {
+    this.surfaceBlurCallbacks.delete(Number(windowId));
+  }
+
+  fireSurfaceBlurRefresh(windowId: number, radius: number): void {
+    this.surfaceBlurCallbacks.get(Number(windowId))?.(radius);
+  }
+
   // Fire the registered refresh callback so a live webview's backdropBlur updates.
   fireBlurRefresh(windowId: number, radius: number): void {
     const refreshCb = this.blurRefreshCallbacks.get(Number(windowId));
@@ -207,6 +221,7 @@ export class WindowAttachmentRegistry {
     this.componentRoots.delete(wid);
     this.windowBlurRadii.delete(wid);
     this.blurRefreshCallbacks.delete(wid);
+    this.surfaceBlurCallbacks.delete(wid);
     WindowAttachmentRegistry.pendingComponentRootCallbacks.delete(wid);
   }
 

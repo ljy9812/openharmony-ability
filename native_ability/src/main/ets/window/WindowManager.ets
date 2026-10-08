@@ -56,6 +56,7 @@ export interface SubWindowOptions {
   height?: number;
   x?: number;
   y?: number;
+  displayId?: number;
   decorations?: boolean;
   transparent?: boolean;
   backgroundColor?: number;
@@ -796,9 +797,18 @@ export class WindowManager {
     }
     // Sub-window: showWindow() restores from minimize (symmetric with hideWindow's minimize).
     this.withWindow(windowId, "showWindowMethod", (win: window.Window) => {
-      this.fireAndForget(win.showWindow(), "showWindowMethod", windowId, () => {
-        hilog.info(DOMAIN, "WindowManager", "showWindowMethod %{public}d OK", windowId);
-      });
+      const previousRect = win.getWindowProperties().windowRect;
+      this.fireAndForget(
+        (async (): Promise<void> => {
+          await win.showWindow();
+          await win.moveWindowTo(previousRect.left, previousRect.top);
+        })(),
+        "showWindowMethod",
+        windowId,
+        () => {
+          hilog.info(DOMAIN, "WindowManager", "showWindowMethod %{public}d OK", windowId);
+        },
+      );
     });
   }
 
@@ -1376,6 +1386,7 @@ export class WindowManager {
     const height = opts.height ?? 600;
     const x = opts.x ?? 100;
     const y = opts.y ?? 100;
+    const displayId = opts.displayId;
     const decorations = opts.decorations ?? true;
     const transparent = opts.transparent ?? false;
     const backgroundColor = opts.backgroundColor;
@@ -1668,8 +1679,30 @@ export class WindowManager {
         x,
         y,
       );
-      await win.moveWindowTo(x, y);
+      if (displayId === undefined) {
+        await win.moveWindowTo(x, y);
+      } else {
+        if (deviceInfo.sdkApiVersion < 15) {
+          throw new Error("Moving a sub-window to a display requires API 15");
+        }
+        await win.moveWindowToGlobal(x, y, { displayId });
+        hilog.info(
+          DOMAIN,
+          "WindowManager",
+          "Sub-window %{public}d requested display %{public}d, reported display %{public}d",
+          windowId,
+          displayId,
+          win.getWindowProperties().displayId ?? -1,
+        );
+      }
       await win.showWindow();
+      // showWindow() repositions a newly created float window on 2in1.
+      // Reapply the requested position after the window becomes visible.
+      if (displayId === undefined) {
+        await win.moveWindowTo(x, y);
+      } else {
+        await win.moveWindowToGlobal(x, y, { displayId });
+      }
       hilog.info(DOMAIN, "WindowManager", `Window shown: %{public}d`, windowId);
     } catch (err) {
       hilog.error(
@@ -1849,12 +1882,8 @@ export class WindowManager {
     }
   }
 
-  // Window vibrancy: apply blur to the WebView container.
-  // Blur API selection (WebviewPlugin's BuildWebview):
-  // - transparent=true (main window): `backgroundBlurStyle` — samples content behind the window
-  // - transparent=false (opaque, Float sub-windows): `backdropBlur` — blurs in-surface pixels
-  // The radius is persisted (WindowAttachmentRegistry) and consumed when the webview node
-  // is built; a live webview is refreshed through the registered callback.
+  // Persist the per-window blur radius for WebView and the native XComponent.
+  // Each surface consumes the pending radius on attach and receives live updates.
   applyWindowBlur(windowId: number, radius: number): void {
     // windowId arrives from Rust NAPI as i64 → BigInt (1n). Normalize to number
     // so it matches the ArkTS number keys used by the per-window Maps.
@@ -1870,6 +1899,7 @@ export class WindowManager {
     );
     this.attachments.setBlurRadius(id, radius);
     this.attachments.fireBlurRefresh(id, radius);
+    this.attachments.fireSurfaceBlurRefresh(id, radius);
   }
 
   /** Register a runtime blur refresh callback for a window (WebviewPlugin path). Called
@@ -1880,6 +1910,14 @@ export class WindowManager {
 
   unregisterBlurRefreshCallback(windowId: number): void {
     this.attachments.unregisterBlurRefreshCallback(windowId);
+  }
+
+  registerSurfaceBlurCallback(windowId: number, cb: (radius: number) => void): void {
+    this.attachments.registerSurfaceBlurCallback(windowId, cb);
+  }
+
+  unregisterSurfaceBlurCallback(windowId: number): void {
+    this.attachments.unregisterSurfaceBlurCallback(windowId);
   }
 
   /**
