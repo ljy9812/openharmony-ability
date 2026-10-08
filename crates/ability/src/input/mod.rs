@@ -9,8 +9,10 @@ use ohos_arkui_binding::{
 use ohos_ime_binding::{Action, Direction, KeyboardStatus};
 use ohos_xcomponent_binding::{KeyEventData, MouseEventData, TouchEventData};
 
+#[cfg(feature = "drag")]
 pub(crate) mod drag;
 mod ime;
+#[cfg(feature = "drag")]
 pub use drag::{DragInputData, DragPhase, DragResponse, NativeFileDrag};
 mod keyboard;
 mod text_input;
@@ -49,6 +51,7 @@ pub enum XComponentInputEvent {
 pub enum ArkUiInputEvent {
     /// Pointer identity only; the existing XComponent callback delivers the input itself.
     Pointer(PointerInputData),
+    #[cfg(feature = "drag")]
     Drag(DragInputData),
     /// State-only snapshot before IME processing; do not dispatch another key press.
     KeyPreIme(KeyboardEventData),

@@ -1638,7 +1638,7 @@ pub fn notify_window_close(window_id: i32) {
     match PENDING_WINDOW_CLOSES.lock() {
         Ok(mut queue) => queue.push(window_id),
         Err(poisoned) => {
-            log::warn!(
+            crate::warn!(
                 "[OHOS] PENDING_WINDOW_CLOSES mutex poisoned, recovering. window_id={}",
                 window_id
             );
@@ -1715,7 +1715,7 @@ pub fn notify_window_status(window_id: i32, status: i32) {
     match PENDING_WINDOW_STATUS.lock() {
         Ok(mut queue) => queue.push((window_id, status)),
         Err(poisoned) => {
-            log::warn!(
+            crate::warn!(
                 "[OHOS] PENDING_WINDOW_STATUS mutex poisoned, recovering. window_id={} status={}",
                 window_id,
                 status

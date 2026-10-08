@@ -37,11 +37,9 @@ syn = { version = "2", features = ["fold", "full", "extra-traits"] }
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
-ohos-arkui-binding = { version = "0.3" }
-ohos-xcomponent-binding = { version = "0.4", features = ["multi_mode", "accessibility", "api-15"] }
-ohos-xcomponent-sys = { version = "0.1" }
-ohos-arkui-sys = { version = "0.1" }
-ohos-udmf-sys = { version = "0.0.4", features = ["api-13"] }
+ohos-arkui-binding = { version = "0.4.2" }
+ohos-xcomponent-binding = { version = "0.5.1", features = ["multi_mode", "accessibility", "api-15"] }
+ohos-udmf-binding = { version = "0.0.8", features = ["api-13"] }
 ohos-ime-binding = { version = "0.3.1" }
 ohos-web-binding = { version = "0.2" }
 ohos-display-binding = { version = "0.1" }
@@ -66,7 +64,10 @@ png = "0.17"
 
 [patch.crates-io]
 ohos-ime-binding = { path = "../../ohos-rs/ohos-native-bindings/crates/ime" }
-ohos-xcomponent-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "c05f75ebc489ad2a8c7f7b314aac38a27fb24836" }
-ohos-xcomponent-sys = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "c05f75ebc489ad2a8c7f7b314aac38a27fb24836" }
-ohos-arkui-input-sys = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "c05f75ebc489ad2a8c7f7b314aac38a27fb24836" }
-ohos-arkui-input-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "c05f75ebc489ad2a8c7f7b314aac38a27fb24836" }
+ohos-arkui-binding = { path = "../../ohos-rs/ohos-native-bindings/crates/arkui" }
+ohos-xcomponent-binding = { path = "../../ohos-rs/ohos-native-bindings/crates/xcomponent" }
+ohos-arkui-input-binding = { path = "../../ohos-rs/ohos-native-bindings/crates/arkui_input" }
+ohos-udmf-binding = { path = "../../ohos-rs/ohos-native-bindings/crates/udmf" }
+ohos-arkui-sys = { path = "../../ohos-rs/ohos-native-bindings/sys/ohos-arkui-sys" }
+ohos-xcomponent-sys = { path = "../../ohos-rs/ohos-native-bindings/sys/ohos-xcomponent-sys" }
+ohos-arkui-input-sys = { path = "../../ohos-rs/ohos-native-bindings/sys/ohos-arkui-input-sys" }

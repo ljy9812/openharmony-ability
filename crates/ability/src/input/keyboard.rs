@@ -1,17 +1,9 @@
-use std::{
-    ffi::c_void,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, OnceLock,
-    },
-};
-
-use ohos_arkui_binding::arkui_input_binding::ArkUIInputEvent;
-use ohos_arkui_sys::{
-    OH_ArkUI_KeyEvent_GetKeyCode, OH_ArkUI_KeyEvent_GetKeySource, OH_ArkUI_KeyEvent_GetType,
-    OH_ArkUI_KeyEvent_GetUnicode,
-};
+use ohos_arkui_binding::event::{KeyEvent, KeyEventType};
 use ohos_xcomponent_binding::{Action, EventSource, KeyCode};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 /// Selects one keyboard stream; the same physical key is never delivered twice.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -62,53 +54,11 @@ impl KeyboardEventResponse {
     }
 }
 
-type LockQuery = unsafe extern "C" fn(*const c_void, *mut bool) -> u32;
-
-#[derive(Default)]
-struct LockQueries {
-    caps: Option<LockQuery>,
-    num: Option<LockQuery>,
-}
-
-impl LockQueries {
-    fn get() -> &'static Self {
-        static QUERIES: OnceLock<LockQueries> = OnceLock::new();
-        QUERIES.get_or_init(|| {
-            // These symbols were added in API 19. Resolve them optionally so the
-            // API 14 keyboard stream still works on older systems. libace remains
-            // loaded for the lifetime of the node APIs used by this crate.
-            let library = libloading::os::unix::Library::this();
-            unsafe {
-                Self {
-                    caps: library
-                        .get::<LockQuery>(b"OH_ArkUI_KeyEvent_IsCapsLockOn\0")
-                        .ok()
-                        .map(|symbol| *symbol),
-                    num: library
-                        .get::<LockQuery>(b"OH_ArkUI_KeyEvent_IsNumLockOn\0")
-                        .ok()
-                        .map(|symbol| *symbol),
-                }
-            }
-        })
-    }
-
-    fn query(query: Option<LockQuery>, event: *const c_void) -> Option<bool> {
-        let mut state = false;
-        // SAFETY: called only while a validated key event is alive.
-        (unsafe { query?(event, &mut state) } == 0).then_some(state)
-    }
-}
-
 impl KeyboardEventData {
-    // Only called by NODE_ON_KEY_EVENT. The generic event-type enum did not
-    // expose Key until API 20, although this node callback exists since API 14.
-    pub(crate) fn from_key_callback(event: &ArkUIInputEvent) -> Option<Self> {
-        let raw = event.raw().cast();
-        // SAFETY: the node's key callback owns this validated key event until it returns.
-        let action = match unsafe { OH_ArkUI_KeyEvent_GetType(raw) } {
-            0 => Action::Down,
-            1 => Action::Up,
+    pub(crate) fn from_key_callback(event: &KeyEvent<'_>) -> Option<Self> {
+        let action = match event.event_type() {
+            KeyEventType::Down => Action::Down,
+            KeyEventType::Up => Action::Up,
             // Long-press/click are semantic events, not additional key transitions.
             _ => return None,
         };
@@ -121,7 +71,7 @@ impl KeyboardEventData {
                     .collect::<Vec<_>>()
             })
         });
-        let code = KeyCode::from(unsafe { OH_ArkUI_KeyEvent_GetKeyCode(raw) } as u32);
+        let code = KeyCode::from(event.key_code_raw() as u32);
         if let Some(pressed) = pressed_keys.as_mut() {
             match action {
                 Action::Up => pressed.retain(|pressed| *pressed != code),
@@ -129,17 +79,17 @@ impl KeyboardEventData {
                 _ => {}
             }
         }
-        let locks = LockQueries::get();
+        let locks = event.lock_state();
         Some(Self {
             code,
             action,
             device_id: event.device_id() as i64,
-            source: EventSource::from(unsafe { OH_ArkUI_KeyEvent_GetKeySource(raw) }),
+            source: EventSource::from(u32::from(event.source())),
             timestamp: event.event_time(),
-            unicode: unsafe { OH_ArkUI_KeyEvent_GetUnicode(raw) },
+            unicode: event.unicode(),
             pressed_keys,
-            caps_lock: LockQueries::query(locks.caps, raw.cast()),
-            num_lock: LockQueries::query(locks.num, raw.cast()),
+            caps_lock: locks.caps_lock,
+            num_lock: locks.num_lock,
             response: KeyboardEventResponse::default(),
         })
     }

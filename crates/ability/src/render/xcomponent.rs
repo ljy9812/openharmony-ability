@@ -11,6 +11,9 @@ use ohos_arkui_binding::gesture::{gesture_data::GestureData, inner_gesture::Gest
 use ohos_arkui_binding::types::{
     gesture_direction::GestureDirection, gesture_event::GestureEventAction,
 };
+use ohos_arkui_binding::{
+    api::node_custom_event::IntOffset, common::node::ArkUINode, types::advanced::LengthMetricUnit,
+};
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::{XComponentOffset, XComponentSize};
@@ -85,37 +88,20 @@ fn pointer_snapshot(
     node: *mut std::ffi::c_void,
 ) -> PointerInputData {
     let mut pointer = PointerInputData::from_arkui_event(input);
-    let mut origin = ohos_arkui_sys::ArkUI_IntOffset { x: 0, y: 0 };
-    // Invoked only from this live node's native event callback, before the event is released.
-    // XComponent touch/ArkUI display fields can be window-relative on 2in1 mouse events.
-    // The node screen origin plus its local pointer position gives physical screen coordinates.
-    let result = unsafe {
-        ohos_arkui_sys::OH_ArkUI_NodeUtils_GetLayoutPositionInScreen(node.cast(), &mut origin)
-    };
-    if result == 0 {
-        pointer.display_x = origin.x as f32 + pointer.x;
-        pointer.display_y = origin.y as f32 + pointer.y;
-    }
-    if matches!(
-        pointer.action,
-        ohos_arkui_binding::arkui_input_binding::UIInputAction::Down
-            | ohos_arkui_binding::arkui_input_binding::UIInputAction::Up
-    ) {
-        crate::debug!("Geometry snapshot: action={:?} source={:?} tool={:?} local=({}, {}) origin=({}, {}) result={} screen=({}, {})", pointer.action, pointer.source_type, pointer.tool_type, pointer.x, pointer.y, origin.x, origin.y, result, pointer.display_x, pointer.display_y);
+    // This borrowed node view exists only while its native callback is active.
+    if let Some(node) = ArkUINode::from_raw_handle(node.cast()) {
+        if let Ok(origin) = node.layout_position_in_screen() {
+            pointer.display_x = origin.x as f32 + pointer.x;
+            pointer.display_y = origin.y as f32 + pointer.y;
+        }
     }
     pointer
 }
 
-fn content_offset_in_window(
-    node: *mut std::ffi::c_void,
-) -> Option<ohos_arkui_sys::ArkUI_IntOffset> {
-    let mut offset = ohos_arkui_sys::ArkUI_IntOffset { x: 0, y: 0 };
-    // The XComponent NDK offset is relative to its surface and reports (0, 0)
-    // even when ArkUI places the surface below the window's title/content chrome.
-    let result = unsafe {
-        ohos_arkui_sys::OH_ArkUI_NodeUtils_GetLayoutPositionInWindow(node.cast(), &mut offset)
-    };
-    (result == 0).then_some(offset)
+fn content_offset_in_window(node: *mut std::ffi::c_void) -> Option<IntOffset> {
+    ArkUINode::from_raw_handle(node.cast())?
+        .layout_position_in_window()
+        .ok()
 }
 
 fn release_gestures(xcomponent: &XComponent, gestures: &mut Vec<Gesture>) {
@@ -292,26 +278,10 @@ pub fn render_for_window(
         XComponent::new().map_err(|e| Error::from_reason(e.reason.to_string()))?;
     // GPUI and the native surface use physical pixels. ArkUI node callbacks otherwise
     // inherit VP units, even though UIInputEvent getters are documented as pixels.
-    let units_result = unsafe {
-        let api = ohos_arkui_sys::OH_ArkUI_QueryModuleInterfaceByName(
-            ohos_arkui_sys::ArkUI_NativeAPIVariantKind_ARKUI_NATIVE_NODE,
-            c"ArkUI_NativeNodeAPI_1".as_ptr(),
-        )
-        .cast::<ohos_arkui_sys::ArkUI_NativeNodeAPI_1>();
-        api.as_ref()
-            .and_then(|api| api.setLengthMetricUnit)
-            .map(|set_units| {
-                set_units(
-                    xcomponent_native.raw().raw_handle(),
-                    ohos_arkui_sys::ArkUI_LengthMetricUnit_ARKUI_LENGTH_METRIC_UNIT_PX,
-                )
-            })
-    };
-    if units_result != Some(0) {
-        return Err(Error::from_reason(
-            "Cannot configure XComponent physical pixel units",
-        ));
-    }
+    xcomponent_native
+        .raw()
+        .set_length_metric_unit(LengthMetricUnit::Px)
+        .map_err(|e| Error::from_reason(e.to_string()))?;
     xcomponent_native
         .background_color(0x0000_0000)
         .map_err(|e| Error::from_reason(e.reason.to_string()))?;
@@ -562,7 +532,7 @@ pub fn render_for_window(
         let pre_ime_app = app.clone();
         let pre_ime_owner = render_owner.clone();
         xcomponent_native.on_key_pre_ime(move |event| {
-            if let Some(input) = event.input_event() {
+            if let Some(input) = event.key_event() {
                 if let Some(data) = KeyboardEventData::from_key_callback(&input) {
                     dispatch_input(
                         &pre_ime_app,
@@ -575,7 +545,7 @@ pub fn render_for_window(
             None
         });
         xcomponent_native.on_key_event(move |event| {
-            if let Some(input) = event.input_event() {
+            if let Some(input) = event.key_event() {
                 if let Some(data) = KeyboardEventData::from_key_callback(&input) {
                     let response = data.response.clone();
                     dispatch_input(
@@ -584,14 +554,8 @@ pub fn render_for_window(
                         InputEvent::ArkUi(ArkUiInputEvent::Key(data)),
                     );
                     if response.is_consumed() {
-                        // The raw pointer is used only inside this key callback.
-                        unsafe {
-                            ohos_arkui_sys::OH_ArkUI_KeyEvent_SetConsumed(input.raw().cast(), true);
-                            ohos_arkui_sys::OH_ArkUI_KeyEvent_StopPropagation(
-                                input.raw().cast(),
-                                true,
-                            );
-                        }
+                        input.set_consumed(true);
+                        input.stop_propagation(true);
                     }
                 }
             }
@@ -679,115 +643,67 @@ pub fn render_for_window(
         }
     });
 
-    let drag_app = app.clone();
-    let drag_owner = render_owner.clone();
-    xcomponent_native.on_drag_enter(move |event| {
-        if let Some(raw) = event.drag_event() {
-            crate::info!("OHOS ArkUI drag enter: window={window_id}");
-            // The SDK event is borrowed only for this callback; delivery contains owned values.
-            let snapshot =
-                unsafe { input::drag::snapshot(raw.as_ptr().cast(), crate::DragPhase::Enter) };
-            let is_drop = snapshot.phase == crate::DragPhase::Drop;
-            let response = snapshot.response.clone();
-            dispatch_input(
-                &drag_app,
-                &drag_owner,
-                InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
-            );
-            if is_drop {
+    #[cfg(feature = "drag")]
+    {
+        let drag_app = app.clone();
+        let drag_owner = render_owner.clone();
+        xcomponent_native.on_drag_enter(move |event| {
+            if let Some(drag) = event.drag_event() {
+                let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Enter);
+                dispatch_input(
+                    &drag_app,
+                    &drag_owner,
+                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
+                );
+            }
+        });
+        let drag_app = app.clone();
+        let drag_owner = render_owner.clone();
+        xcomponent_native.on_drag_move(move |event| {
+            if let Some(drag) = event.drag_event() {
+                let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Move);
+                dispatch_input(
+                    &drag_app,
+                    &drag_owner,
+                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
+                );
+            }
+        });
+        let drag_app = app.clone();
+        let drag_owner = render_owner.clone();
+        xcomponent_native.on_drag_leave(move |event| {
+            if let Some(drag) = event.drag_event() {
+                let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Leave);
+                dispatch_input(
+                    &drag_app,
+                    &drag_owner,
+                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
+                );
+            }
+        });
+        let drag_app = app.clone();
+        let drag_owner = render_owner.clone();
+        xcomponent_native.on_drop(move |event| {
+            if let Some(drag) = event.drag_event() {
+                let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Drop);
+                let response = snapshot.response.clone();
+                dispatch_input(
+                    &drag_app,
+                    &drag_owner,
+                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
+                );
+                use ohos_arkui_binding::types::drag::DragResult;
                 let result = if response.accepted() {
-                    ohos_arkui_sys::ArkUI_DragResult_ARKUI_DRAG_RESULT_SUCCESSFUL
+                    DragResult::Successful
                 } else {
-                    ohos_arkui_sys::ArkUI_DragResult_ARKUI_DRAG_RESULT_FAILED
+                    DragResult::Failed
                 };
-                unsafe {
-                    ohos_arkui_sys::OH_ArkUI_DragEvent_SetDragResult(raw.as_ptr().cast(), result);
+                if let Err(error) = drag.set_drag_result(result) {
+                    crate::warn!("Failed to set drag result: {error}");
                 }
             }
-        }
-    });
-
-    let drag_app = app.clone();
-    let drag_owner = render_owner.clone();
-    xcomponent_native.on_drag_move(move |event| {
-        if let Some(raw) = event.drag_event() {
-            // The SDK event is borrowed only for this callback; delivery contains owned values.
-            let snapshot =
-                unsafe { input::drag::snapshot(raw.as_ptr().cast(), crate::DragPhase::Move) };
-            let is_drop = snapshot.phase == crate::DragPhase::Drop;
-            let response = snapshot.response.clone();
-            dispatch_input(
-                &drag_app,
-                &drag_owner,
-                InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
-            );
-            if is_drop {
-                let result = if response.accepted() {
-                    ohos_arkui_sys::ArkUI_DragResult_ARKUI_DRAG_RESULT_SUCCESSFUL
-                } else {
-                    ohos_arkui_sys::ArkUI_DragResult_ARKUI_DRAG_RESULT_FAILED
-                };
-                unsafe {
-                    ohos_arkui_sys::OH_ArkUI_DragEvent_SetDragResult(raw.as_ptr().cast(), result);
-                }
-            }
-        }
-    });
-
-    let drag_app = app.clone();
-    let drag_owner = render_owner.clone();
-    xcomponent_native.on_drag_leave(move |event| {
-        if let Some(raw) = event.drag_event() {
-            // The SDK event is borrowed only for this callback; delivery contains owned values.
-            let snapshot =
-                unsafe { input::drag::snapshot(raw.as_ptr().cast(), crate::DragPhase::Leave) };
-            let is_drop = snapshot.phase == crate::DragPhase::Drop;
-            let response = snapshot.response.clone();
-            dispatch_input(
-                &drag_app,
-                &drag_owner,
-                InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
-            );
-            if is_drop {
-                let result = if response.accepted() {
-                    ohos_arkui_sys::ArkUI_DragResult_ARKUI_DRAG_RESULT_SUCCESSFUL
-                } else {
-                    ohos_arkui_sys::ArkUI_DragResult_ARKUI_DRAG_RESULT_FAILED
-                };
-                unsafe {
-                    ohos_arkui_sys::OH_ArkUI_DragEvent_SetDragResult(raw.as_ptr().cast(), result);
-                }
-            }
-        }
-    });
-
-    let drag_app = app.clone();
-    let drag_owner = render_owner.clone();
-    xcomponent_native.on_drop(move |event| {
-        if let Some(raw) = event.drag_event() {
-            crate::info!("OHOS ArkUI drag drop: window={window_id}");
-            // The SDK event is borrowed only for this callback; delivery contains owned values.
-            let snapshot =
-                unsafe { input::drag::snapshot(raw.as_ptr().cast(), crate::DragPhase::Drop) };
-            let is_drop = snapshot.phase == crate::DragPhase::Drop;
-            let response = snapshot.response.clone();
-            dispatch_input(
-                &drag_app,
-                &drag_owner,
-                InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
-            );
-            if is_drop {
-                let result = if response.accepted() {
-                    ohos_arkui_sys::ArkUI_DragResult_ARKUI_DRAG_RESULT_SUCCESSFUL
-                } else {
-                    ohos_arkui_sys::ArkUI_DragResult_ARKUI_DRAG_RESULT_FAILED
-                };
-                unsafe {
-                    ohos_arkui_sys::OH_ArkUI_DragEvent_SetDragResult(raw.as_ptr().cast(), result);
-                }
-            }
-        }
-    });
+        });
+    }
 
     if touch_input_delivery.delivers_arkui_gestures() {
         let gestures = register_gestures(&xcomponent_native, &render_owner, &app, pan_tracker)?;
@@ -820,17 +736,7 @@ impl OpenHarmonyApp {
         delivery: FrameInputDelivery,
     ) -> Result<()> {
         if delivery == FrameInputDelivery::OnDemand {
-            // The native node is retained and active on the UI thread for this operation.
-            let code = unsafe {
-                ohos_xcomponent_sys::OH_NativeXComponent_UnregisterOnFrameCallback(native.raw())
-            };
-            return if code == 0 {
-                Ok(())
-            } else {
-                Err(Error::from_reason(format!(
-                    "Cannot disable native frame callback: {code}"
-                )))
-            };
+            return native.unregister_frame_callback();
         }
         let inner = Arc::downgrade(&self.inner);
         let event_loop = Arc::downgrade(&self.event_loop);

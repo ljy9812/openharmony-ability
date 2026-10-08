@@ -24,6 +24,31 @@ do not need to derive gesture recognition from XComponent touch points.
 
 Gesture handles are owned by the active render and are detached and disposed with that render.
 
+## Keyboard and optional drag/drop
+
+Keyboard and pointer input are available with the default features. ArkUI keyboard delivery
+uses the API-14 node key event and reads optional lock state through the binding layer.
+
+Native file drag/drop is opt-in:
+
+```toml
+openharmony-ability = { version = "1.0.0-beta.2", features = ["drag"] }
+```
+
+The `drag` feature enables `ArkUiInputEvent::Drag`, `DragInputData`, `DragPhase`,
+`DragResponse` and `NativeFileDrag`, registers native drag/drop callbacks, and enables
+the ArkUI UDMF/image bindings. It is not part of the default feature set.
+
+`NativeFileDrag::node_handle` returns a typed XComponent view. Capture it while the
+source surface is retained, then release the surface lock before `start`: starting
+a native drag can synchronously reenter input dispatch. Keep the source surface
+alive until completion, and drop the drag before releasing the surface. The binding
+owns native action disposal, listener removal, data and preview lifetimes.
+
+The workspace currently patches the new ArkUI/UDMF APIs to the sibling
+`../../ohos-rs/ohos-native-bindings` checkout. Dependent workspaces must supply their
+own Cargo patches until the corresponding binding versions are published.
+
 ## License
 
 This project is licensed under the [MIT license](https://github.com/harmony-contrib/openharmony-ability/blob/main/LICENSE)

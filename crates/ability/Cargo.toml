@@ -10,6 +10,8 @@ description = "Binding Rust application on Harmony with Ability"
 default = ["log", "window"]
 log = ["dep:log"]
 window = ["dep:ohos-window-manager-binding"]
+# Native file drag/drop is opt-in; ordinary keyboard/pointer input needs no UDMF or preview images.
+drag = ["dep:ohos-udmf-binding", "ohos-arkui-binding/udmf", "ohos-arkui-binding/image"]
 
 [dependencies]
 # common dependencies
@@ -28,13 +30,9 @@ napi-ohos = { workspace = true, features = ["napi8"] }
 napi-derive-ohos = { workspace = true }
 
 # for xcomponent native render
-# 0.3.x's API-14 key enums/HTML helpers need its API-20 import gates.
-# The keyboard delivery implementation itself calls only API-14 functions.
 ohos-arkui-binding = { workspace = true, features = ["napi", "api-20"] }
 ohos-xcomponent-binding = { workspace = true }
-ohos-xcomponent-sys = { workspace = true }
-ohos-arkui-sys = { workspace = true, features = ["api-14"] }
-ohos-udmf-sys.workspace = true
+ohos-udmf-binding = { workspace = true, optional = true }
 ohos-ime-binding = { workspace = true }
 ohos-display-binding = { workspace = true }
 ohos-resource-manager-binding = { workspace = true }
