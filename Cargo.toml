@@ -42,7 +42,7 @@ ohos-xcomponent-binding = { version = "0.4", features = ["multi_mode", "accessib
 ohos-xcomponent-sys = { version = "0.1" }
 ohos-arkui-sys = { version = "0.1" }
 ohos-udmf-sys = { version = "0.0.4", features = ["api-13"] }
-ohos-ime-binding = { version = "0.3" }
+ohos-ime-binding = { version = "0.3.1" }
 ohos-web-binding = { version = "0.2" }
 ohos-display-binding = { version = "0.1" }
 ohos-resource-manager-binding = { version = "0.3" }
