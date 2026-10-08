@@ -414,7 +414,7 @@ dependencies = [
 
 [[package]]
 name = "ohos-arkui-binding"
-version = "0.4.2"
+version = "0.4.1"
 dependencies = [
  "bitflags 2.13.2",
  "libloading 0.8.9",
@@ -695,7 +695,7 @@ dependencies = [
 
 [[package]]
 name = "ohos-udmf-binding"
-version = "0.0.8"
+version = "0.0.7"
 dependencies = [
  "ohos-enum-derive 0.1.2",
  "ohos-image-native-binding 0.0.7",
