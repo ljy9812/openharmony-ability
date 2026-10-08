@@ -91,7 +91,6 @@ pub struct OpenHarmonyAppInner {
     render_owner: Option<String>,
     touch_input_delivery: TouchInputDelivery,
     frame_input_delivery: HashMap<i64, crate::render::FrameDeliveryState>,
-    render_thread: Option<std::thread::ThreadId>,
     surface_active: bool,
     sub_surfaces: HashMap<i64, SubRenderSurface>,
 
@@ -204,7 +203,6 @@ impl OpenHarmonyAppInner {
             render_owner: None,
             touch_input_delivery: TouchInputDelivery::default(),
             frame_input_delivery: HashMap::new(),
-            render_thread: None,
             surface_active: false,
             sub_surfaces: HashMap::new(),
             state: vec![],
@@ -729,7 +727,23 @@ impl OpenHarmonyApp {
         window_id: i64,
         delivery: crate::FrameInputDelivery,
     ) -> Result<()> {
+        // Repeated frame scheduling needs neither the session lock nor a write lock.
+        if self
+            .inner
+            .read()
+            .map_err(|_| Error::from_reason("Cannot read frame delivery"))?
+            .frame_input_delivery
+            .get(&window_id)
+            .is_some_and(|state| state.is_applied(delivery))
+        {
+            return Ok(());
+        }
         let target = {
+            // Keep the session -> render lock order used by bridge callbacks.
+            let session = self
+                .bridge_session
+                .read()
+                .map_err(|_| Error::from_reason("Failed to read native module bridge session"))?;
             let mut inner = self
                 .inner
                 .write()
@@ -760,7 +774,11 @@ impl OpenHarmonyApp {
                         )
                     })
             };
-            if target.is_some() && inner.render_thread != Some(std::thread::current().id()) {
+            if target.is_some()
+                && !session
+                    .as_ref()
+                    .is_some_and(|session| session.runtime.is_main_thread())
+            {
                 return Err(Error::from_reason(
                     "Active frame delivery must change on the UI thread",
                 ));
@@ -836,28 +854,26 @@ impl OpenHarmonyApp {
         window_id: i64,
         xcomponent: XComponent,
     ) -> Result<TouchInputDelivery> {
-        let bridge_active = self
-            .bridge_session
-            .read()
-            .map_err(|_| Error::from_reason("Failed to read native module bridge session"))?
-            .is_some();
-        if !bridge_active {
-            return Err(Error::from_reason(
-                "A DefaultXComponent cannot render outside an active NativeAbility module session",
-            ));
+        {
+            let session = self
+                .bridge_session
+                .read()
+                .map_err(|_| Error::from_reason("Failed to read native module bridge session"))?;
+            let session = session.as_ref().ok_or_else(|| {
+                Error::from_reason(
+                    "A DefaultXComponent cannot render outside an active NativeAbility module session",
+                )
+            })?;
+            if !session.runtime.is_main_thread() {
+                return Err(Error::from_reason(
+                    "A DefaultXComponent must render on the N-API/UI thread",
+                ));
+            }
         }
         let mut inner = self
             .inner
             .write()
             .map_err(|_| Error::from_reason("Failed to claim native render owner"))?;
-        let render_thread = std::thread::current().id();
-        if inner
-            .render_thread
-            .is_some_and(|thread| thread != render_thread)
-        {
-            return Err(Error::from_reason("Render owners must share the UI thread"));
-        }
-        inner.render_thread = Some(render_thread);
         if window_id == 0 {
             inner.claim_render_owner(owner)?;
             inner.xcomponent = Some(xcomponent);
