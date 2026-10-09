@@ -46,12 +46,12 @@ ohos-display-binding = { version = "0.1" }
 ohos-resource-manager-binding = { version = "0.3" }
 ohos-resource-manager-sys = { version = "0.3" }
 ohos-hilog-binding = { version = "0.2" }
-ohos-window-manager-binding = { version = "0.1" }
+# Share image-native 0.0.7 with the published ArkUI wrappers.
+ohos-window-manager-binding = { version = "0.1.1" }
 
 # Bridge runtime and examples use these without pinning versions in member manifests.
 futures-channel = { version = "0.3" }
 futures-executor = { version = "0.3" }
-libloading = { version = "0.8" }
 http = { version = "1" }
 
 # Local dependencies used by legacy feature-gated modules
@@ -61,13 +61,3 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync", "time"] }
 png = "0.17"
-
-[patch.crates-io]
-ohos-ime-binding = { path = "../../ohos-rs/ohos-native-bindings/crates/ime" }
-ohos-arkui-binding = { path = "../../ohos-rs/ohos-native-bindings/crates/arkui" }
-ohos-xcomponent-binding = { path = "../../ohos-rs/ohos-native-bindings/crates/xcomponent" }
-ohos-arkui-input-binding = { path = "../../ohos-rs/ohos-native-bindings/crates/arkui_input" }
-ohos-udmf-binding = { path = "../../ohos-rs/ohos-native-bindings/crates/udmf" }
-ohos-arkui-sys = { path = "../../ohos-rs/ohos-native-bindings/sys/ohos-arkui-sys" }
-ohos-xcomponent-sys = { path = "../../ohos-rs/ohos-native-bindings/sys/ohos-xcomponent-sys" }
-ohos-arkui-input-sys = { path = "../../ohos-rs/ohos-native-bindings/sys/ohos-arkui-input-sys" }

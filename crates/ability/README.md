@@ -45,10 +45,6 @@ a native drag can synchronously reenter input dispatch. Keep the source surface
 alive until completion, and drop the drag before releasing the surface. The binding
 owns native action disposal, listener removal, data and preview lifetimes.
 
-The workspace currently patches the new ArkUI/UDMF APIs to the sibling
-`../../ohos-rs/ohos-native-bindings` checkout. Dependent workspaces must supply their
-own Cargo patches until the corresponding binding versions are published.
-
 ## License
 
 This project is licensed under the [MIT license](https://github.com/harmony-contrib/openharmony-ability/blob/main/LICENSE)

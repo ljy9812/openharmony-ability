@@ -16,7 +16,6 @@ drag = ["dep:ohos-udmf-binding", "ohos-arkui-binding/udmf", "ohos-arkui-binding/
 [dependencies]
 # common dependencies
 futures-channel = { workspace = true }
-libloading = { workspace = true }
 uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
