@@ -1,6 +1,5 @@
 [package]
 name = "openharmony-ability"
-workspace = "../.."
 version = "1.0.0-beta.2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -29,7 +28,7 @@ napi-ohos = { workspace = true, features = ["napi8"] }
 napi-derive-ohos = { workspace = true }
 
 # for xcomponent native render
-ohos-arkui-binding = { workspace = true, features = ["napi", "api-20"] }
+ohos-arkui-binding = { workspace = true, features = ["napi", "api-14"] }
 ohos-xcomponent-binding = { workspace = true }
 ohos-udmf-binding = { workspace = true, optional = true }
 ohos-ime-binding = { workspace = true }

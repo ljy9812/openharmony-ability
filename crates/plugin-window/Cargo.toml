@@ -1,5 +1,4 @@
 [package]
-workspace = "../.."
 name = "openharmony-ability-plugin-window"
 version = "1.0.0-beta.1"
 edition = "2021"
