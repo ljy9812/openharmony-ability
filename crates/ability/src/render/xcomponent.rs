@@ -18,10 +18,12 @@ use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::{XComponentOffset, XComponentSize};
 
+#[cfg(feature = "keyboard")]
+use crate::KeyboardEventData;
 use crate::{
     input, set_main_thread_env, ArkUiInputEvent, AxisEventData, Event, GestureEvent, GesturePhase,
-    InputEvent, KeyboardEventData, KeyboardInputDelivery, OpenHarmonyApp, PanGestureEvent,
-    PointerInputData, Rect, Size, SwipeGestureEvent, TapGestureEvent, XComponentInputEvent,
+    InputEvent, KeyboardInputDelivery, OpenHarmonyApp, PanGestureEvent, PointerInputData, Rect,
+    Size, SwipeGestureEvent, TapGestureEvent, XComponentInputEvent,
 };
 
 const PAN_GESTURE_DISTANCE: f64 = 8.0;
@@ -528,47 +530,53 @@ pub fn render_for_window(
 
     let on_key_event_app = app.clone();
     let on_key_event_owner = render_owner.clone();
-    if app.keyboard_input_delivery() == KeyboardInputDelivery::ArkUi {
-        let pre_ime_app = app.clone();
-        let pre_ime_owner = render_owner.clone();
-        xcomponent_native.on_key_pre_ime(move |event| {
-            if let Some(input) = event.key_event() {
-                if let Some(data) = KeyboardEventData::from_key_callback(&input) {
-                    dispatch_input(
-                        &pre_ime_app,
-                        &pre_ime_owner,
-                        InputEvent::ArkUi(ArkUiInputEvent::KeyPreIme(data)),
-                    );
-                }
-            }
-            // Keep system shortcuts and IME processing intact.
-            None
-        });
-        xcomponent_native.on_key_event(move |event| {
-            if let Some(input) = event.key_event() {
-                if let Some(data) = KeyboardEventData::from_key_callback(&input) {
-                    let response = data.response.clone();
-                    dispatch_input(
-                        &on_key_event_app,
-                        &on_key_event_owner,
-                        InputEvent::ArkUi(ArkUiInputEvent::Key(data)),
-                    );
-                    if response.is_consumed() {
-                        input.set_consumed(true);
-                        input.stop_propagation(true);
+    match app.keyboard_input_delivery() {
+        #[cfg(feature = "keyboard")]
+        KeyboardInputDelivery::ArkUi => {
+            let pre_ime_app = app.clone();
+            let pre_ime_owner = render_owner.clone();
+            xcomponent_native.on_key_pre_ime(move |event| {
+                if let Some(input) = event.key_event() {
+                    if let Some(data) = KeyboardEventData::from_key_callback(&input) {
+                        dispatch_input(
+                            &pre_ime_app,
+                            &pre_ime_owner,
+                            InputEvent::ArkUi(ArkUiInputEvent::KeyPreIme(data)),
+                        );
                     }
                 }
+                // Keep system shortcuts and IME processing intact.
+                None
+            });
+            xcomponent_native.on_key_event(move |event| {
+                if let Some(input) = event.key_event() {
+                    if let Some(data) = KeyboardEventData::from_key_callback(&input) {
+                        let response = data.response.clone();
+                        dispatch_input(
+                            &on_key_event_app,
+                            &on_key_event_owner,
+                            InputEvent::ArkUi(ArkUiInputEvent::Key(data)),
+                        );
+                        if response.is_consumed() {
+                            input.set_consumed(true);
+                            input.stop_propagation(true);
+                        }
+                    }
+                }
+            });
+        }
+        KeyboardInputDelivery::RawXComponent => {
+            if let Err(error) = xcomponent.on_key_event(move |_, _, data| {
+                dispatch_input(
+                    &on_key_event_app,
+                    &on_key_event_owner,
+                    InputEvent::XComponent(XComponentInputEvent::Key(data)),
+                );
+                Ok(())
+            }) {
+                crate::warn!("Failed to register XComponent key events: {error:?}");
             }
-        });
-    } else if let Err(error) = xcomponent.on_key_event(move |_, _, data| {
-        dispatch_input(
-            &on_key_event_app,
-            &on_key_event_owner,
-            InputEvent::XComponent(XComponentInputEvent::Key(data)),
-        );
-        Ok(())
-    }) {
-        crate::warn!("Failed to register XComponent key events: {error:?}");
+        }
     }
 
     let on_mouse_event_app = app.clone();

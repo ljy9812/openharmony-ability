@@ -871,6 +871,7 @@ impl OpenHarmonyApp {
 
     /// Selects the keyboard stream before any main or child render starts.
     pub fn set_keyboard_input_delivery(&self, delivery: KeyboardInputDelivery) -> Result<()> {
+        #[cfg(feature = "keyboard")]
         if delivery == KeyboardInputDelivery::ArkUi && crate::version::sdk_api_version() < 14 {
             return Err(Error::from_reason(
                 "ArkUI keyboard delivery requires API 14",

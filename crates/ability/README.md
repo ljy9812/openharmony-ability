@@ -26,8 +26,21 @@ Gesture handles are owned by the active render and are detached and disposed wit
 
 ## Keyboard and optional drag/drop
 
-Keyboard and pointer input are available with the default features. ArkUI keyboard delivery
-uses the API-14 node key event and reads optional lock state through the binding layer.
+Raw XComponent keyboard and pointer input are available with the default features.
+Enhanced ArkUI keyboard delivery is opt-in through the `keyboard` feature:
+
+```toml
+openharmony-ability = { git = "https://github.com/richerfu/openharmony-ability.git", branch = "feat/ohos-adaptation-runtime-fixes", features = ["keyboard"] }
+```
+
+`keyboard` enables `KeyboardInputDelivery::ArkUi`, `KeyboardEventData`,
+`KeyboardEventResponse`, and `ArkUiInputEvent::{KeyPreIme, Key}`. It forwards
+`ohos-arkui-binding/api-14` and is not part of the default feature set. The
+default stream remains raw XComponent input; select
+`OpenHarmonyApp::set_keyboard_input_delivery(KeyboardInputDelivery::ArkUi)`
+before rendering to receive Unicode, held-key state, optional lock state, and
+synchronous key consumption. Selecting ArkUI delivery on a runtime below API 14
+returns an error. Enabling `drag` does not enable `keyboard`.
 
 Native file drag/drop is opt-in:
 

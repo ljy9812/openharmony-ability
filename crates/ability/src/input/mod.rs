@@ -17,7 +17,9 @@ pub use drag::{DragInputData, DragPhase, DragResponse, NativeFileDrag};
 mod keyboard;
 mod text_input;
 pub use ime::*;
-pub use keyboard::{KeyboardEventData, KeyboardEventResponse, KeyboardInputDelivery};
+pub use keyboard::KeyboardInputDelivery;
+#[cfg(feature = "keyboard")]
+pub use keyboard::{KeyboardEventData, KeyboardEventResponse};
 pub use text_input::*;
 
 #[derive(Clone)]
@@ -54,7 +56,9 @@ pub enum ArkUiInputEvent {
     #[cfg(feature = "drag")]
     Drag(DragInputData),
     /// State-only snapshot before IME processing; do not dispatch another key press.
+    #[cfg(feature = "keyboard")]
     KeyPreIme(KeyboardEventData),
+    #[cfg(feature = "keyboard")]
     Key(KeyboardEventData),
     Axis(AxisEventData),
     Gesture(GestureEvent),
