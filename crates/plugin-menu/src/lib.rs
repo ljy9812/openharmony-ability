@@ -89,7 +89,7 @@ pub struct MenuItemData {
 // ownership in the menu consumer (the consumer) without plugin-menu depending on the menu consumer.
 
 static MENU_EVENT_SENDER: OnceLock<Sender<String>> = OnceLock::new();
-static MENU_OPEN_EVENT_SENDER: OnceLock<Sender<()>> = OnceLock::new();
+static MENU_OPEN_EVENT_SENDER: OnceLock<Sender<MenuOpenEvent>> = OnceLock::new();
 
 /// Called by the menu consumer at startup to register its menu event channel sender.
 /// Idempotent: the first registration wins, later calls are ignored.
@@ -97,7 +97,8 @@ pub fn register_menu_event_sender(sender: Sender<String>) {
     let _ = MENU_EVENT_SENDER.set(sender);
 }
 
-pub fn register_menu_open_event_sender(sender: Sender<()>) {
+/// Register the menu-open channel, preserving the originating window identity.
+pub fn register_menu_open_event_sender(sender: Sender<MenuOpenEvent>) {
     let _ = MENU_OPEN_EVENT_SENDER.set(sender);
 }
 
@@ -134,9 +135,9 @@ impl BridgePlugin for MenuBridgePlugin {
                 event.respond(true)
             }
             "menu-open" => {
-                let _: MenuOpenEvent = event.decode()?;
+                let open: MenuOpenEvent = event.decode()?;
                 if let Some(sender) = MENU_OPEN_EVENT_SENDER.get() {
-                    let _ = sender.send(());
+                    let _ = sender.send(open);
                 }
                 event.respond(true)
             }

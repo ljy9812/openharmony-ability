@@ -77,6 +77,7 @@ export struct DefaultXComponent {
   private appearanceGeneration: number = 0;
   private attachment?: ComponentAttachment;
   private releasePromise: Promise<void> = Promise.resolve();
+  private releaseSurfaceBlur?: () => void;
 
   async aboutToAppear(): Promise<void> {
     const generation = ++this.appearanceGeneration;
@@ -129,7 +130,7 @@ export struct DefaultXComponent {
         nativeModule,
         nativeSubWindow: true,
       };
-      this.attachSurfaceBlur();
+      this.attachSurfaceBlur(generation);
       return;
     }
 
@@ -191,10 +192,11 @@ export struct DefaultXComponent {
         this.getUIContext(),
         root,
       );
-      this.attachSurfaceBlur();
       if (generation !== this.appearanceGeneration) {
         await this.releasePromise;
+        return;
       }
+      this.attachSurfaceBlur(generation);
     } catch (error) {
       if (generation !== this.appearanceGeneration) {
         await this.releasePromise;
@@ -208,14 +210,15 @@ export struct DefaultXComponent {
   }
 
   aboutToDisappear(): void {
+    this.appearanceGeneration += 1;
+    this.releaseSurfaceBlur?.();
+    this.releaseSurfaceBlur = undefined;
     // Sub-window mode cleanup: unregister component root and dispose FrameNode
     if (!this.moduleName.trim() && this.windowId > 0) {
       WindowManager.getInstance().unregisterComponentRoot(this.windowId);
       this.nodeController.disposeRoot();
       return;
     }
-    WindowManager.getInstance().unregisterSurfaceBlurCallback(this.windowId);
-    this.appearanceGeneration += 1;
     this.releasePromise = this.releaseAttachment(this.attachment);
   }
 
@@ -223,6 +226,8 @@ export struct DefaultXComponent {
     if (expected !== undefined && this.attachment !== expected) {
       return this.releasePromise;
     }
+    this.releaseSurfaceBlur?.();
+    this.releaseSurfaceBlur = undefined;
     const attachment = expected ?? this.attachment;
     this.attachment = undefined;
     if (attachment === undefined) {
@@ -247,12 +252,21 @@ export struct DefaultXComponent {
       });
   }
 
-  private attachSurfaceBlur(): void {
+  private attachSurfaceBlur(generation: number): void {
+    if (generation !== this.appearanceGeneration) {
+      return;
+    }
     const manager = WindowManager.getInstance();
     this.blurRadius = manager.getPendingBlur(this.windowId);
-    manager.registerSurfaceBlurCallback(this.windowId, (radius: number): void => {
-      this.blurRadius = radius;
-    });
+    this.releaseSurfaceBlur?.();
+    this.releaseSurfaceBlur = manager.registerSurfaceBlurCallback(
+      this.windowId,
+      (radius: number): void => {
+        if (generation === this.appearanceGeneration) {
+          this.blurRadius = radius;
+        }
+      },
+    );
   }
 
   build() {

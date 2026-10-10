@@ -1,5 +1,6 @@
-import { ComponentContent, UIContext } from "@kit.ArkUI";
+import { ComponentContent, UIContext, window } from "@kit.ArkUI";
 import { BridgeCallContext } from "@ohos-rs/ability";
+import { PromptPlacement, PromptOffset } from "./PromptPlacement";
 
 export interface WindowPromptRequest {
   windowId: number;
@@ -11,6 +12,7 @@ export interface WindowPromptRequest {
   anchor?: WindowPromptAnchor;
 }
 export interface WindowPromptAnchor {
+  /** Window content-local logical coordinates in vp, not screen coordinates or px. */
   x: number;
   y: number;
 }
@@ -18,48 +20,71 @@ export interface WindowPromptAnchor {
 class PromptModel {
   readonly request: WindowPromptRequest;
   readonly choose: (index: number) => void;
-  constructor(request: WindowPromptRequest, choose: (index: number) => void) {
+  readonly placement: PromptPlacement;
+  readonly measure: (width: number, height: number) => void;
+  constructor(
+    request: WindowPromptRequest,
+    choose: (index: number) => void,
+    placement: PromptPlacement,
+    measure: (width: number, height: number) => void,
+  ) {
     this.request = request;
     this.choose = choose;
+    this.placement = placement;
+    this.measure = measure;
   }
 }
 
 @Builder
 function promptBuilder(model: PromptModel) {
-  Column({ space: 12 }) {
-    Text(model.request.message)
-      .fontSize(20)
-      .fontWeight(FontWeight.Medium)
-      .fontColor($r("sys.color.font_primary"))
-      .width("100%")
-    if (model.request.detail) {
-      Text(model.request.detail)
-        .fontSize(14)
-        .fontColor($r("sys.color.font_secondary"))
-        .width("100%");
-    }
-    Scroll() {
+  Scroll() {
+    Column({ space: 12 }) {
+      Row({ space: 8 }) {
+        Text(model.request.level === 0 ? "ℹ" : model.request.level === 1 ? "⚠" : "⛔")
+          .fontSize(24)
+          .fontColor(
+            model.request.level === 0
+              ? Color.Blue
+              : model.request.level === 1
+                ? Color.Orange
+                : Color.Red,
+          )
+        Text(model.request.message)
+          .fontSize(20)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r("sys.color.font_primary"))
+          .layoutWeight(1)
+      }.width("100%")
+      if (model.request.detail) {
+        Text(model.request.detail)
+          .fontSize(14)
+          .fontColor($r("sys.color.font_secondary"))
+          .width("100%");
+      }
       Column({ space: 8 }) {
         ForEach(model.request.buttons, (label: string, index: number) => {
           Button(label)
             .width("100%")
             .onClick(() => model.choose(index));
         })
-      }
+      }.width("100%")
     }
-    .constraintSize({ maxHeight: 360 })
+    .padding(24)
     .width("100%")
   }
-  .padding(24)
-  .width(model.request.anchor ? 240 : 400)
-  .constraintSize({ maxWidth: "90%" })
+  .width(model.placement.width)
+  .constraintSize({ maxHeight: model.placement.maxHeight })
   .backgroundColor($r("sys.color.comp_background_primary"))
-  .borderRadius(16);
+  .borderRadius(16)
+  .onAreaChange((_oldArea: Area, newArea: Area): void => {
+    model.measure(Number(newArea.width), Number(newArea.height));
+  });
 }
 
 /** One dialog lifetime; only ArkTS owns the ComponentContent and UIContext. */
 class PromptSession {
   private readonly uiContext: UIContext;
+  private readonly targetWindow: window.Window;
   private readonly request: WindowPromptRequest;
   private readonly context: BridgeCallContext;
   private content?: ComponentContent<PromptModel>;
@@ -69,11 +94,96 @@ class PromptSession {
   private unsubscribe?: () => void;
   private resolve?: (index: number) => void;
   private reject?: (error: Error) => void;
+  private placement: PromptPlacement;
+  private measuredWidth: number = 0;
+  private measuredHeight: number = 0;
+  private lastOffset?: PromptOffset;
+  private positionUpdates: Promise<void> = Promise.resolve();
+  private sizeListener?: (size: window.Size) => void;
 
-  constructor(uiContext: UIContext, request: WindowPromptRequest, context: BridgeCallContext) {
-    this.uiContext = uiContext;
+  constructor(
+    targetWindow: window.Window,
+    request: WindowPromptRequest,
+    context: BridgeCallContext,
+  ) {
+    this.targetWindow = targetWindow;
+    this.uiContext = targetWindow.getUIContext();
     this.request = request;
     this.context = context;
+    this.placement = this.readPlacement();
+  }
+
+  private readPlacement(): PromptPlacement {
+    const rect = this.targetWindow.getWindowProperties().windowRect;
+    const avoid = this.targetWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+    // Window geometry is px; dialog sizes and offsets are vp. Use this window's
+    // UIContext conversion so secondary displays and custom densities are respected.
+    return new PromptPlacement(
+      this.uiContext.px2vp(Math.max(1, rect.width - avoid.leftRect.width - avoid.rightRect.width)),
+      this.uiContext.px2vp(
+        Math.max(1, rect.height - avoid.topRect.height - avoid.bottomRect.height),
+      ),
+      this.request.anchor !== undefined && this.request.anchor !== null,
+    );
+  }
+
+  private model(): PromptModel {
+    return new PromptModel(
+      this.request,
+      (index: number): void => {
+        void this.choose(index);
+      },
+      this.placement,
+      (width: number, height: number): void => {
+        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+          return;
+        }
+        this.measuredWidth = width;
+        this.measuredHeight = height;
+        this.updatePosition();
+      },
+    );
+  }
+
+  private offset(): PromptOffset {
+    const anchor = this.request.anchor;
+    if (!anchor) {
+      return { dx: 0, dy: 0 };
+    }
+    // Before layout is measured, reserve the maximum height to keep the initial
+    // dialog on screen. Actual layout then moves it as close to the anchor as fits.
+    return this.placement.offset(
+      anchor.x,
+      anchor.y,
+      this.measuredWidth || this.placement.width,
+      this.measuredHeight || this.placement.maxHeight,
+    );
+  }
+
+  private updatePosition(): void {
+    if (!this.request.anchor || !this.opened || this.completed) {
+      return;
+    }
+    this.positionUpdates = this.positionUpdates
+      .then(async (): Promise<void> => {
+        const content = this.content;
+        if (!content || !this.opened || this.completed || !this.context.isActive()) {
+          return;
+        }
+        const offset = this.offset();
+        if (this.lastOffset?.dx === offset.dx && this.lastOffset?.dy === offset.dy) {
+          return;
+        }
+        await this.uiContext.getPromptAction().updateCustomDialog(content, {
+          alignment: DialogAlignment.TopStart,
+          offset,
+          autoCancel: this.request.cancelIndex !== undefined && this.request.cancelIndex !== null,
+        });
+        this.lastOffset = offset;
+      })
+      .catch((error: Error): void => {
+        console.warn(`[WindowPrompt] position update failed: ${String(error)}`);
+      });
   }
 
   async run(): Promise<number> {
@@ -88,11 +198,24 @@ class PromptSession {
       void this.cancel();
     });
     try {
-      const model = new PromptModel(this.request, (index: number): void => {
-        void this.choose(index);
-      });
+      const model = this.model();
       const content = new ComponentContent(this.uiContext, wrapBuilder(promptBuilder), model);
       this.content = content;
+      this.sizeListener = (_size: window.Size): void => {
+        if (this.completed || !this.context.isActive()) {
+          return;
+        }
+        try {
+          this.placement = this.readPlacement();
+          this.measuredWidth = 0;
+          this.measuredHeight = 0;
+          content.update(this.model());
+          this.updatePosition();
+        } catch (error) {
+          console.warn(`[WindowPrompt] resize update failed: ${String(error)}`);
+        }
+      };
+      this.targetWindow.on("windowSizeChange", this.sizeListener);
       if (this.completed || !this.context.isActive()) {
         await this.cancel();
       } else {
@@ -100,9 +223,7 @@ class PromptSession {
           isModal: true,
           autoCancel: this.request.cancelIndex !== undefined && this.request.cancelIndex !== null,
           alignment: this.request.anchor ? DialogAlignment.TopStart : DialogAlignment.Center,
-          offset: this.request.anchor
-            ? { dx: this.request.anchor.x, dy: this.request.anchor.y }
-            : { dx: 0, dy: 0 },
+          offset: this.offset(),
           onDidDisappear: (): void => {
             void this.cancel();
           },
@@ -121,6 +242,8 @@ class PromptSession {
         this.opened = true;
         if (this.completed || !this.context.isActive()) {
           await this.close();
+        } else {
+          this.updatePosition();
         }
       }
     } catch (error) {
@@ -133,6 +256,14 @@ class PromptSession {
       return await result;
     } finally {
       this.unsubscribe?.();
+      if (this.sizeListener) {
+        try {
+          this.targetWindow.off("windowSizeChange", this.sizeListener);
+        } catch (error) {
+          console.warn(`[WindowPrompt] size listener cleanup failed: ${String(error)}`);
+        }
+        this.sizeListener = undefined;
+      }
       await this.close();
     }
   }
@@ -168,6 +299,7 @@ class PromptSession {
   }
 
   private async closeOpened(content: ComponentContent<PromptModel>): Promise<void> {
+    await this.positionUpdates;
     try {
       await this.uiContext.getPromptAction().closeCustomDialog(content);
     } catch {}
@@ -183,7 +315,7 @@ export class PromptDialogs {
   private readonly sessions: Set<PromptSession> = new Set();
 
   async show(
-    uiContext: UIContext,
+    targetWindow: window.Window,
     request: WindowPromptRequest,
     context: BridgeCallContext,
   ): Promise<number> {
@@ -211,7 +343,7 @@ export class PromptDialogs {
     ) {
       throw new Error("Invalid native prompt request");
     }
-    const session = new PromptSession(uiContext, request, context);
+    const session = new PromptSession(targetWindow, request, context);
     this.sessions.add(session);
     try {
       return await session.run();

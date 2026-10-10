@@ -25,8 +25,14 @@ const WRITE_HTML_RESPONSE_TYPE = "ohos.clipboard.WriteHtmlResponse";
 const WRITE_RECORDS_REQUEST_TYPE = "ohos.clipboard.WriteRecordsRequest";
 const READ_RECORDS_RESPONSE_TYPE = "ohos.clipboard.ReadRecordsResponse";
 const CHANGED_EVENT_TYPE = "ohos.clipboard.ChangedEvent";
-const METADATA_MIME = "application/x-gpui-ohos-text-metadata";
-const METADATA_MIME_V1 = "application/x-gpui-ohos-text-metadata-v1";
+// Retain reads of existing clipboard entries during consumer-specific MIME migration.
+const LEGACY_METADATA_MIME = "application/x-gpui-ohos-text-metadata";
+const LEGACY_METADATA_MIME_V1 = "application/x-gpui-ohos-text-metadata-v1";
+
+export interface ClipboardPluginOptions {
+  /** Custom MIME for versioned UTF-8 text metadata; keep writers and readers consistent. */
+  metadataMimeType: string;
+}
 
 interface ClipboardRecord {
   text?: string;
@@ -126,8 +132,33 @@ class ClearResponse {
 export class ClipboardPlugin extends AsyncPluginBase {
   readonly id = "ohos.clipboard";
   readonly requires: BridgeContextRequirement[] = ["ability"];
+  private readonly metadataMimeType: string;
 
   private updateListener?: () => void;
+
+  constructor(options: ClipboardPluginOptions) {
+    super();
+    const mime = options?.metadataMimeType;
+    const reserved = [
+      pasteboard.MIMETYPE_TEXT_PLAIN,
+      pasteboard.MIMETYPE_TEXT_HTML,
+      pasteboard.MIMETYPE_TEXT_URI,
+      pasteboard.MIMETYPE_TEXT_WANT,
+      pasteboard.MIMETYPE_PIXELMAP,
+      LEGACY_METADATA_MIME,
+    ];
+    if (
+      typeof mime !== "string" ||
+      mime.length > 1024 ||
+      !/^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/.test(mime) ||
+      reserved.includes(mime.toLowerCase())
+    ) {
+      throw new Error(
+        "ClipboardPlugin options.metadataMimeType must be a non-reserved type/subtype MIME",
+      );
+    }
+    this.metadataMimeType = mime.toLowerCase();
+  }
 
   override onInstall(context: BridgePluginHookContext): void {
     this.updateListener = (): void => {
@@ -176,7 +207,7 @@ export class ClipboardPlugin extends AsyncPluginBase {
       const maps: image.PixelMap[] = [];
       let data: pasteboard.PasteData | undefined;
       try {
-        // addRecord inserts at the front; reverse construction preserves GPUI record order.
+        // addRecord inserts at the front; reverse construction preserves caller record order.
         for (let index = request.records.length - 1; index >= 0; index--) {
           const entry = request.records[index];
           const hasText = typeof entry.text === "string";
@@ -195,7 +226,7 @@ export class ClipboardPlugin extends AsyncPluginBase {
               // A version byte keeps empty metadata readable: the SDK rejects empty custom data.
               const encoded = new util.TextEncoder().encodeInto(`1${entry.metadata}`);
               record.addEntry(
-                METADATA_MIME_V1,
+                this.metadataMimeType,
                 encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength),
               );
             }
@@ -258,13 +289,22 @@ export class ClipboardPlugin extends AsyncPluginBase {
           typeof record.plainText === "string"
         ) {
           let metadata: string | undefined;
-          const versioned = record.getValidTypes([METADATA_MIME_V1]).length > 0;
-          if (versioned || record.getValidTypes([METADATA_MIME]).length > 0) {
-            const value = await record
-              .getData(versioned ? METADATA_MIME_V1 : METADATA_MIME)
-              .catch((error: Error): never => {
-                throw new Error(`Clipboard metadata record ${index} failed: ${String(error)}`);
-              });
+          let metadataMime: string | undefined;
+          for (const mime of [
+            this.metadataMimeType,
+            LEGACY_METADATA_MIME_V1,
+            LEGACY_METADATA_MIME,
+          ]) {
+            if (record.getValidTypes([mime]).length > 0) {
+              metadataMime = mime;
+              break;
+            }
+          }
+          if (metadataMime !== undefined) {
+            const versioned = metadataMime !== LEGACY_METADATA_MIME;
+            const value = await record.getData(metadataMime).catch((error: Error): never => {
+              throw new Error(`Clipboard metadata record ${index} failed: ${String(error)}`);
+            });
             if (value instanceof ArrayBuffer) {
               const decoded = new util.TextDecoder("utf-8").decodeToString(new Uint8Array(value));
               if (versioned && !decoded.startsWith("1")) {
@@ -390,8 +430,12 @@ export class ClipboardPlugin extends AsyncPluginBase {
       ) {
         throw new Error("write-uris.uris must contain file:// URIs");
       }
-      const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_URI, request.uris[0]);
-      for (let index = 1; index < request.uris.length; index++) {
+      // Both addRecord overloads prepend; construct from the end to preserve URI order.
+      const data = pasteboard.createData(
+        pasteboard.MIMETYPE_TEXT_URI,
+        request.uris[request.uris.length - 1],
+      );
+      for (let index = request.uris.length - 2; index >= 0; index--) {
         data.addRecord(pasteboard.MIMETYPE_TEXT_URI, request.uris[index]);
       }
       await pasteboard.getSystemPasteboard().setData(data);

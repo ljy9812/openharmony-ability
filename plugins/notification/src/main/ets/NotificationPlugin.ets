@@ -1,5 +1,5 @@
 import wantAgent, { WantAgent } from "@ohos.app.ability.wantAgent";
-import notificationManager from "@ohos.notificationManager";
+import { notificationManager } from "@kit.NotificationKit";
 import {
   AsyncPluginBase,
   BridgeCallContext,
@@ -11,6 +11,11 @@ import {
 const SHOW_REQUEST_TYPE = "ohos.notification.ShowRequest";
 const DISMISS_REQUEST_TYPE = "ohos.notification.DismissRequest";
 const ACKNOWLEDGEMENT_TYPE = "ohos.notification.Acknowledgement";
+
+export interface NotificationPluginOptions {
+  /** URI scheme consumed by the application's onNewWant handler, without ':'. */
+  scheme: string;
+}
 
 interface NotificationAction {
   id: string;
@@ -37,10 +42,10 @@ class NotificationAcknowledgement {
 }
 
 // The URI is delivered to NativeAbility.onNewWant when the notification is tapped.
-function responseUri(tag: string, actionId?: string): string {
+function responseUri(scheme: string, tag: string, actionId?: string): string {
   const query = `tag=${encodeURIComponent(tag)}`;
   return (
-    `gpui-notification://response?${query}` +
+    `${scheme}://response?${query}` +
     (actionId === undefined ? "" : `&action=${encodeURIComponent(actionId)}`)
   );
 }
@@ -60,6 +65,16 @@ function notificationLabel(tag: string): string {
 export class NotificationPlugin extends AsyncPluginBase {
   readonly id = "ohos.notification";
   readonly requires: BridgeContextRequirement[] = ["ability"];
+  private readonly responseScheme: string;
+
+  constructor(options: NotificationPluginOptions) {
+    super();
+    const scheme = options?.scheme;
+    if (typeof scheme !== "string" || !/^[A-Za-z][A-Za-z0-9+.-]*$/.test(scheme)) {
+      throw new Error("NotificationPlugin options.scheme must be a URI scheme without ':'");
+    }
+    this.responseScheme = scheme.toLowerCase();
+  }
 
   async invokeAsync(
     action: string,
@@ -76,8 +91,31 @@ export class NotificationPlugin extends AsyncPluginBase {
         action,
         SHOW_REQUEST_TYPE,
       ) as ShowRequest;
-      if (!request.tag || !request.title || !request.body || !Array.isArray(request.actions)) {
+      if (
+        typeof request.tag !== "string" ||
+        !request.tag.trim() ||
+        typeof request.title !== "string" ||
+        !request.title.trim() ||
+        typeof request.body !== "string" ||
+        !request.body.trim() ||
+        !Array.isArray(request.actions)
+      ) {
         throw new Error("Notification requires a tag, title, body and actions array");
+      }
+      if (request.actions.length > 3) {
+        throw new Error("Notification supports at most 3 actions");
+      }
+      if (
+        request.actions.some(
+          (item: NotificationAction) =>
+            !item ||
+            typeof item.id !== "string" ||
+            !item.id.trim() ||
+            typeof item.label !== "string" ||
+            !item.label.trim(),
+        )
+      ) {
+        throw new Error("Notification actions require an id and label");
       }
       if (!(await notificationManager.isNotificationEnabled())) {
         await notificationManager.requestEnableNotification(context.abilityContext);
@@ -101,13 +139,10 @@ export class NotificationPlugin extends AsyncPluginBase {
         });
       };
       const buttons: notificationManager.NotificationActionButton[] = [];
-      for (const item of request.actions.slice(0, 3)) {
-        if (!item.id || !item.label) {
-          throw new Error("Notification actions require an id and label");
-        }
+      for (const item of request.actions) {
         buttons.push({
           title: item.label,
-          wantAgent: await agentFor(responseUri(request.tag, item.id)),
+          wantAgent: await agentFor(responseUri(this.responseScheme, request.tag, item.id)),
         });
       }
       const notification: notificationManager.NotificationRequest = {
@@ -117,7 +152,7 @@ export class NotificationPlugin extends AsyncPluginBase {
           notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
           normal: { title: request.title, text: request.body },
         },
-        wantAgent: await agentFor(responseUri(request.tag)),
+        wantAgent: await agentFor(responseUri(this.responseScheme, request.tag)),
         actionButtons: buttons,
       };
       await notificationManager.publish(notification);

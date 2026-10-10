@@ -1,6 +1,7 @@
 import commonEventManager from "@ohos.commonEventManager";
 import thermal from "@ohos.thermal";
 import display from "@ohos.display";
+import { ThermalSubscriptions } from "./ThermalSubscriptions";
 import {
   AsyncPluginBase,
   BridgeCallContext,
@@ -10,15 +11,15 @@ import {
   expectBridgeRequestType,
 } from "@ohos-rs/ability";
 
-const GET_THERMAL_LEVEL_REQUEST_TYPE = "ohos.system_state.GetThermalLevelRequest";
-const GET_THERMAL_LEVEL_RESPONSE_TYPE = "ohos.system_state.GetThermalLevelResponse";
-const GET_BUNDLE_CODE_DIR_REQUEST_TYPE = "ohos.system_state.GetBundleCodeDirRequest";
-const GET_BUNDLE_CODE_DIR_RESPONSE_TYPE = "ohos.system_state.GetBundleCodeDirResponse";
-const GET_AVAILABLE_AREA_REQUEST_TYPE = "ohos.system_state.GetAvailableAreaRequest";
-const GET_AVAILABLE_AREA_RESPONSE_TYPE = "ohos.system_state.GetAvailableAreaResponse";
-const GET_DISPLAYS_REQUEST_TYPE = "ohos.system_state.GetDisplaysRequest";
-const GET_DISPLAYS_RESPONSE_TYPE = "ohos.system_state.GetDisplaysResponse";
-const CHANGED_EVENT_TYPE = "ohos.system_state.ChangedEvent";
+const GET_THERMAL_LEVEL_REQUEST_TYPE = "ohos.system-state.GetThermalLevelRequest";
+const GET_THERMAL_LEVEL_RESPONSE_TYPE = "ohos.system-state.GetThermalLevelResponse";
+const GET_BUNDLE_CODE_DIR_REQUEST_TYPE = "ohos.system-state.GetBundleCodeDirRequest";
+const GET_BUNDLE_CODE_DIR_RESPONSE_TYPE = "ohos.system-state.GetBundleCodeDirResponse";
+const GET_AVAILABLE_AREA_REQUEST_TYPE = "ohos.system-state.GetAvailableAreaRequest";
+const GET_AVAILABLE_AREA_RESPONSE_TYPE = "ohos.system-state.GetAvailableAreaResponse";
+const GET_DISPLAYS_REQUEST_TYPE = "ohos.system-state.GetDisplaysRequest";
+const GET_DISPLAYS_RESPONSE_TYPE = "ohos.system-state.GetDisplaysResponse";
+const CHANGED_EVENT_TYPE = "ohos.system-state.ChangedEvent";
 
 class GetThermalLevelResponse {
   readonly level: number;
@@ -76,18 +77,22 @@ export class SystemStatePlugin extends AsyncPluginBase {
 
   private subscriber: commonEventManager.CommonEventSubscriber | null = null;
   private active = false;
-  private thermalCallback: (level: thermal.ThermalLevel) => void = () => {};
+  private unsubscribeThermal?: () => void;
   private currentDisplay: display.Display | null = null;
   private availableAreaCallback: (area: display.Rect) => void = () => {};
   private displayChangeCallback: (id: number) => void = () => {};
 
   onInstall(context: BridgePluginHookContext): void {
+    if (this.active) {
+      return;
+    }
     this.active = true;
-    this.thermalCallback = (level: thermal.ThermalLevel): void => {
-      this.emit(context, "thermal", level);
-    };
     try {
-      thermal.registerThermalLevelCallback(this.thermalCallback);
+      this.unsubscribeThermal = ThermalSubscriptions.subscribe(
+        (level: thermal.ThermalLevel): void => {
+          this.emit(context, "thermal", level);
+        },
+      );
     } catch (error) {
       console.warn(`[SystemState] thermal registration failed: ${String(error)}`);
     }
@@ -123,8 +128,9 @@ export class SystemStatePlugin extends AsyncPluginBase {
     };
     commonEventManager
       .createSubscriber(info)
-      .then((subscriber) => {
+      .then(async (subscriber): Promise<void> => {
         if (!this.active || !context.isActive()) {
+          await this.unsubscribeSubscriber(subscriber);
           return;
         }
         this.subscriber = subscriber;
@@ -152,12 +158,14 @@ export class SystemStatePlugin extends AsyncPluginBase {
       });
   }
 
-  onDispose(): void {
+  async onDispose(): Promise<void> {
     this.active = false;
     try {
-      thermal.unregisterThermalLevelCallback();
+      this.unsubscribeThermal?.();
     } catch (error) {
       console.warn(`[SystemState] thermal unregister failed: ${String(error)}`);
+    } finally {
+      this.unsubscribeThermal = undefined;
     }
     if (this.currentDisplay !== null) {
       try {
@@ -175,9 +183,28 @@ export class SystemStatePlugin extends AsyncPluginBase {
       console.warn(`[SystemState] display change unregister failed: ${String(error)}`);
     }
     if (this.subscriber !== null) {
-      commonEventManager.unsubscribe(this.subscriber);
+      const subscriber = this.subscriber;
       this.subscriber = null;
+      await this.unsubscribeSubscriber(subscriber);
     }
+  }
+
+  private unsubscribeSubscriber(
+    subscriber: commonEventManager.CommonEventSubscriber,
+  ): Promise<void> {
+    return new Promise<void>((resolve) => {
+      try {
+        commonEventManager.unsubscribe(subscriber, (error): void => {
+          if (error) {
+            console.warn(`[SystemState] common event unregister failed: ${String(error)}`);
+          }
+          resolve();
+        });
+      } catch (error) {
+        console.warn(`[SystemState] common event unregister failed: ${String(error)}`);
+        resolve();
+      }
+    });
   }
 
   async invokeAsync(
@@ -261,7 +288,7 @@ export class SystemStatePlugin extends AsyncPluginBase {
       return;
     }
     try {
-      context.invokeNativeSyncProcessWide("state-changed", CHANGED_EVENT_TYPE, "std.bool", {
+      context.invokeNativeSync("state-changed", CHANGED_EVENT_TYPE, "std.bool", {
         kind,
         thermalLevel,
         availableArea,

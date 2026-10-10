@@ -565,7 +565,15 @@ export class WindowPlugin extends AsyncPluginBase {
       for (const id of request.windowIds) {
         try {
           aliases.set(this.requireWindow(id, context).getWindowProperties().id, id);
-        } catch {}
+        } catch (error) {
+          hilog.warn(
+            DOMAIN,
+            TAG,
+            "get-window-stack skipped window %{public}d: %{public}s",
+            id,
+            String(error),
+          );
+        }
       }
       if (deviceInfo.sdkApiVersion < 14) {
         throw new Error("get-window-stack requires API 14 or later");
@@ -592,7 +600,7 @@ export class WindowPlugin extends AsyncPluginBase {
         throw new Error("Invalid prompt window");
       }
       const index = await this.prompts.show(
-        this.requireWindow(request.windowId, context).getUIContext(),
+        this.requireWindow(request.windowId, context),
         request,
         context,
       );
@@ -626,8 +634,13 @@ export class WindowPlugin extends AsyncPluginBase {
       try {
         created = await context.getWindowStage().createSubWindow(request.name.trim());
         this.assertCallActive(context);
-        await created.moveWindowTo(request.x, request.y);
         await created.resize(request.width, request.height);
+        const position = await WindowManager.getInstance().resolveWindowPosition(
+          created,
+          request.x,
+          request.y,
+        );
+        await created.moveWindowTo(position.x, position.y);
         created.setWindowDecorVisible(request.decorations);
         const backgroundColor = request.transparent
           ? "#00000000"
@@ -639,7 +652,10 @@ export class WindowPlugin extends AsyncPluginBase {
         // the transparent window (vibrancy/frosted glass effect invisible).
         if (request.transparent && deviceInfo.sdkApiVersion >= 20) {
           try {
-            created.setWindowContainerColor("#00000000", "#00000000");
+            created.setWindowContainerColor(
+              "#00000000",
+              WindowManager.getInstance().inactiveContainerColor(created, 0),
+            );
           } catch (containerErr) {
             const error = containerErr as BusinessError;
             if (error.code !== 801) {
@@ -651,7 +667,7 @@ export class WindowPlugin extends AsyncPluginBase {
         this.assertCallActive(context);
         // showWindow() can reset a newly created float window to the origin.
         // Apply the requested GPUI bounds after the window is visible.
-        await created.moveWindowTo(request.x, request.y);
+        await created.moveWindowTo(position.x, position.y);
         this.assertCallActive(context);
         const actualRect = created.getWindowProperties().windowRect;
         hilog.info(
@@ -717,7 +733,21 @@ export class WindowPlugin extends AsyncPluginBase {
         ) {
           // The main window has a separate container layer. A transparent content
           // background alone leaves that layer opaque and hides the blur beneath.
-          win.setWindowContainerColor(color, "#FFFFFFFF");
+          try {
+            win.setWindowContainerColor(
+              color,
+              WindowManager.getInstance().inactiveContainerColor(win, request.color),
+            );
+          } catch (containerError) {
+            if ((containerError as BusinessError).code !== 801) {
+              throw containerError as Error;
+            }
+            hilog.debug(
+              DOMAIN,
+              TAG,
+              "setWindowContainerColor unavailable; window background applied",
+            );
+          }
         }
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
       } catch (error) {
@@ -744,19 +774,24 @@ export class WindowPlugin extends AsyncPluginBase {
     if (action === "focus") {
       const request = parseWindowIdRequest(payload);
       const win = this.requireWindow(request.windowId, context);
+      const manager = WindowManager.getInstance();
       try {
-        if (WindowManager.getInstance().isUIAbilityMainWindow(request.windowId)) {
-          if (win.getWindowStatus() === window.WindowStatusType.MINIMIZE) {
-            await win.restore();
-          } else {
-            await win.showWindow();
-          }
+        if (manager.isUIAbilityMainWindow(request.windowId)) {
+          await manager.restoreWindow(request.windowId, {
+            window: win,
+            onlyIfMinimized: true,
+            focus: true,
+            beforeRun: (): void => this.assertCallActive(context),
+          });
         } else {
-          const dynamic: ESObject = this.dynamic(win);
-          if (typeof dynamic.raiseToAppTop !== "function") {
-            throw new Error("raiseToAppTop is unavailable on this API level");
-          }
-          await (dynamic.raiseToAppTop() as Promise<void>);
+          await manager.serializeOp(request.windowId, async (): Promise<void> => {
+            this.assertCallActive(context);
+            const dynamic: ESObject = this.dynamic(win);
+            if (typeof dynamic.raiseToAppTop !== "function") {
+              throw new Error("raiseToAppTop is unavailable on this API level");
+            }
+            await (dynamic.raiseToAppTop() as Promise<void>);
+          });
         }
         this.assertCallActive(context);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
@@ -1089,45 +1124,49 @@ export class WindowPlugin extends AsyncPluginBase {
 
     const win = this.requireWindow(request.windowId, context);
     try {
-      const dynamic: ESObject = this.dynamic(win);
-      if (action === "minimize") {
-        await (dynamic.minimize() as Promise<void>);
-      } else if (action === "maximize") {
-        // Use FOLLOW_APP_IMMERSIVE_SETTING (not the default ENTER_IMMERSIVE) to
-        // preserve the existing fullscreen layout mode. ENTER_IMMERSIVE causes a
-        // layout gap (white bar at bottom) after recover().
-        // Snapshot the floating rect first: WMS recover() re-anchors the floating
-        // position to the pointer (GetFullScreenToFloatingRect), so the paired
-        // recover below must moveTo() back — see WindowManager.preMaximizeRects.
-        // Cannot delegate to WindowManager.maximizeWindow (fire-and-forget) without
-        // losing this bridge's await-completion semantics (callers immediately
-        // query is-maximized afterwards).
-        WindowManager.getInstance().snapshotPreMaximizeRect(request.windowId, win);
-        await win.maximize(window.MaximizePresentation.FOLLOW_APP_IMMERSIVE_SETTING);
-      } else if (action === "restore") {
-        await (dynamic.restore() as Promise<void>);
-      } else if (action === "recover") {
-        await (dynamic.recover() as Promise<void>);
-        // Restore the pre-maximize position snapshotted above (WMS recover()
-        // pointer-anchors the floating rect). Best-effort — recover already
-        // succeeded.
-        await WindowManager.getInstance().restorePreMaximizeRect(request.windowId, win);
-        // NOTE: Do NOT call showWindow() after recover() — recover() already makes
-        // the window visible, and showWindow() resets the window position to centered
-        // state, causing the window to jump to the center of the screen.
-      } else if (action === "show") {
-        // A minimized UIAbility main window requires restore(); showWindow()
-        // does not leave MINIMIZE. Await the actual OS operation so callers
-        // observe failures and do not report a restored window prematurely.
-        if (WindowManager.getInstance().isUIAbilityMainWindow(request.windowId)) {
-          if (win.getWindowStatus() === window.WindowStatusType.MINIMIZE) {
-            await win.restore();
+      const manager = WindowManager.getInstance();
+      if (
+        action === "restore" ||
+        (action === "show" && manager.isUIAbilityMainWindow(request.windowId))
+      ) {
+        await manager.restoreWindow(request.windowId, {
+          window: win,
+          onlyIfMinimized: action === "show",
+          beforeRun: (): void => this.assertCallActive(context),
+        });
+      } else {
+        await manager.serializeOp(request.windowId, async (): Promise<void> => {
+          this.assertCallActive(context);
+          const dynamic: ESObject = this.dynamic(win);
+          if (action === "minimize") {
+            await (dynamic.minimize() as Promise<void>);
+          } else if (action === "maximize") {
+            // Use FOLLOW_APP_IMMERSIVE_SETTING (not the default ENTER_IMMERSIVE) to
+            // preserve the existing fullscreen layout mode. ENTER_IMMERSIVE causes a
+            // layout gap (white bar at bottom) after recover().
+            // Snapshot the floating rect first: WMS recover() re-anchors the floating
+            // position to the pointer (GetFullScreenToFloatingRect), so the paired
+            // recover below must moveTo() back — see WindowManager.preMaximizeRects.
+            // Cannot delegate to WindowManager.maximizeWindow (fire-and-forget) without
+            // losing this bridge's await-completion semantics (callers immediately
+            // query is-maximized afterwards).
+            manager.snapshotPreMaximizeRect(request.windowId, win);
+            await win.maximize(window.MaximizePresentation.FOLLOW_APP_IMMERSIVE_SETTING);
+          } else if (action === "recover") {
+            await (dynamic.recover() as Promise<void>);
+            // Restore the pre-maximize position snapshotted above (WMS recover()
+            // pointer-anchors the floating rect). Best-effort — recover already
+            // succeeded.
+            await manager.restorePreMaximizeRect(request.windowId, win);
+            // NOTE: Do NOT call showWindow() after recover() — recover() already makes
+            // the window visible, and showWindow() resets the window position to centered
+            // state, causing the window to jump to the center of the screen.
+          } else if (action === "show") {
+            const previousRect = win.getWindowProperties().windowRect;
+            await win.showWindow();
+            await win.moveWindowTo(previousRect.left, previousRect.top);
           }
-        } else {
-          const previousRect = win.getWindowProperties().windowRect;
-          await win.showWindow();
-          await win.moveWindowTo(previousRect.left, previousRect.top);
-        }
+        });
       }
       this.assertCallActive(context);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };

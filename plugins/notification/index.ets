@@ -1,1 +1,1 @@
-export { NotificationPlugin } from "./src/main/ets/NotificationPlugin";
+export { NotificationPlugin, NotificationPluginOptions } from "./src/main/ets/NotificationPlugin";

@@ -7,7 +7,9 @@ use openharmony_ability::{impl_bridge_napi_type, BridgeCallOptions};
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct WindowPromptAnchor {
+    /// Horizontal position in the target window's content, in logical vp units.
     pub x: f64,
+    /// Vertical position in the target window's content, in logical vp units.
     pub y: f64,
 }
 impl_bridge_napi_type!(WindowPromptAnchor, "ohos.window.PromptAnchor");
@@ -22,7 +24,7 @@ pub struct WindowPromptRequest {
     pub level: u32,
     pub buttons: Vec<String>,
     pub cancel_index: Option<u32>,
-    /// Optional content-local logical position for an anchored window menu.
+    /// Optional content-local position in logical vp units, not physical px or screen coordinates.
     pub anchor: Option<WindowPromptAnchor>,
 }
 impl_bridge_napi_type!(WindowPromptRequest, "ohos.window.PromptRequest");
@@ -64,7 +66,7 @@ impl WindowClient {
             .call_async::<WindowBridgePlugin, WindowPromptRequest, WindowPromptResponse>(
                 "show-prompt",
                 request,
-                BridgeCallOptions::default().with_timeout_ms(600_000),
+                BridgeCallOptions::default().with_timeout_ms(300_000),
             )
             .await?;
         if response.index as usize >= count {

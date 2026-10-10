@@ -1,7 +1,7 @@
 //! Typed system notification bridge for OpenHarmony consumers.
 
 use napi_derive_ohos::napi;
-use napi_ohos::Result;
+use napi_ohos::{Error, Result};
 use openharmony_ability::{
     impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgeContextRequirement, BridgePlugin,
     BridgeRuntime, OpenHarmonyApp,
@@ -34,6 +34,29 @@ pub struct ShowNotificationRequest {
 }
 
 impl_bridge_napi_type!(ShowNotificationRequest, "ohos.notification.ShowRequest");
+
+impl ShowNotificationRequest {
+    fn validate(&self) -> Result<()> {
+        if self.actions.len() > 3 {
+            return Err(Error::from_reason(
+                "Notification supports at most 3 actions",
+            ));
+        }
+        if self.tag.trim().is_empty()
+            || self.title.trim().is_empty()
+            || self.body.trim().is_empty()
+            || self
+                .actions
+                .iter()
+                .any(|action| action.id.trim().is_empty() || action.label.trim().is_empty())
+        {
+            return Err(Error::from_reason(
+                "Invalid notification tag, title, body or action",
+            ));
+        }
+        Ok(())
+    }
+}
 
 #[napi(object)]
 #[derive(Clone, Debug)]
@@ -70,6 +93,7 @@ impl NotificationClient {
     }
 
     pub async fn show(&self, request: ShowNotificationRequest) -> Result<bool> {
+        request.validate()?;
         let response = self
             .bridge
             .call_async::<NotificationBridgePlugin, ShowNotificationRequest, NotificationAcknowledgement>(
@@ -117,5 +141,28 @@ mod tests {
             NotificationAcknowledgement::TYPE_NAME,
             "ohos.notification.Acknowledgement"
         );
+    }
+
+    #[test]
+    fn notification_rejects_excess_actions() {
+        let mut request = ShowNotificationRequest {
+            tag: "tag".into(),
+            title: "title".into(),
+            body: "body".into(),
+            actions: vec![],
+        };
+        assert!(request.validate().is_ok());
+        request.actions = (0..3)
+            .map(|id| super::NotificationAction {
+                id: id.to_string(),
+                label: "Action".into(),
+            })
+            .collect();
+        assert!(request.validate().is_ok());
+        request.actions.push(super::NotificationAction {
+            id: "four".into(),
+            label: "Fourth".into(),
+        });
+        assert!(request.validate().is_err());
     }
 }

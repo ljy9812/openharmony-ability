@@ -213,14 +213,14 @@ export class UrlPlugin extends AsyncPluginBase {
       }
       const abilityName = context.abilityContext.abilityInfo.name;
       const scheme = request.scheme.toLowerCase();
-      const declared = bundle.hapModulesInfo.some((module) =>
-        module.abilitiesInfo.some(
+      const declared = (bundle.hapModulesInfo ?? []).some((module) =>
+        (module.abilitiesInfo ?? []).some(
           (ability) =>
             ability.name === abilityName &&
-            ability.skills.some(
+            (ability.skills ?? []).some(
               (skill) =>
-                skill.actions.includes("ohos.want.action.viewData") &&
-                skill.uris.some((uri) => uri.scheme.toLowerCase() === scheme),
+                (skill.actions ?? []).includes("ohos.want.action.viewData") &&
+                (skill.uris ?? []).some((uri) => (uri.scheme ?? "").toLowerCase() === scheme),
             ),
         ),
       );

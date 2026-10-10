@@ -49,7 +49,7 @@ pub struct SystemStateChangedEvent {
     pub displays: Option<Vec<DisplaySnapshot>>,
 }
 
-impl_bridge_napi_type!(SystemStateChangedEvent, "ohos.system_state.ChangedEvent");
+impl_bridge_napi_type!(SystemStateChangedEvent, "ohos.system-state.ChangedEvent");
 
 #[napi(object)]
 #[derive(Clone, Debug)]
@@ -77,7 +77,7 @@ pub struct GetThermalLevelRequest {}
 
 impl_bridge_napi_type!(
     GetThermalLevelRequest,
-    "ohos.system_state.GetThermalLevelRequest"
+    "ohos.system-state.GetThermalLevelRequest"
 );
 
 #[napi(object)]
@@ -88,7 +88,7 @@ pub struct GetThermalLevelResponse {
 
 impl_bridge_napi_type!(
     GetThermalLevelResponse,
-    "ohos.system_state.GetThermalLevelResponse"
+    "ohos.system-state.GetThermalLevelResponse"
 );
 
 #[napi(object)]
@@ -97,7 +97,7 @@ pub struct GetBundleCodeDirRequest {}
 
 impl_bridge_napi_type!(
     GetBundleCodeDirRequest,
-    "ohos.system_state.GetBundleCodeDirRequest"
+    "ohos.system-state.GetBundleCodeDirRequest"
 );
 
 #[napi(object)]
@@ -108,7 +108,7 @@ pub struct GetBundleCodeDirResponse {
 
 impl_bridge_napi_type!(
     GetBundleCodeDirResponse,
-    "ohos.system_state.GetBundleCodeDirResponse"
+    "ohos.system-state.GetBundleCodeDirResponse"
 );
 
 #[napi(object)]
@@ -117,7 +117,7 @@ pub struct GetAvailableAreaRequest {}
 
 impl_bridge_napi_type!(
     GetAvailableAreaRequest,
-    "ohos.system_state.GetAvailableAreaRequest"
+    "ohos.system-state.GetAvailableAreaRequest"
 );
 
 #[napi(object)]
@@ -128,14 +128,14 @@ pub struct GetAvailableAreaResponse {
 
 impl_bridge_napi_type!(
     GetAvailableAreaResponse,
-    "ohos.system_state.GetAvailableAreaResponse"
+    "ohos.system-state.GetAvailableAreaResponse"
 );
 
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
 pub struct GetDisplaysRequest {}
 
-impl_bridge_napi_type!(GetDisplaysRequest, "ohos.system_state.GetDisplaysRequest");
+impl_bridge_napi_type!(GetDisplaysRequest, "ohos.system-state.GetDisplaysRequest");
 
 #[napi(object)]
 #[derive(Clone, Debug)]
@@ -143,7 +143,7 @@ pub struct GetDisplaysResponse {
     pub displays: Vec<DisplaySnapshot>,
 }
 
-impl_bridge_napi_type!(GetDisplaysResponse, "ohos.system_state.GetDisplaysResponse");
+impl_bridge_napi_type!(GetDisplaysResponse, "ohos.system-state.GetDisplaysResponse");
 
 static SYSTEM_STATE_EVENT_SENDER: OnceLock<Sender<SystemStateChangedEvent>> = OnceLock::new();
 
@@ -230,39 +230,39 @@ mod tests {
         );
         assert_eq!(
             SystemStateChangedEvent::TYPE_NAME,
-            "ohos.system_state.ChangedEvent"
+            "ohos.system-state.ChangedEvent"
         );
         assert_eq!(
             GetThermalLevelRequest::TYPE_NAME,
-            "ohos.system_state.GetThermalLevelRequest"
+            "ohos.system-state.GetThermalLevelRequest"
         );
         assert_eq!(
             GetThermalLevelResponse::TYPE_NAME,
-            "ohos.system_state.GetThermalLevelResponse"
+            "ohos.system-state.GetThermalLevelResponse"
         );
         assert_eq!(
             GetBundleCodeDirRequest::TYPE_NAME,
-            "ohos.system_state.GetBundleCodeDirRequest"
+            "ohos.system-state.GetBundleCodeDirRequest"
         );
         assert_eq!(
             GetBundleCodeDirResponse::TYPE_NAME,
-            "ohos.system_state.GetBundleCodeDirResponse"
+            "ohos.system-state.GetBundleCodeDirResponse"
         );
         assert_eq!(
             GetAvailableAreaRequest::TYPE_NAME,
-            "ohos.system_state.GetAvailableAreaRequest"
+            "ohos.system-state.GetAvailableAreaRequest"
         );
         assert_eq!(
             GetAvailableAreaResponse::TYPE_NAME,
-            "ohos.system_state.GetAvailableAreaResponse"
+            "ohos.system-state.GetAvailableAreaResponse"
         );
         assert_eq!(
             GetDisplaysRequest::TYPE_NAME,
-            "ohos.system_state.GetDisplaysRequest"
+            "ohos.system-state.GetDisplaysRequest"
         );
         assert_eq!(
             GetDisplaysResponse::TYPE_NAME,
-            "ohos.system_state.GetDisplaysResponse"
+            "ohos.system-state.GetDisplaysResponse"
         );
     }
 }
