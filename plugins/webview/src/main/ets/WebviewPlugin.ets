@@ -1,4 +1,4 @@
-import { WebHeader } from "@kit.ArkUI";
+import { WebHeader, AttributeUpdater } from "@kit.ArkUI";
 import { BuilderNode } from "@ohos.arkui.node";
 import webview from "@ohos.web.webview";
 import { image } from "@kit.ImageKit";
@@ -223,11 +223,54 @@ interface ManagedWebview extends WebviewCreatePayload {
   /** Trailing debounce timer for onAreaChange → resize dispatch. Prevents flooding
    *  ArkWeb with rapid JS dispatches during drag-resize. */
   resizeDebounceTimer: number;
+  /**
+   * Frozen at create (decision D2): true when the create request carried no
+   * explicit style.width AND no style.height — the webview follows its parent
+   * container (100% natural layout) until the first runtime set_bounds flips
+   * it to explicit sizing. Diagnostic anchor only: setBounds applies the full
+   * geometry regardless of this flag.
+   */
+  naturalLayout: boolean;
+  /** Runtime geometry refresher bound to the outer Stack wrapper (D1). */
+  geometryModifier: WebviewGeometryModifier;
 }
 
 interface ControllerWaiter {
   resolve: () => void;
   reject: (reason: Error) => void;
+}
+
+/**
+ * Runtime geometry refresher for a webview's outer Stack wrapper
+ * (openspec ohos-webview-sizing, decision D1).
+ *
+ * BuilderNode.update re-runs the builder but does not refresh chained component
+ * attributes (ohos-constraints §4.1 — the vibrancy backdropBlur counterexample),
+ * so the set-bounds bridge action drives the wrapper geometry through this
+ * AttributeUpdater: `attribute?.position/width/height` writes go straight to the
+ * native attribute instead of waiting for a builder re-run. `initializeModifier`
+ * stays empty on purpose — the build-time chained attributes (style-driven,
+ * see BuildWebview) must keep their values (p1-window-vibrancy BlurModifier
+ * precedent).
+ */
+class WebviewGeometryModifier extends AttributeUpdater<CommonAttribute> {
+  initializeModifier(_instance: CommonAttribute): void {}
+
+  /**
+   * Applies a full geometry (position + size) to the mounted Stack wrapper.
+   * Values arrive from the set-bounds bridge action as vp numbers — the unit
+   * contract is vp end to end (wry bounds() unit doc, which carries its own
+   * DPI≠1 caveat: physical px equal vp only at density 1, and device-measured
+   * window scale factors can differ — ohos-webview-sizing green calibration 2).
+   * No-op until the modifier is attached to a built component (the `attribute`
+   * proxy appears on attach); the style fields the builder reads are written
+   * alongside, so a later builder re-run converges to the same geometry.
+   */
+  applyGeometry(x: number, y: number, width: number, height: number): void {
+    this.attribute?.position({ x: x, y: y });
+    this.attribute?.width(width);
+    this.attribute?.height(height);
+  }
 }
 
 class WebviewEntry {
@@ -874,6 +917,14 @@ function styleLength(
   return value;
 }
 
+/**
+ * Normalizes the create-request style (openspec ohos-webview-sizing). The
+ * width/height fields are real geometry: when present they drive the wrapper
+ * Stack's rendered size (BuildWebview D1 migration); when BOTH are absent the
+ * webview is natural layout and fills its container — create() freezes that
+ * decision in `naturalLayout`. All fields feed the build-time chained
+ * attributes; runtime geometry refreshes go through WebviewGeometryModifier.
+ */
 function normalizeStyle(
   style: WebviewStyle | null | undefined,
   transparent: boolean | null | undefined,
@@ -1337,9 +1388,13 @@ function BuildWebview(data: ManagedWebview) {
         controller: data.controller as webview.WebviewController,
         renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
       })
+        // Always "100%": the Web fills its wrapper Stack, and the ArkWeb viewport
+        // tracks the wrapper size through container layout — the same mechanism
+        // natural layout uses on window resize (fixed px directly on the Web
+        // component historically broke that tracking: bottom cutoff). The wrapper
+        // Stack below carries the requested geometry (decision D1).
         .width("100%")
         .height("100%")
-        .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
         // Explicit background color (create-time style or runtime set-background-color)
         // takes precedence; transparent webviews fall back to Color.Transparent so
         // vibrancy/blur stays visible. The old form (transparent ? Color.Transparent
@@ -1425,8 +1480,16 @@ function BuildWebview(data: ManagedWebview) {
           dispatchWebviewDragLeave(data, dragEvent);
         })
     }
-    .width("100%")
-    .height("100%")
+    // Geometry carrier (decision D1): the outer Stack takes the requested bounds
+    // so hit-testing and drag coverage == the web area. Explicit bounds render at
+    // the requested size; a natural-layout webview (no explicit width/height at
+    // create, D2) keeps "100%" and follows its container. Runtime set_bounds
+    // refreshes through the modifier — BuilderNode.update re-runs the builder but
+    // does not refresh chained attributes (ohos-constraints §4.1).
+    .width(data.style.width ?? "100%")
+    .height(data.style.height ?? "100%")
+    .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
+    .attributeModifier(data.geometryModifier)
     // Mouse-driven focus gate (issue Eulogizethesun/tauri#109): the Web's own
     // onMouse never fires (ArkWeb consumes mouse events at the component level),
     // but they bubble to ancestors — this Stack wraps only the web area, so its
@@ -1446,9 +1509,9 @@ function BuildWebview(data: ManagedWebview) {
     });
   } else {
     // Direct mode: drag events bound directly on the Web component.
-    // The Stack wrapper is layout-neutral (100%×100% of the mount slot, Web
-    // keeps its own width/height/position inside it) and exists for the
-    // mouse-driven focus gate (issue Eulogizethesun/tauri#109): the Web's own
+    // The outer Stack wrapper carries the webview geometry (decision D1: it takes
+    // the requested bounds below, so its coverage IS the web area) and exists for
+    // the mouse-driven focus gate (issue Eulogizethesun/tauri#109): the Web's own
     // onMouse never fires (ArkWeb's pattern consumes mouse events at the
     // component level), but they DO bubble to ancestors (MainPage.onMouse
     // relies on the same behavior), so the wrapper sees presses over the web
@@ -1459,13 +1522,13 @@ function BuildWebview(data: ManagedWebview) {
         controller: data.controller as webview.WebviewController,
         renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
       })
-        // Always "100%": natural ArkUI layout so the Web follows its parent container on
-        // window resize. set_bounds (BuilderNode.update) re-runs this builder but only
-        // .position() below consumes style.{x,y} — sizing via fixed px here would pin the
-        // Web component and break ArkWeb viewport tracking on resize (bottom cutoff).
+        // Always "100%": the Web fills its wrapper Stack, and the ArkWeb viewport
+        // tracks the wrapper size through container layout — the same mechanism
+        // natural layout uses on window resize (fixed px directly on the Web
+        // component historically broke that tracking: bottom cutoff). The wrapper
+        // Stack below carries the requested geometry (decision D1).
         .width("100%")
         .height("100%")
-        .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
         // Explicit background color takes precedence over the transparent fallback —
         // same precedence flip as the overlay branch above (runtime set_background_color
         // must stay visible on transparent windows). Unset + transparent →
@@ -1546,8 +1609,17 @@ function BuildWebview(data: ManagedWebview) {
           handleWebviewWindowNew(data, e);
         })
     }
-    .width("100%")
-    .height("100%")
+    // Geometry carrier (same as the overlay branch, decision D1): the wrapper
+    // takes the requested bounds — explicit bounds render at the requested size,
+    // a natural-layout webview (D2) keeps "100%" and follows its container — and
+    // the mouse focus gate below covers exactly that area (presses over the web
+    // hit-test inside this Stack; menubar presses hit-test outside). Runtime
+    // set_bounds refreshes through the modifier (BuilderNode.update does not
+    // refresh chained attributes).
+    .width(data.style.width ?? "100%")
+    .height(data.style.height ?? "100%")
+    .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
+    .attributeModifier(data.geometryModifier)
     .onMouse((event: MouseEvent) => {
       if (event.action === MouseAction.Press && event.button === MouseButton.Left) {
         hilog.info(
@@ -1851,6 +1923,12 @@ class WebviewSurface {
     this.assertCallActive(callContext);
     this.remove(payload.id);
     const style = normalizeStyle(payload.style, payload.transparent);
+    // Freeze the layout mode at create time (decision D2): no explicit width AND
+    // height in the create request → natural layout (the wrapper Stack renders
+    // "100%" and follows its container); any explicit dimension renders as
+    // requested. The first runtime set_bounds flips a natural webview to
+    // explicit sizing regardless of this flag (setBounds is full-geometry).
+    const naturalLayout = style.width === undefined && style.height === undefined;
     // Read pending blur radius from WindowManager (set by window set-blur command).
     // Injected at build time here; runtime refresh goes through blurRefreshCallbacks.
     const windowId = payload.windowId ?? 0;
@@ -1975,6 +2053,8 @@ class WebviewSurface {
       eventOptions,
       controller: new webview.WebviewController(nativeTag) as WebviewController,
       style,
+      naturalLayout,
+      geometryModifier: new WebviewGeometryModifier(),
       didInitialLoad: false,
       beginControllerAttach: (): boolean => false,
       notifyNativeControllerAttached: (): void => {},
@@ -2130,10 +2210,11 @@ class WebviewSurface {
     hilog.info(
       0x1999,
       "WebviewSurface",
-      "create: id=%{public}s windowId=%{public}d isSubWindow=%{public}s",
+      "create: id=%{public}s windowId=%{public}d isSubWindow=%{public}s naturalLayout=%{public}s",
       payload.id,
       windowId,
       isSubWindow ? "true" : "false",
+      String(naturalLayout),
     );
     const wm = isSubWindow ? WindowManager.getInstance() : null;
 
@@ -2692,12 +2773,32 @@ class WebviewSurface {
     if (!entry) {
       return false;
     }
-    // Only x/y drive the Web component's .position(); width/height are intentionally
-    // ignored — the Web uses "100%" so it follows its parent container on resize.
-    // Storing them as fixed px would pin the Web and break ArkWeb viewport tracking.
+    // Full-geometry semantics (decision D2, ohos-webview-sizing): width/height
+    // are applied just like x/y — the previous behavior intentionally ignored
+    // them, which inflated every child webview to the full container. A
+    // natural-layout webview (created without explicit style.width/height)
+    // flips to explicit sizing on this first set_bounds and stops following its
+    // parent container on window resize — matching the desktop "set_bounds
+    // breaks auto-dock" semantics.
     entry.data.style.x = x;
     entry.data.style.y = y;
+    entry.data.style.width = width;
+    entry.data.style.height = height;
+    // The modifier is the actual refresh driver (BuilderNode.update does not
+    // refresh chained attributes, ohos-constraints §4.1); node.update stays for
+    // the non-geometry attributes the builder re-run owns (visibility, colors).
     entry.node.update(entry.data);
+    entry.data.geometryModifier.applyGeometry(x, y, width, height);
+    hilog.info(
+      0x1999,
+      "WebviewSurface",
+      "setBounds: id=%{public}s x=%{public}d y=%{public}d w=%{public}d h=%{public}d (full geometry, D2)",
+      id,
+      x,
+      y,
+      width,
+      height,
+    );
     return true;
   }
 
