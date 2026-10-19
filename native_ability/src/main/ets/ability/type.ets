@@ -211,7 +211,9 @@ export interface Module {
   setDisplayLayout?: (layoutJson: string) => void;
   /** `read_continue_snapshot` — onContinue source-side snapshot read. */
   readContinueSnapshot?: () => string;
-  /** `update_cursor_position` — MainPage onMouse cursor tracking. */
+  /** `update_cursor_position` — onMouse cursor tracking (MainPage AND
+   *  FloatPage, fed via helper/cursor_feed.ets — ohos-cursor-passthrough D2;
+   *  the values are screen-global vp since the same change). */
   updateCursorPosition?: (x: number, y: number) => void;
   /** `notify_key_event` — MainPage onKeyPreIme Rust key forward (issue #109).
    *  action: 0 = Down, 1 = Up. */

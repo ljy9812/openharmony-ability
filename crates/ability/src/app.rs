@@ -944,16 +944,41 @@ impl OpenHarmonyApp {
             .set_window_rects(window_id, outer, drawable);
     }
 
-    /// Last known cursor position in physical px (vp stored by the ArkTS
-    /// `MainPage.onMouse` handler × current scale). Issue #87 major-10: the
-    /// f64-bit-packed `CURSOR_POSITION_X/Y` statics are an implementation
-    /// detail — consumers read them through this method instead of unpacking
-    /// the bits by hand.
-    pub fn cursor_position(&self) -> (f64, f64) {
-        let scale = self.scale() as f64;
-        (
-            f64::from_bits(CURSOR_POSITION_X.load(std::sync::atomic::Ordering::Relaxed)) * scale,
-            f64::from_bits(CURSOR_POSITION_Y.load(std::sync::atomic::Ordering::Relaxed)) * scale,
+    /// Last known cursor position in physical px (screen-global vp fed by the
+    /// ArkTS `onMouse` handlers × current scale — ohos-cursor-passthrough D1).
+    /// Issue #87 major-10: the f64-bit-packed `CURSOR_POSITION_X/Y` statics are
+    /// an implementation detail — consumers read them through this method
+    /// instead of unpacking the bits by hand.
+    ///
+    /// Untracked fail-safe contract (ohos-cursor-passthrough D3, spec「冷启动
+    /// 未喂入 → reject」): when NO feed was ever recorded the read is the typed
+    /// [`CursorUntracked`] error — NOT the (0,0) zero-init sentinel, which is
+    /// indistinguishable from a real screen-origin feed and would let a
+    /// hit-test "succeed" on garbage. `Ok` therefore always equals a real fed
+    /// screen-global coordinate. tao maps the error to
+    /// `ExternalError::NotSupported`; runtime-wry turns that into
+    /// `FailedToGetCursorPosition`, so the tauri command — and the JS
+    /// `cursorPosition()` promise — reject.
+    pub fn cursor_position(&self) -> std::result::Result<(f64, f64), CursorUntracked> {
+        // Memory-order discipline (task 2.1, mandatory): the Acquire load of
+        // EVER_FED must precede the X/Y loads. Paired with the feed-side
+        // ordering (X.store(Relaxed) → Y.store(Relaxed) → EVER_FED
+        // .store(true, Release)) this guarantees: observing ever_fed=true
+        // makes that feed's (and any earlier feed's) X/Y values visible to
+        // this reader. Without it a concurrent first feed could yield
+        // ever_fed=true with stale (0,0) X/Y — returning the very sentinel
+        // `Ok((0,0))` this contract removes.
+        let ever_fed = EVER_FED.load(std::sync::atomic::Ordering::Acquire);
+        // Explicit `std::result::Result` (same pattern as `set_cursor_grab`):
+        // the napi `Result` alias in scope would wrap the error in
+        // `napi::Error<CursorUntracked>` and demand an `AsRef<str>` bound —
+        // this error stays a typed value for tao to map, it never crosses
+        // the NAPI boundary itself.
+        cursor_position_with(
+            ever_fed,
+            f64::from_bits(CURSOR_POSITION_X.load(std::sync::atomic::Ordering::Relaxed)),
+            f64::from_bits(CURSOR_POSITION_Y.load(std::sync::atomic::Ordering::Relaxed)),
+            self.scale(),
         )
     }
 
@@ -1251,28 +1276,79 @@ pub fn drain_pending_window_closes() -> Vec<i32> {
         .unwrap_or_default()
 }
 
-/// ─── Cursor position tracking ─────────────────────────────────────────────
-/// ArkTS `MainPage.onMouse` calls `update_cursor_position` via NAPI because the
-/// NDK `DispatchMouseEvent` path does not fire while the cursor is over the
-/// WebView (which covers the window). tao's `cursor_position()` reads these
-/// atomics. Dropped during the pluginize refactor (restored from 5941dfb).
+// ─── Cursor position tracking ─────────────────────────────────────────────
+// ArkTS `onMouse` handlers (MainPage AND FloatPage — ohos-cursor-passthrough
+// D2) call `update_cursor_position` via NAPI because the NDK
+// `DispatchMouseEvent` path does not fire while the cursor is over the
+// WebView (which covers the window). tao's `cursor_position()` reads these
+// atomics. Dropped during the pluginize refactor (restored from 5941dfb).
 
-/// Last known cursor X position, in vp relative to the MainPage component
-/// (f64 stored as u64 bits). Read through [`OpenHarmonyApp::cursor_position`].
+/// Last known cursor X position, in **screen-global vp** (f64 stored as u64
+/// bits; ohos-cursor-passthrough D1 — the fed value is the ArkUI event's
+/// `displayX`/`globalDisplayX`, i.e. device-screen-frame, NOT
+/// component-relative). Read through [`OpenHarmonyApp::cursor_position`].
 pub(crate) static CURSOR_POSITION_X: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
-/// Last known cursor Y position, in vp relative to the MainPage component
-/// (f64 stored as u64 bits). Read through [`OpenHarmonyApp::cursor_position`].
+/// Last known cursor Y position, in **screen-global vp** (f64 stored as u64
+/// bits). Read through [`OpenHarmonyApp::cursor_position`].
 pub(crate) static CURSOR_POSITION_Y: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
-/// NAPI function called from the ArkTS `onMouse` handler (Move/Press) to
-/// update the tracked cursor position. Coordinates are MainPage-relative vp.
+/// Whether ANY feed was ever recorded (ohos-cursor-passthrough D3). The
+/// (0,0) zero-init of the X/Y statics is indistinguishable from a real
+/// screen-origin feed, so "untracked" is carried by this flag instead: until
+/// it is set, `cursor_position` fails with [`CursorUntracked`].
+pub(crate) static EVER_FED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// NAPI function called from the ArkTS `onMouse` handlers (Move/Press) to
+/// update the tracked cursor position. Coordinates are **screen-global vp**
+/// (the event's `displayX`/`globalDisplayX` — ohos-cursor-passthrough D1;
+/// the NAPI signature is unchanged, only the value semantics were upgraded
+/// from MainPage-component-relative to screen-global).
+///
+/// Memory-order discipline (task 2.1, mandatory): X → Y → EVER_FED(Release).
+/// The Release store is placed AFTER the X/Y stores so a reader that
+/// observes `ever_fed=true` (Acquire) also sees this feed's X/Y values —
+/// without the ordering, a concurrent first feed could produce
+/// `Ok((0,0))`, the exact sentinel the untracked contract removes. The X/Y
+/// pair itself can still tear under concurrent feeds (new X with old Y);
+/// that is a pre-existing property of the two-statics layout, the hit-test
+/// tolerance absorbs it, and collapsing into a single packed atomic is the
+/// documented alternative (not taken here).
 #[napi]
 pub fn update_cursor_position(x: f64, y: f64) {
     CURSOR_POSITION_X.store(x.to_bits(), std::sync::atomic::Ordering::Relaxed);
     CURSOR_POSITION_Y.store(y.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    EVER_FED.store(true, std::sync::atomic::Ordering::Release);
+}
+
+/// Typed "no feed ever recorded" error for [`OpenHarmonyApp::cursor_position`]
+/// (ohos-cursor-passthrough D3). Unit-like by design: it carries no payload —
+/// the only fact it encodes is "untracked" — and tao maps it 1:1 onto
+/// `ExternalError::NotSupported` (the §1.5 error-conversion constraint: one
+/// variant, no wrapping).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CursorUntracked;
+
+/// Pure cursor read-out (ohos-cursor-passthrough 2.1): tracked feed →
+/// screen-global vp × scale = global physical px (the tao upstream semantic,
+/// Windows `GetCursorPos`); never-fed → typed [`CursorUntracked`] error.
+/// Split from [`OpenHarmonyApp::cursor_position`] so both branches are UT-able
+/// without touching the process statics (device UT constraint: OHOS UTs can
+/// only exercise pure functions).
+pub fn cursor_position_with(
+    ever_fed: bool,
+    x_vp: f64,
+    y_vp: f64,
+    scale: f32,
+) -> std::result::Result<(f64, f64), CursorUntracked> {
+    if !ever_fed {
+        return Err(CursorUntracked);
+    }
+    let s = scale as f64;
+    Ok((x_vp * s, y_vp * s))
 }
 
 /// Global queue for pending window status changes from ArkTS
@@ -1728,8 +1804,8 @@ mod want_parameters_tests {
 mod tests {
     use super::OpenHarmonyAppInner;
     use crate::{
-        update_cursor_position, AvoidArea, AvoidAreaType, Rect, CURSOR_POSITION_X,
-        CURSOR_POSITION_Y,
+        cursor_position_with, update_cursor_position, AvoidArea, AvoidAreaType, CursorUntracked,
+        Rect, CURSOR_POSITION_X, CURSOR_POSITION_Y,
     };
 
     #[test]
