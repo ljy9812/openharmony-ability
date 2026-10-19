@@ -40,26 +40,13 @@ const CURSOR_FEED_TAG = "cursor_feed";
 /**
  * Feeds the process cursor snapshot from one ArkUI mouse event (best-effort).
  *
- * Guards, in order:
- * 1. module guard — `typeof module?.updateCursorPosition === "function"`
- *    (optional NAPI export; pre-pluginize legacy modules lack it);
- * 2. coordinate guard — both coordinates must be finite numbers
- *    (`Number.isFinite`, NOT `typeof === "number"`: typeof lets NaN through,
- *    and a NaN feed would bit-pack into the snapshot and poison every later
- *    hit-test until the next valid feed). `displayX/displayY` are
- *    declared-required and NaN/undefined is unreachable per D2 — the guard
- *    is defense-in-depth, verified implementation-time (synthetic non-finite
- *    event straight into this helper → skip + no feed trace), not on device;
- * 3. version guard — API ≥ 20 with a finite `globalDisplayX` feeds the
- *    multi-monitor-aware global-display frame; otherwise `displayX`
- *    (single display = global). The adopted field is named in the trace
- *    (seg 5 assertion: API 23 device → `globalDisplayX`).
- *
- * On any guard miss the snapshot is left untouched (spec「非数值字段不覆盖
- * 快照」) and a `cursor_feed_skip`-tagged debug line explains why — skip
- * lines never carry the `cursor_feed` tag so "no feed trace" stays literal
- * for the tag-greps. Errors from the NAPI call are swallowed (cursor
- * tracking is best-effort, mirroring the MainPage status quo ante).
+ * On any guard miss the snapshot is left untouched (non-finite fields never
+ * overwrite the snapshot) and a `cursor_feed_skip`-tagged debug line explains
+ * why — skip lines never carry the `cursor_feed` tag so "no feed trace" stays
+ * literal for the trace-greps (anchor them on `/cursor_feed:`, NOT the bare
+ * `cursor_feed` substring, which also matches `cursor_feed_skip`).
+ * Errors from the NAPI call are swallowed (cursor tracking is best-effort,
+ * mirroring the MainPage status quo ante).
  */
 export function feedCursorFromMouse(
   module: Module | null | undefined,
@@ -74,11 +61,12 @@ export function feedCursorFromMouse(
       );
       return;
     }
-    // Version guard (D1 multi-display reserve): globalDisplayX only exists
-    // (and only means "global display") since API 20. Design-exact condition
-    // guards X; the generic finite guard below still validates the adopted
-    // pair, so a half-present globalDisplayY (unreachable per D2) skips the
-    // feed instead of feeding a mixed pair.
+    // Guard 2 — version-select (D1 multi-display reserve): globalDisplayX
+    // only exists (and only means "global display") since API 20.
+    // Design-exact condition guards X; the generic finite validation in
+    // guard 3 still validates the adopted pair, so a half-present
+    // globalDisplayY (unreachable per D2) skips the feed instead of feeding
+    // a mixed pair.
     let gx: number;
     let gy: number;
     let adoptedField: string;
@@ -94,16 +82,26 @@ export function feedCursorFromMouse(
       gy = event.displayY;
       adoptedField = "displayX";
     }
-    // Finite-value guard (D2): skip leaves the last snapshot in place —
-    // never poison it with NaN.
+    // Guard 3 — finite validation (D2): skip leaves the last snapshot in
+    // place — never poison it with NaN. The raw values of the ADOPTED
+    // fields are logged (not fixed displayX/Y) so the line stays truthful
+    // when globalDisplayX was adopted (audit round 1 minor).
     if (!Number.isFinite(gx) || !Number.isFinite(gy)) {
+      const rawX =
+        adoptedField === "globalDisplayX"
+          ? event.globalDisplayX
+          : event.displayX;
+      const rawY =
+        adoptedField === "globalDisplayX"
+          ? event.globalDisplayY
+          : event.displayY;
       hilog.debug(
         DOMAIN,
         "cursor_feed_skip",
         "coordinate guard miss: %{public}s=(%{public}s,%{public}s) not finite",
         adoptedField,
-        String(event.displayX),
-        String(event.displayY),
+        String(rawX),
+        String(rawY),
       );
       return;
     }

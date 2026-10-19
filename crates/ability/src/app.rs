@@ -950,8 +950,9 @@ impl OpenHarmonyApp {
     /// an implementation detail — consumers read them through this method
     /// instead of unpacking the bits by hand.
     ///
-    /// Untracked fail-safe contract (ohos-cursor-passthrough D3, spec「冷启动
-    /// 未喂入 → reject」): when NO feed was ever recorded the read is the typed
+    /// Untracked fail-safe contract (ohos-cursor-passthrough D3; spec
+    /// "cold start, never fed → reject"): when NO feed was ever recorded the
+    /// read is the typed
     /// [`CursorUntracked`] error — NOT the (0,0) zero-init sentinel, which is
     /// indistinguishable from a real screen-origin feed and would let a
     /// hit-test "succeed" on garbage. `Ok` therefore always equals a real fed
@@ -1337,8 +1338,10 @@ pub struct CursorUntracked;
 /// Windows `GetCursorPos`); never-fed → typed [`CursorUntracked`] error.
 /// Split from [`OpenHarmonyApp::cursor_position`] so both branches are UT-able
 /// without touching the process statics (device UT constraint: OHOS UTs can
-/// only exercise pure functions).
-pub fn cursor_position_with(
+/// only exercise pure functions). `pub(crate)` — the only cross-crate consumer
+/// (tao) reads through `OpenHarmonyApp::cursor_position` and only needs
+/// [`CursorUntracked`] public (audit round 1 suggestion).
+pub(crate) fn cursor_position_with(
     ever_fed: bool,
     x_vp: f64,
     y_vp: f64,
@@ -2116,8 +2119,8 @@ mod tests {
     }
 
     /// UT for the tracked read-out branch (ohos-cursor-passthrough D1/D3, spec
-    /// "主窗 Move 喂入"): a fed screen-global vp coordinate × scale must come
-    /// out as global physical px — the tao upstream `cursor_position`
+    /// "main-window Move feed"): a fed screen-global vp coordinate × scale must
+    /// come out as global physical px — the tao upstream `cursor_position`
     /// semantic (Windows `GetCursorPos`). `ever_fed=true` → `Ok`.
     #[test]
     fn cursor_position_with_tracked_feed_multiplies_scale_by_scale() {
@@ -2128,7 +2131,8 @@ mod tests {
     }
 
     /// UT for the untracked fail-safe contract (ohos-cursor-passthrough D3,
-    /// spec "冷启动未喂入 → reject"): with no feed ever recorded the read-out
+    /// spec "cold start, never fed → reject"): with no feed ever recorded the
+    /// read-out
     /// must be the typed `CursorUntracked` error — NOT the (0,0) zero-init
     /// sentinel, which is indistinguishable from a real screen-origin feed
     /// and would let a hit-test "succeed" on garbage. Authoritative
