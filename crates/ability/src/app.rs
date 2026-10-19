@@ -2038,4 +2038,43 @@ mod tests {
             20.25
         );
     }
+
+    /// UT for the tracked read-out branch (ohos-cursor-passthrough D1/D3, spec
+    /// "主窗 Move 喂入"): a fed screen-global vp coordinate × scale must come
+    /// out as global physical px — the tao upstream `cursor_position`
+    /// semantic (Windows `GetCursorPos`). `ever_fed=true` → `Ok`.
+    #[test]
+    fn cursor_position_with_tracked_feed_multiplies_scale_by_scale() {
+        assert_eq!(
+            cursor_position_with(true, 100.5, 50.25, 2.0),
+            Ok((201.0, 100.5))
+        );
+    }
+
+    /// UT for the untracked fail-safe contract (ohos-cursor-passthrough D3,
+    /// spec "冷启动未喂入 → reject"): with no feed ever recorded the read-out
+    /// must be the typed `CursorUntracked` error — NOT the (0,0) zero-init
+    /// sentinel, which is indistinguishable from a real screen-origin feed
+    /// and would let a hit-test "succeed" on garbage. Authoritative
+    /// verification for the cold-start reject contract (the suite has no
+    /// cold-start face: mouse interaction always precedes a suite run).
+    #[test]
+    fn cursor_position_with_untracked_feed_returns_untracked_error() {
+        assert_eq!(
+            cursor_position_with(false, 0.0, 0.0, 2.0),
+            Err(CursorUntracked)
+        );
+    }
+
+    /// UT guard-matrix negative bits (ohos-cursor-passthrough 1.1): the
+    /// scale=1.0 identity branch, and a fed (0.0, 0.0) — after a real feed
+    /// the screen origin is a legal coordinate, not "untracked".
+    #[test]
+    fn cursor_position_with_scale_one_identity_and_fed_zero_is_legal() {
+        assert_eq!(
+            cursor_position_with(true, 100.5, 50.25, 1.0),
+            Ok((100.5, 50.25))
+        );
+        assert_eq!(cursor_position_with(true, 0.0, 0.0, 2.0), Ok((0.0, 0.0)));
+    }
 }
