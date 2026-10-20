@@ -192,7 +192,16 @@ pub fn create_lifecycle_handle<'a>(
             // the pair). The remaining stage events map to tao app-level events
             // (Resumed/Pause/…) with no window routing, so they stay
             // primary-only (window_id == 0).
-            let state_event = StageEventType::from(event_type);
+            // #221: the conversion is fallible (TryFrom); an unrecognized code
+            // (system upgrade / new event) is warned here at the call site and
+            // the event is dropped instead of panicking the bridge thread.
+            let state_event = match StageEventType::try_from(event_type) {
+                Ok(e) => e,
+                Err(v) => {
+                    crate::warn!("[ability] unknown StageEventType value {}, ignoring", v);
+                    return Ok(());
+                }
+            };
             let e = match state_event {
                 StageEventType::Active => Event::GainedFocus { window_id },
                 StageEventType::Inactive => Event::LostFocus { window_id },

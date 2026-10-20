@@ -1,3 +1,5 @@
+/// Window stage event codes forwarded by the ArkTS bridge (`onWindowStageEvent`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StageEventType {
     Shown = 1,
     Active,
@@ -7,16 +9,53 @@ pub enum StageEventType {
     Paused,
 }
 
-impl From<i32> for StageEventType {
-    fn from(value: i32) -> Self {
+impl TryFrom<i32> for StageEventType {
+    type Error = i32;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
         match value {
-            1 => StageEventType::Shown,
-            2 => StageEventType::Active,
-            3 => StageEventType::Inactive,
-            4 => StageEventType::Hidden,
-            5 => StageEventType::Resumed,
-            6 => StageEventType::Paused,
-            _ => panic!("Invalid StageEventType value: {}", value),
+            1 => Ok(StageEventType::Shown),
+            2 => Ok(StageEventType::Active),
+            3 => Ok(StageEventType::Inactive),
+            4 => Ok(StageEventType::Hidden),
+            5 => Ok(StageEventType::Resumed),
+            6 => Ok(StageEventType::Paused),
+            v => Err(v),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StageEventType;
+    use std::convert::TryFrom;
+
+    /// UT for #221: each known stage event code 1..=6 maps to its variant.
+    /// # Brief: call `StageEventType::try_from` for every code in 1..=6 and
+    /// assert the expected variant is produced.
+    #[test]
+    fn ut_stage_event_try_from_known_values() {
+        let expected = [
+            (1, StageEventType::Shown),
+            (2, StageEventType::Active),
+            (3, StageEventType::Inactive),
+            (4, StageEventType::Hidden),
+            (5, StageEventType::Resumed),
+            (6, StageEventType::Paused),
+        ];
+        for (code, want) in expected {
+            let got = StageEventType::try_from(code).unwrap();
+            assert_eq!(got as i32, want as i32, "code {code} mapped wrongly");
+        }
+    }
+
+    /// UT for #221: unknown stage event codes return `Err` carrying the same
+    /// value instead of panicking.
+    /// # Brief: call `try_from` for 0/7/-1/2147483647 and assert `Err(v)`.
+    #[test]
+    fn ut_stage_event_try_from_unknown_values() {
+        for code in [0i32, 7, -1, 2147483647] {
+            assert_eq!(StageEventType::try_from(code), Err(code));
         }
     }
 }
