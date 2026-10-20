@@ -302,8 +302,12 @@ export class WindowManager {
   }
 
   // Whether the given window is a UIAbility main window.
-  // Such windows are system-managed: win.resize()/moveWindowTo() return 1300002,
-  // decorations are system-provided, and per-button enable flags are no-ops.
+  // Such windows are system-managed: resize()/moveWindowTo() dispatches DO run —
+  // the effect is governed by the system WM (e.g. freeform clamping); error
+  // 1300002 only surfaces transiently when the window state is abnormal, it is
+  // not the expected outcome of these calls (see tao facade docs,
+  // committer Eulogizethesun/tauri#170). Decorations are system-provided, and
+  // per-button enable flags are no-ops.
   // windowId=0 alone must NOT be used for this judgement — a subsequent UIAbility
   // instance has id>0 but is still a system-managed main window.
   isUIAbilityMainWindow(windowId: number): boolean {
