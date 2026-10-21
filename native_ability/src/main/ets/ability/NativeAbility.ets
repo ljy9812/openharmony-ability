@@ -1,4 +1,4 @@
-import { AbilityConstant, Configuration, UIAbility, Want } from "@kit.AbilityKit";
+import { AbilityConstant, Configuration, ConfigurationConstant, UIAbility, Want } from "@kit.AbilityKit";
 import common from "@ohos.app.ability.common";
 import window from "@ohos.window";
 import display from "@ohos.display";
@@ -493,6 +493,64 @@ export class NativeAbility extends UIAbility {
     }
 
     this.acceptingLifecycle = true;
+
+    // #181: cold-start configuration/theme injection (committer issue #181).
+    // The system only fires onConfigurationUpdate on CHANGE, so on a cold
+    // start in dark mode the Rust-side app.configuration (and therefore tao's
+    // theme()) kept its default Light value until the first real change.
+    // acceptingLifecycle is now true, so the guard at the top of
+    // onConfigurationUpdate passes: synthesize a Configuration from the
+    // resource manager and feed it through the SAME entry point the system
+    // callback uses — the Rust on_configuration_updated closure writes
+    // app.configuration and dispatches Event::ConfigChanged before any window
+    // queries the theme. Joined-instance early-return path above does NOT
+    // inject (bridge closure registration is equally restricted there — known
+    // limitation, same boundary as the pre-existing event-forwarding face).
+    // Nested try/catch: a failure here must never fail onCreate — the app
+    // simply keeps the pre-injection default, as before this change.
+    try {
+      const abilityContext = this.context as common.UIAbilityContext;
+      const resCfg = abilityContext.resourceManager.getConfigurationSync();
+      const injectedConfig: Configuration = {
+        // resmgr direct reads (6 keys): locale → language, colorMode,
+        // direction, screenDensity, mcc, mnc. resmgr types mcc/mnc as number
+        // while the app Configuration and the Rust closure read strings —
+        // String() them to prevent a type mismatch on the bridge.
+        // resmgr and ConfigurationConstant declare distinct-but-value-equal
+        // numeric enums for colorMode (DARK=0/LIGHT=1) and screenDensity
+        // (SDPI=120…XXXLDPI=640), and direction (VERTICAL=0/HORIZONTAL=1):
+        // hop through number to re-key the value into the app-side enum type
+        // the app Configuration declares.
+        language: resCfg.locale,
+        colorMode: resCfg.colorMode as number as ConfigurationConstant.ColorMode,
+        direction: resCfg.direction as number as ConfigurationConstant.Direction,
+        screenDensity: resCfg.screenDensity as number as ConfigurationConstant.ScreenDensity,
+        mcc: String(resCfg.mcc),
+        mnc: String(resCfg.mnc),
+        // SDK 20 resmgr exposes no such fields — neutral defaults (sources:
+        // app-side defaults the system would report for a fresh UIAbility).
+        fontSizeScale: 1.0,
+        fontWeightScale: 1.0,
+        hasPointerDevice: true,
+        displayId: 0,
+      };
+      this.onConfigurationUpdate(injectedConfig);
+      hilog.debug(
+        DOMAIN,
+        "NativeAbility",
+        "#181 config injected: colorMode=%{public}d language=%{public}s direction=%{public}d",
+        injectedConfig.colorMode,
+        injectedConfig.language,
+        injectedConfig.direction,
+      );
+    } catch (e) {
+      hilog.warn(
+        DOMAIN,
+        "NativeAbility",
+        "#181 config injection failed (theme stays default): %{public}s",
+        String(e),
+      );
+    }
   }
 
   private enqueueLifecycleOperation(label: string, op: () => Promise<void>): Promise<void> {

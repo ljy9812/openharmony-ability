@@ -1121,9 +1121,8 @@ export class WindowManager {
     try {
       const realWindowId = win.getWindowProperties().id;
       pointer.setPointerStyleSync(realWindowId, style as pointer.PointerStyle);
-      console.info(
-        `[WindowManager] setPointerStyle taoId=${windowId} realId=${realWindowId} style=${style} OK`,
-      );
+      // success log removed (issue #231): this body is NAPI-reentrant (C5) —
+      // the failure console below is the exemption that reports real errors.
     } catch (err) {
       console.error(`[WindowManager] setPointerStyle ${windowId} failed: ${JSON.stringify(err)}`);
     }

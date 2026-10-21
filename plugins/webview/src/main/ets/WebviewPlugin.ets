@@ -2444,6 +2444,28 @@ class WebviewSurface {
 
   async clearAllBrowsingData(id: string, callContext: BridgeCallContext): Promise<void> {
     const entry = await this.controllerEntry(id, callContext);
+    // #191: the wipes below (WebStorage.deleteAllData, HttpAuthCredentials,
+    // removeCache, clearHistory) do not cover the cookie store —
+    // WebCookieManager is process-global, so wipe it first (false = the
+    // non-incognito store; both persistent and session cookies). Defensive
+    // typeof probe + try/catch (#222 precedent): the SDK-family d.ts marks
+    // these @since 20 but real-device evidence contradicts the annotation,
+    // so the declaration cannot be trusted literally. Unavailable or
+    // throwing: disclose via warn and continue the existing cleanup —
+    // zero blocking, zero panic (design D4/R10).
+    try {
+      if (typeof webview?.WebCookieManager?.clearAllCookiesSync === "function") {
+        webview.WebCookieManager.clearAllCookiesSync(false);
+      } else {
+        console.warn(
+          "[WebviewPlugin] clearAllBrowsingData: WebCookieManager.clearAllCookiesSync unavailable on this SDK — cookies not wiped",
+        );
+      }
+    } catch (cookieError) {
+      console.warn(
+        `[WebviewPlugin] clearAllBrowsingData: cookie clear failed (continuing): ${String(cookieError)}`,
+      );
+    }
     try {
       webview.WebStorage.deleteAllData(true);
       webview.WebDataBase.deleteHttpAuthCredentials();
@@ -2543,6 +2565,12 @@ class WebviewSurface {
               pdfConfig.shouldPrintBackground ?? DEFAULT_PDF_CONFIG.shouldPrintBackground,
           }
         : DEFAULT_PDF_CONFIG;
+      // #233: forward the caller-supplied print scale into the system
+      // PdfConfiguration — it was declared on WebviewPdfConfig but silently
+      // dropped here, so the rendered PDF always used the system default.
+      if (pdfConfig?.scale !== undefined) {
+        cfg.scale = pdfConfig.scale;
+      }
       const pdfData = await controller.createPdf(cfg);
       const buffer = pdfData.pdfArrayBuffer().buffer;
       if (!buffer || buffer.byteLength === 0) {
