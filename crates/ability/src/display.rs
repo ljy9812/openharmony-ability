@@ -25,7 +25,7 @@ use std::sync::{Mutex, OnceLock};
 use napi_derive_ohos::napi;
 use ohos_display_binding::{
     default_display_height, default_display_id, default_display_refresh_rate,
-    default_display_scaled_density, default_display_width,
+    default_display_scaled_density, default_display_virtual_pixel_ratio, default_display_width,
 };
 
 // ─── FFI (api-14 layout of libnative_display_manager.so) ────────────────────
@@ -181,6 +181,39 @@ fn position_of(display_id: u32) -> Option<(i32, i32)> {
     })
 }
 
+// ─── Virtual pixel ratio (openspec ohos-webview-bounds, #198) ───────────────
+
+/// Ratio returned when the display binding is unavailable or reports nothing
+/// usable — the "physical px == vp" identity the desktop baseline and the
+/// previous `to_logical::<f64>(1.0)` behavior are calibrated against.
+const FALLBACK_VIRTUAL_PIXEL_RATIO: f32 = 1.0;
+
+/// Value guard for the binding's raw virtual pixel ratio: keeps a positive
+/// finite ratio, degrades everything else (0 on error paths, non-finite
+/// garbage) to the 1.0 fallback. Split from [`virtual_pixel_ratio`] so the
+/// degradation contract is UT-able without touching the display C API
+/// (device-only).
+fn sanitize_vp(vp: f32) -> f32 {
+    if vp > 0.0 && vp.is_finite() {
+        vp
+    } else {
+        FALLBACK_VIRTUAL_PIXEL_RATIO
+    }
+}
+
+/// The default display's virtual pixel ratio (physical px per logical vp) for
+/// the bounds logical↔physical conversion (openspec ohos-webview-bounds, #198).
+///
+/// Thin wrapper over the existing `ohos_display_binding` C-API binding
+/// `default_display_virtual_pixel_ratio() -> f32` (same family as
+/// [`default_display_scaled_density`], no new NAPI wire, no ArkTS surface).
+/// A binding value ≤ 0 (early calls / unsupported device) degrades to the 1.0
+/// identity fallback via [`sanitize_vp`]. Never blocks; the binding's own
+/// error signaling is a non-zero return code, not a blocking call.
+pub fn virtual_pixel_ratio() -> f32 {
+    sanitize_vp(default_display_virtual_pixel_ratio())
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /// One display snapshot, consumed by tao's `MonitorHandle` accessors.
@@ -283,4 +316,38 @@ fn c_name_to_string(raw: &[c_char]) -> String {
         .map(|&c| c as u8)
         .collect();
     String::from_utf8_lossy(&bytes).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// UT for #198: a positive finite binding value passes through unchanged.
+    /// # Brief: sanitize 1.0 and 2.5 and assert identity.
+    #[test]
+    fn ut_sanitize_vp_keeps_positive_finite() {
+        assert_eq!(sanitize_vp(1.0), 1.0);
+        assert_eq!(sanitize_vp(2.5), 2.5);
+    }
+
+    /// UT for #198: a binding value ≤ 0 (early call / unsupported device)
+    /// degrades to the 1.0 identity fallback, per the spec's fallback
+    /// scenario ("virtual_pixel_ratio() SHALL return 1.0, no panic").
+    /// # Brief: sanitize 0.0, negative, NaN and ±inf and assert 1.0.
+    #[test]
+    fn ut_sanitize_vp_falls_back_to_one() {
+        assert_eq!(sanitize_vp(0.0), 1.0);
+        assert_eq!(sanitize_vp(-1.5), 1.0);
+        assert_eq!(sanitize_vp(f32::NAN), 1.0);
+        assert_eq!(sanitize_vp(f32::INFINITY), 1.0);
+        assert_eq!(sanitize_vp(f32::NEG_INFINITY), 1.0);
+    }
+
+    /// UT for #198: the fallback constant is exactly the documented 1.0
+    /// identity the desktop baseline is calibrated against.
+    /// # Brief: assert the constant value.
+    #[test]
+    fn ut_fallback_vp_constant_is_one() {
+        assert_eq!(FALLBACK_VIRTUAL_PIXEL_RATIO, 1.0);
+    }
 }

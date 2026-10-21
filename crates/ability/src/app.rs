@@ -1394,6 +1394,47 @@ pub fn drain_pending_window_status() -> Vec<(i32, i32)> {
         .unwrap_or_default()
 }
 
+/// Global queue for pending window focus transitions from ArkTS (#180①:
+/// `win.on('windowEvent')` WINDOW_ACTIVE/WINDOW_INACTIVE collection —
+/// `windowFocusChange` is absent from the local SDK20 `@ohos.window.d.ets`
+/// overload table, so the @since 20 `windowEvent` enum is the equivalent
+/// signal). The runtime event loop drains this queue and feeds each
+/// (window_id, focused) transition into tao's `LAST_FOCUSED_WINDOW_ID`
+/// change-edge guard, which forwards to the existing focus paths and the
+/// WindowStateMirror focused bit (p2 #173 write face).
+static PENDING_WINDOW_FOCUS: Mutex<Vec<(i64, bool)>> = Mutex::new(Vec::new());
+
+/// NAPI function called from ArkTS `windowEvent` handlers to report a window
+/// focus transition (wire name `notifyWindowFocus` — `#[napi]` camelCase,
+/// mirroring `notify_window_status`). Queues (window_id, focused) for the Rust
+/// event loop; de-duplication happens on the tao side (edge guard), this layer
+/// only transports the raw transition.
+#[napi]
+pub fn notify_window_focus(window_id: i64, focused: bool) {
+    match PENDING_WINDOW_FOCUS.lock() {
+        Ok(mut queue) => queue.push((window_id, focused)),
+        Err(poisoned) => {
+            log::warn!(
+                "[OHOS] PENDING_WINDOW_FOCUS mutex poisoned, recovering. window_id={} focused={}",
+                window_id,
+                focused
+            );
+            poisoned.into_inner().push((window_id, focused));
+        }
+    }
+}
+
+/// Drain all pending window focus transitions.
+/// Called by the tao OHOS event loop (alongside `drain_pending_window_status`)
+/// so Float-subwindow focus edges reach the same mirror bits the stage path
+/// uses (spec ohos-window-focus-state: both paths share one de-dup guard).
+pub fn drain_pending_window_focus() -> Vec<(i64, bool)> {
+    PENDING_WINDOW_FOCUS
+        .lock()
+        .map(|mut q| q.drain(..).collect())
+        .unwrap_or_default()
+}
+
 #[derive(Clone)]
 pub struct SaveSaver<'a> {
     pub(crate) app: &'a OpenHarmonyApp,

@@ -668,6 +668,9 @@ mod tests {
             id: "https-decision-test".to_owned(),
             native_tag: "native-old".to_owned(),
             url: "https://stale.example".to_owned(),
+            method: None,
+            header_names: None,
+            header_values: None,
         })
         .unwrap();
         assert!(!stale.handled);
@@ -677,6 +680,9 @@ mod tests {
             id: "https-decision-test".to_owned(),
             native_tag: "native-h1".to_owned(),
             url: "https://current.example".to_owned(),
+            method: None,
+            header_names: None,
+            header_values: None,
         })
         .unwrap();
         assert!(!no_callback.handled);
@@ -704,6 +710,9 @@ mod tests {
             id: "https-handle-test".to_owned(),
             native_tag: "native-h2".to_owned(),
             url: "https://handled.example".to_owned(),
+            method: None,
+            header_names: None,
+            header_values: None,
         })
         .unwrap();
         assert!(handled.handled);

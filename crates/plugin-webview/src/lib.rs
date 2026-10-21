@@ -272,6 +272,10 @@ pub struct WebviewStyle {
     pub height: Option<Either<f64, String>>,
     pub visible: Option<bool>,
     pub background_color: Option<String>,
+    /// Run the Web component in incognito mode (`WebOptions.incognitoMode`, SDK20 @since 20):
+    /// cookies/records/geolocation permissions stay out of persistent storage. Absent (or
+    /// false) keeps the default non-incognito behavior byte-identical to the previous wire.
+    pub incognito: Option<bool>,
 }
 
 /// Engine lifecycle signal delivered directly from the ArkTS WebView host.
@@ -551,6 +555,18 @@ pub struct WebviewHttpsInterceptRequest {
     /// Process-unique controller generation used to reject callbacks from a replaced WebView.
     pub native_tag: String,
     pub url: String,
+    /// HTTP method of the intercepted request (e.g. "GET"/"POST"), captured by the ArkTS
+    /// interceptor via `WebResourceRequest.getRequestMethod()`. Absent in payloads from
+    /// older ArkTS plugins — consumers fall back to the current default (GET).
+    pub method: Option<String>,
+    /// Request header names captured by the ArkTS interceptor
+    /// (`WebResourceRequest.getRequestHeader()`), same order as [`Self::header_values`].
+    /// Parallel-array wire form (`Vec<String>` — the established `protocols` precedent;
+    /// no nested-map wire exists in this crate). Absent in payloads from older ArkTS
+    /// plugins — consumers fall back to no headers.
+    pub header_names: Option<Vec<String>>,
+    /// Request header values, same order as [`Self::header_names`].
+    pub header_values: Option<Vec<String>>,
 }
 
 impl_bridge_napi_type!(
@@ -1259,6 +1275,10 @@ static COOKIE_SYNC_APP: OnceLock<OpenHarmonyApp> = OnceLock::new();
 /// `bridgePlugins` list.
 pub fn set_cookie_sync_app(app: &OpenHarmonyApp) -> Result<()> {
     app.register_plugin(WebviewCookieBridgePlugin)?;
+    // #192: the get-url sync plugin rides the same registration point and the
+    // same COOKIE_SYNC_APP app handle — the sync bridge addresses plugins by
+    // ID, so no second OnceLock is needed.
+    app.register_plugin(WebviewUrlBridgePlugin)?;
     if COOKIE_SYNC_APP.set(app.clone()).is_err() {
         return Err(Error::from_reason(
             "webview cookie sync app already initialized",
@@ -1289,6 +1309,91 @@ pub fn cookies_for_url_on_main_thread(url: &str) -> Result<String> {
         .as_ref()
         .ok_or_else(|| Error::from_reason("main-thread N-API Env not available"))?;
     app.fetch_cookies_sync(env, url)
+}
+
+// ── Synchronous URL read (ohos.webview-url, #192) ──────────────────────────────
+
+/// `MainThreadSync` companion plugin for reading a webview's live URL.
+///
+/// `WebviewController.getUrl()` is a synchronous ArkTS API, but the async
+/// bridge cannot serve it to a main-thread caller (its TSFN round-trip needs
+/// that same thread to pump — deadlock). This sync plugin carries the read
+/// instead — invoked through [`OpenHarmonyApp::with_main_thread_bridge`], the
+/// call always executes on the UI thread. Mirrors [`WebviewCookieBridgePlugin`]
+/// in every mechanical respect; the ArkTS counterpart (`getUrlSync` handler,
+/// action `get-url`) is registered in the same bridge plugin list as the
+/// cookie sync plugin (openspec ohos-webview-bridge-fidelity, #192).
+pub struct WebviewUrlBridgePlugin;
+
+impl BridgePlugin for WebviewUrlBridgePlugin {
+    type Mode = MainThreadSyncBridge;
+
+    const ID: &'static str = "ohos.webview-url";
+    const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] = &[];
+}
+
+/// Request for the `get-url` action: the public webview id whose live URL to
+/// read (the ArkTS handler resolves the controller from it, same keying as the
+/// event callbacks).
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewUrlGetRequest {
+    pub id: String,
+}
+
+impl_bridge_napi_type!(WebviewUrlGetRequest, "ohos.webview.UrlGetRequest");
+
+/// Response for the `get-url` action: the controller's current URL, exactly as
+/// `WebviewController.getUrl()` reports it.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewUrlGetResponse {
+    pub url: String,
+}
+
+impl_bridge_napi_type!(WebviewUrlGetResponse, "ohos.webview.UrlGetResponse");
+
+/// Synchronous URL read scoped to an N-API `Env` on the main thread.
+pub trait WebviewUrlSyncExt {
+    fn get_url_sync(&self, env: &Env, id: &str) -> Result<String>;
+}
+
+impl WebviewUrlSyncExt for OpenHarmonyApp {
+    fn get_url_sync(&self, env: &Env, id: &str) -> Result<String> {
+        self.with_main_thread_bridge(env, |bridge| {
+            let response = bridge.call_sync::<
+                WebviewUrlBridgePlugin,
+                WebviewUrlGetRequest,
+                WebviewUrlGetResponse,
+            >(
+                "get-url",
+                WebviewUrlGetRequest { id: id.to_string() },
+            )?;
+            Ok(response.url)
+        })
+    }
+}
+
+/// Synchronously reads the live URL of webview `id` (ArkTS `getUrlSync`).
+///
+/// **Must be called from the N-API main thread** — same `MainThreadSync`
+/// contract as [`cookies_for_url_on_main_thread`], and the same re-entrant
+/// direct-call shape: no recv_timeout, no block_on anywhere on the path.
+/// Reuses the [`COOKIE_SYNC_APP`] app handle — the sync bridge addresses the
+/// plugin by [`WebviewUrlBridgePlugin::ID`], so no second OnceLock exists.
+pub fn webview_url_on_main_thread(id: &str) -> Result<String> {
+    let app = COOKIE_SYNC_APP.get().ok_or_else(|| {
+        Error::from_reason(
+            "webview url sync app not set — the embedding runtime must call \
+             wry::set_ohos_app during setup",
+        )
+    })?;
+    let env_cell = get_main_thread_env();
+    let env_ref = env_cell.borrow();
+    let env = env_ref
+        .as_ref()
+        .ok_or_else(|| Error::from_reason("main-thread N-API Env not available"))?;
+    app.get_url_sync(env, id)
 }
 
 #[derive(Clone)]
@@ -2168,5 +2273,29 @@ mod tests {
             schemes: vec![],
         };
         assert!(engine_scheme_pairs(&event).is_empty());
+    }
+
+    // ── #192 get-url sync plugin (ohos.webview-url) ─────────────────────
+
+    /// UT for #192: the get-url sync plugin keeps the cookie-sync contract —
+    /// MainThreadSync mode, no context requirements, and its own plugin ID so
+    /// the sync bridge can address it independently of the cookie plugin.
+    /// # Brief: assert ID, REQUIRED_CONTEXTS parity, and the new wire type names.
+    #[test]
+    fn url_sync_plugin_contract_matches_cookie_sync_precedent() {
+        assert_eq!(WebviewUrlBridgePlugin::ID, "ohos.webview-url");
+        assert_eq!(WebviewCookieBridgePlugin::ID, "ohos.webview-cookie");
+        assert_eq!(
+            <WebviewUrlBridgePlugin as BridgePlugin>::REQUIRED_CONTEXTS,
+            <WebviewCookieBridgePlugin as BridgePlugin>::REQUIRED_CONTEXTS,
+        );
+        assert_eq!(
+            <WebviewUrlGetRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.UrlGetRequest"
+        );
+        assert_eq!(
+            <WebviewUrlGetResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.UrlGetResponse"
+        );
     }
 }
