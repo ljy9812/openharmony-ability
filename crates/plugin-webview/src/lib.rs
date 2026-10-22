@@ -584,6 +584,15 @@ pub struct WebviewHttpsInterceptResponse {
     pub mime_type: String,
     /// Raw response body bytes transported as `Uint8Array` across the NAPI boundary.
     pub body: Vec<u8>,
+    /// #186 (fix-variant M1): response header names the protocol handler attached,
+    /// same order as [`Self::header_values`] (parallel-array wire form — the
+    /// established request-side precedent; no nested-map wire exists in this
+    /// crate). Content-Type travels via [`Self::mime_type`] and is never
+    /// duplicated here. `None` when the handler set no other headers — keeps the
+    /// wire identical to the pre-M1 shape (D9 byte-identical default).
+    pub header_names: Option<Vec<String>>,
+    /// Response header values, same order as [`Self::header_names`].
+    pub header_values: Option<Vec<String>>,
 }
 
 impl_bridge_napi_type!(
@@ -599,6 +608,8 @@ impl WebviewHttpsInterceptResponse {
             status: 0,
             mime_type: String::new(),
             body: Vec::new(),
+            header_names: None,
+            header_values: None,
         }
     }
 }

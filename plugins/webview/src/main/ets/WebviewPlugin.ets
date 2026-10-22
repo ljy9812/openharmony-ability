@@ -635,6 +635,12 @@ interface WebviewHttpsInterceptResponse {
   status: number;
   mimeType: string;
   body: Uint8Array;
+  // #186 (fix-variant M1): response headers the Rust protocol handler attached,
+  // parallel same-order arrays (request-side precedent). Absent in payloads from
+  // older native modules — the build site skips setResponseHeader then, which
+  // keeps the pre-M1 behavior byte-identical.
+  headerNames?: string[];
+  headerValues?: string[];
 }
 
 interface WebviewRegisterHttpsInterceptPayload {
@@ -2136,6 +2142,25 @@ class WebviewSurface {
           webResponse.setResponseData(bodyBuffer);
           webResponse.setResponseMimeType(response.mimeType || "application/octet-stream");
           webResponse.setResponseCode(response.status || 200);
+          // #186 (fix-variant M1): apply the protocol handler's response headers.
+          // Content-Type is excluded by the Rust extractor (carried via
+          // mimeType); parallel arrays must be present, non-empty, and
+          // length-matched — anything else keeps the pre-M1 behavior.
+          const respHeaderNames = response.headerNames;
+          const respHeaderValues = response.headerValues;
+          if (respHeaderNames !== undefined && respHeaderNames !== null &&
+            respHeaderValues !== undefined && respHeaderValues !== null &&
+            respHeaderNames.length > 0 &&
+            respHeaderNames.length === respHeaderValues.length) {
+            const responseHeaders: Array<webview.Header> = [];
+            for (let h = 0; h < respHeaderNames.length; h++) {
+              responseHeaders.push({
+                headerKey: respHeaderNames[h],
+                headerValue: respHeaderValues[h] ?? "",
+              });
+            }
+            webResponse.setResponseHeader(responseHeaders);
+          }
           webResponse.setResponseIsReady(true);
           hilog.info(
             0x1999,

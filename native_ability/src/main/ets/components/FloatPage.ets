@@ -50,6 +50,8 @@ struct FloatPage {
   @State dpiScale: number = 1;
   private cursorController: CursorController | null = null;
   private acceleratorMatcher: AcceleratorMatcher = new AcceleratorMatcher();
+  // Fix-variant m6: one-shot guard for the stale-HAR structured warn below.
+  private focusNotifyWarned: boolean = false;
 
   // Resize tracking
   private startWidth: number = 0;
@@ -213,6 +215,20 @@ struct FloatPage {
                     nativeModule.notifyWindowFocus(this.windowId, true);
                   } else if (event === arkWindow.WindowEventType.WINDOW_INACTIVE) {
                     nativeModule.notifyWindowFocus(this.windowId, false);
+                  }
+                } else {
+                  // Fix-variant m6: a stale HAR (native module without
+                  // notifyWindowFocus) used to silently drop focus transitions.
+                  // One-time structured warn per FloatPage instance instead.
+                  if (!this.focusNotifyWarned) {
+                    this.focusNotifyWarned = true;
+                    hilog.warn(
+                      DOMAIN,
+                      "FloatPage",
+                      "windowEvent dropped: native module notifyWindowFocus unavailable (stale HAR?): id=%{public}d event=%{public}d",
+                      this.windowId,
+                      event as number,
+                    );
                   }
                 }
               });

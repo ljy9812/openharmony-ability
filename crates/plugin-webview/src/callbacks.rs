@@ -701,6 +701,8 @@ mod tests {
                 status: 200,
                 mime_type: "text/html".to_owned(),
                 body: b"<html>".to_vec(),
+                header_names: None,
+                header_values: None,
             })
             .build()
             .unwrap();
@@ -720,6 +722,32 @@ mod tests {
         assert_eq!(handled.mime_type, "text/html");
 
         controller::on_removed("https-handle-test", "native-h2").unwrap();
+    }
+
+    #[test]
+    fn https_intercept_response_wire_shape_keeps_headerless_default() {
+        // #186 (fix-variant M1): the response wire gained optional parallel
+        // header arrays. A headerless response keeps the pre-M1 shape
+        // (None/None) and passthrough stays handled=false with empty payload.
+        let pt = crate::WebviewHttpsInterceptResponse::passthrough();
+        assert!(!pt.handled);
+        assert_eq!(pt.status, 0);
+        assert!(pt.body.is_empty());
+        assert!(pt.header_names.is_none() && pt.header_values.is_none());
+
+        let explicit = crate::WebviewHttpsInterceptResponse {
+            handled: true,
+            status: 200,
+            mime_type: "text/html".to_owned(),
+            body: Vec::new(),
+            header_names: Some(vec!["Access-Control-Allow-Origin".to_owned()]),
+            header_values: Some(vec!["*".to_owned()]),
+        };
+        assert_eq!(
+            explicit.header_names.as_deref(),
+            Some(&["Access-Control-Allow-Origin".to_owned()][..])
+        );
+        assert_eq!(explicit.header_values.as_deref(), Some(&["*".to_owned()][..]));
     }
 
     #[test]

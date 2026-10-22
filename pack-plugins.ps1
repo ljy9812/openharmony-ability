@@ -7,7 +7,7 @@
 #   - an internal barrel `ability_exports.ets` is generated from the base index.ets
 #     (paths rewritten to be relative to package/src/main/ets/) so plugins resolve
 #     base symbols without importing their own module by name (no cycle)
-#   - the 17 plugin classes are appended as re-exports to package/index.ets so
+#   - the 18 plugin classes are appended as re-exports to package/index.ets so
 #     consumers import them from `@ohos-rs/ability` directly
 #
 # Plugins stay standalone-buildable: their source still uses
