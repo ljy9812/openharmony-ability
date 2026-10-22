@@ -259,14 +259,14 @@ pub fn all_displays() -> Vec<DisplaySnapshot> {
                 (0..len)
                     .map(|i| {
                         let raw = &*base.add(i);
-                        let (x, y) = position_of(raw.id).unwrap_or((0, 0));
+                        let (x, y) = position_of(raw.id).unwrap_or((0_i32, 0_i32));
                         DisplaySnapshot {
                             id: raw.id,
                             name: c_name_to_string(&raw.name),
                             x,
                             y,
-                            width: raw.width.max(0) as u32,
-                            height: raw.height.max(0) as u32,
+                            width: raw.width.max(0_i32) as u32,
+                            height: raw.height.max(0_i32) as u32,
                             refresh_rate: raw.refreshRate,
                             scale: raw.scaledDensity as f64,
                         }
@@ -290,7 +290,7 @@ pub fn all_displays() -> Vec<DisplaySnapshot> {
 /// then degrades to the content-rect fallback (pre-fix behavior).
 fn default_display_fallback() -> Vec<DisplaySnapshot> {
     let id = default_display_id() as u32;
-    let (x, y) = position_of(id).unwrap_or((0, 0));
+    let (x, y) = position_of(id).unwrap_or((0_i32, 0_i32));
     vec![DisplaySnapshot {
         id,
         name: "OpenHarmony Device".to_string(),

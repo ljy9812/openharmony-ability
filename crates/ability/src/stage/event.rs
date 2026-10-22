@@ -36,12 +36,12 @@ mod tests {
     #[test]
     fn ut_stage_event_try_from_known_values() {
         let expected = [
-            (1, StageEventType::Shown),
-            (2, StageEventType::Active),
-            (3, StageEventType::Inactive),
-            (4, StageEventType::Hidden),
-            (5, StageEventType::Resumed),
-            (6, StageEventType::Paused),
+            (1_i32, StageEventType::Shown),
+            (2_i32, StageEventType::Active),
+            (3_i32, StageEventType::Inactive),
+            (4_i32, StageEventType::Hidden),
+            (5_i32, StageEventType::Resumed),
+            (6_i32, StageEventType::Paused),
         ];
         for (code, want) in expected {
             let got = StageEventType::try_from(code).unwrap();
@@ -54,7 +54,7 @@ mod tests {
     /// # Brief: call `try_from` for 0/7/-1/2147483647 and assert `Err(v)`.
     #[test]
     fn ut_stage_event_try_from_unknown_values() {
-        for code in [0i32, 7, -1, 2147483647] {
+        for code in [0_i32, 7_i32, -1_i32, 2147483647_i32] {
             assert_eq!(StageEventType::try_from(code), Err(code));
         }
     }

@@ -905,7 +905,7 @@ pub fn set_cursor_grab(
     real_window_id: i32,
     grab: bool,
 ) -> std::result::Result<(), CursorGrabError> {
-    if real_window_id <= 0 {
+    if real_window_id <= 0_i32 {
         return Err(CursorGrabError::Bridge(format!(
             "invalid real window id {real_window_id}"
         )));
@@ -1024,7 +1024,7 @@ pub fn set_window_privacy_mode(
     real_window_id: i32,
     is_privacy: bool,
 ) -> std::result::Result<(), WindowPrivacyError> {
-    if real_window_id <= 0 {
+    if real_window_id <= 0_i32 {
         return Err(WindowPrivacyError::Bridge(format!(
             "invalid real window id {real_window_id}"
         )));
