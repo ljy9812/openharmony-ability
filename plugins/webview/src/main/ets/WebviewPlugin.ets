@@ -2152,7 +2152,10 @@ class WebviewSurface {
             respHeaderValues !== undefined && respHeaderValues !== null &&
             respHeaderNames.length > 0 &&
             respHeaderNames.length === respHeaderValues.length) {
-            const responseHeaders: Array<webview.Header> = [];
+            // `Header` is a TOP-LEVEL declare interface in the component
+            // web.d.ts (not a webview-namespace member) — same global type the
+            // SDK's `setResponseHeader(header: Array<Header>)` names.
+            const responseHeaders: Array<Header> = [];
             for (let h = 0; h < respHeaderNames.length; h++) {
               responseHeaders.push({
                 headerKey: respHeaderNames[h],
