@@ -1890,15 +1890,19 @@ function handleWebviewInterceptRequest(
   let headerValues: string[] | undefined = undefined;
   try {
     method = event.request.getRequestMethod() || undefined;
-    // Parallel same-order arrays via Object.entries (the NAPI wire has no
-    // nested-map form — design D2, Context fix 4).
-    const headerRecord: Record<string, string> = event.request.getRequestHeader() ?? {};
-    const entries: Array<[string, string]> = Object.entries(headerRecord) as Array<[string, string]>;
+    // Parallel same-order arrays via the SDK Header[] shape (web.d.ts:3945
+    // `getRequestHeader(): Array<Header>`, Header = {headerKey, headerValue};
+    // the NAPI wire has no nested-map form — design D2, Context fix 4). A
+    // `?? {}` fallback would union `Header[]` with `{}` and fail the
+    // Record<string,string> assignment (ArkTS 10505001, stage-A build).
+    const rawHeaders = event.request.getRequestHeader();
     const names: string[] = [];
     const values: string[] = [];
-    for (const entry of entries) {
-      names.push(String(entry[0]));
-      values.push(String(entry[1] ?? ""));
+    if (rawHeaders !== undefined && rawHeaders !== null) {
+      for (const headerEntry of rawHeaders) {
+        names.push(String(headerEntry.headerKey));
+        values.push(String(headerEntry.headerValue ?? ""));
+      }
     }
     headerNames = names.length > 0 ? names : undefined;
     headerValues = values.length > 0 ? values : undefined;

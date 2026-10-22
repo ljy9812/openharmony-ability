@@ -1213,10 +1213,16 @@ impl BridgePlugin for WebviewCookieBridgePlugin {
 }
 
 /// Request for the `fetch-cookies` action: the URL whose cookies to fetch.
+/// #188: `incognito` optionally selects the incognito cookie store
+/// (`fetchCookieSync(url, incognito)` — local SDK
+/// @ohos.web.webview.d.ts:1642). `None` keeps the previous default-store
+/// behavior byte-identical; the caller (wry) forwards its creation-time
+/// incognito flag because the sync request is id-less.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct WebviewCookieFetchRequest {
     pub url: String,
+    pub incognito: Option<bool>,
 }
 
 impl_bridge_napi_type!(WebviewCookieFetchRequest, "ohos.webview.CookieFetchRequest");
@@ -1236,11 +1242,11 @@ impl_bridge_napi_type!(
 
 /// Synchronous cookie fetch scoped to an N-API `Env` on the main thread.
 pub trait WebviewCookieSyncExt {
-    fn fetch_cookies_sync(&self, env: &Env, url: &str) -> Result<String>;
+    fn fetch_cookies_sync(&self, env: &Env, url: &str, incognito: Option<bool>) -> Result<String>;
 }
 
 impl WebviewCookieSyncExt for OpenHarmonyApp {
-    fn fetch_cookies_sync(&self, env: &Env, url: &str) -> Result<String> {
+    fn fetch_cookies_sync(&self, env: &Env, url: &str, incognito: Option<bool>) -> Result<String> {
         self.with_main_thread_bridge(env, |bridge| {
             let response = bridge.call_sync::<
                 WebviewCookieBridgePlugin,
@@ -1250,6 +1256,7 @@ impl WebviewCookieSyncExt for OpenHarmonyApp {
                 "fetch-cookies",
                 WebviewCookieFetchRequest {
                     url: url.to_string(),
+                    incognito,
                 },
             )?;
             Ok(response.cookies)
@@ -1296,7 +1303,7 @@ pub fn set_cookie_sync_app(app: &OpenHarmonyApp) -> Result<()> {
 /// This is the main-thread alternative to the async bridge: a main-thread
 /// caller cannot block on the async round-trip (the TSFN response needs this
 /// very thread to pump), so it goes through the dedicated sync plugin instead.
-pub fn cookies_for_url_on_main_thread(url: &str) -> Result<String> {
+pub fn cookies_for_url_on_main_thread(url: &str, incognito: bool) -> Result<String> {
     let app = COOKIE_SYNC_APP.get().ok_or_else(|| {
         Error::from_reason(
             "webview cookie sync app not set — the embedding runtime must call \
@@ -1308,7 +1315,10 @@ pub fn cookies_for_url_on_main_thread(url: &str) -> Result<String> {
     let env = env_ref
         .as_ref()
         .ok_or_else(|| Error::from_reason("main-thread N-API Env not available"))?;
-    app.fetch_cookies_sync(env, url)
+    // Only `true` reaches the wire: a non-incognito webview keeps the
+    // request byte-identical to the pre-#188 shape (design D9 convention).
+    let incognito_wire = if incognito { Some(true) } else { None };
+    app.fetch_cookies_sync(env, url, incognito_wire)
 }
 
 // ── Synchronous URL read (ohos.webview-url, #192) ──────────────────────────────
@@ -1966,11 +1976,19 @@ mod tests {
         assert!(<WebviewCookieBridgePlugin as BridgePlugin>::REQUIRED_CONTEXTS.is_empty());
         assert_eq!(
             WebviewCookieFetchRequest {
-                url: "https://example.test".to_owned()
+                url: "https://example.test".to_owned(),
+                incognito: None,
             }
             .url,
             "https://example.test"
         );
+        // #188: the optional store selector rides on the request; Some(true)
+        // is the only wire-observed value (wry forwards its creation flag).
+        let incognito_request = WebviewCookieFetchRequest {
+            url: "https://example.test".to_owned(),
+            incognito: Some(true),
+        };
+        assert_eq!(incognito_request.incognito, Some(true));
     }
 
     #[test]
