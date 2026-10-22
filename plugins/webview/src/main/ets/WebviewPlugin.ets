@@ -100,6 +100,14 @@ interface WebviewStyle {
   backgroundColor?: string | null;
   /** Blur radius for vibrancy/frosted glass effect. Applied via backdropBlur on the Web component. */
   blurRadius?: number | null;
+  /**
+   * #188: run the Web component in incognito mode (`WebOptions.incognitoMode`,
+   * local SDK web.d.ts:4639 — the options member, @since 11/18; there is no
+   * `.incognitoMode()` attribute method). Absent/false keeps the default
+   * non-incognito behavior byte-identical to the previous wire. Also feeds the
+   * WebCookieManager fetch/config call sites (per-store selection).
+   */
+  incognito?: boolean | null;
 }
 
 interface WebviewInitializationScript {
@@ -215,11 +223,15 @@ interface ManagedWebview extends WebviewCreatePayload {
    */
   httpsInterceptProtocols: Set<string>;
   /**
-   * Synchronous https intercept handler. Receives the full request URL, dispatches through the
-   * `https-intercept` bridge event, and constructs a `WebResourceResponse` (or returns null to
-   * let ArkWeb continue with its default network stack).
+   * Synchronous https intercept handler. Receives the full request URL plus the
+   * intercepted request's method and headers (#186, parallel same-order arrays —
+   * both optional so callers without the capture stay compatible), dispatches
+   * through the `https-intercept` bridge event, and constructs a
+   * `WebResourceResponse` (or returns null to let ArkWeb continue with its
+   * default network stack).
    */
-  onHttpsInterceptRequest: (url: string) => WebResourceResponse | null;
+  onHttpsInterceptRequest: (url: string, method?: string,
+    headerNames?: string[], headerValues?: string[]) => WebResourceResponse | null;
   /** Trailing debounce timer for onAreaChange → resize dispatch. Prevents flooding
    *  ArkWeb with rapid JS dispatches during drag-resize. */
   resizeDebounceTimer: number;
@@ -597,11 +609,24 @@ class WebviewHttpsInterceptRequestPayload {
   readonly id: string;
   readonly nativeTag: string;
   readonly url: string;
+  // #186: the intercepted request's method + headers, captured by the
+  // onInterceptRequest handler (WebResourceRequest.getRequestMethod() /
+  // getRequestHeader()). Header names and values travel as PARALLEL same-
+  // order arrays — the NAPI wire has no nested-map form (the Rust side
+  // re-zips them; older Rust plugins that don't know the fields ignore
+  // them, and absent fields keep the GET/no-headers default shape).
+  readonly method?: string;
+  readonly headerNames?: string[];
+  readonly headerValues?: string[];
 
-  constructor(id: string, nativeTag: string, url: string) {
+  constructor(id: string, nativeTag: string, url: string, method?: string,
+    headerNames?: string[], headerValues?: string[]) {
     this.id = id;
     this.nativeTag = nativeTag;
     this.url = url;
+    this.method = method;
+    this.headerNames = headerNames;
+    this.headerValues = headerValues;
   }
 }
 
@@ -959,6 +984,9 @@ function normalizeStyle(
   if (style.blurRadius !== undefined && style.blurRadius !== null) {
     normalized.blurRadius = style.blurRadius;
   }
+  if (style.incognito !== undefined && style.incognito !== null) {
+    normalized.incognito = style.incognito;
+  }
   if (transparent === true && !normalized.backgroundColor) {
     normalized.backgroundColor = "#00000000";
   }
@@ -1099,7 +1127,8 @@ const activePrintTasks = new Map<string, ESObject>();
  * `WebResourceResponse` from the returned body bytes, and returns it. On no match, handler
  * decline, or bridge dispatch failure: returns null so ArkWeb uses its default network stack.
  */
-function handleHttpsIntercept(data: ManagedWebview, url: string): WebResourceResponse | null {
+function handleHttpsIntercept(data: ManagedWebview, url: string, method?: string,
+  headerNames?: string[], headerValues?: string[]): WebResourceResponse | null {
   if (!url || !url.startsWith("https://")) {
     if (url) {
       hilog.info(
@@ -1147,7 +1176,7 @@ function handleHttpsIntercept(data: ManagedWebview, url: string): WebResourceRes
     protocol,
   );
   try {
-    const response = data.onHttpsInterceptRequest(url);
+    const response = data.onHttpsInterceptRequest(url, method, headerNames, headerValues);
     hilog.info(
       0x1999,
       "WebviewSurface",
@@ -1387,6 +1416,10 @@ function BuildWebview(data: ManagedWebview) {
         src: "",
         controller: data.controller as webview.WebviewController,
         renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
+        // #188: incognito create flag (WebOptions.incognitoMode — options
+        // member, both branches symmetric). Absent style.incognito stays
+        // false = the default non-incognito store, zero behavior change.
+        incognitoMode: data.style.incognito === true,
       })
         // Always "100%": the Web fills its wrapper Stack, and the ArkWeb viewport
         // tracks the wrapper size through container layout — the same mechanism
@@ -1521,6 +1554,10 @@ function BuildWebview(data: ManagedWebview) {
         src: "",
         controller: data.controller as webview.WebviewController,
         renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
+        // #188: incognito create flag (WebOptions.incognitoMode — options
+        // member, both branches symmetric). Absent style.incognito stays
+        // false = the default non-incognito store, zero behavior change.
+        incognitoMode: data.style.incognito === true,
       })
         // Always "100%": the Web fills its wrapper Stack, and the ArkWeb viewport
         // tracks the wrapper size through container layout — the same mechanism
@@ -1673,6 +1710,35 @@ function keySynthesisScripts(data: ManagedWebview): WebviewInitializationScript[
   return base.concat([shim]);
 }
 
+// ─── Live controller index for the main-thread sync bridge (#192) ─────────────
+// `WebviewController.getUrl()` is a synchronous ArkTS API, but the async bridge
+// cannot serve it to a main-thread caller (the TSFN round-trip needs that same
+// thread to pump — deadlock). The dedicated `WebviewUrlPlugin` (sync-main-
+// thread) serves it instead; the per-session `WebviewSurface` instance is not
+// reachable from another plugin class, so attached controllers are indexed here
+// at module scope, keyed by the public webview id. Register on attach, unregister
+// on remove (which `dispose()` funnels through) — the map never outlives a
+// controller.
+const liveWebviewControllers = new Map<string, webview.WebviewController>();
+
+/** Registers an attached controller under the public webview id (#192). */
+export function registerLiveWebviewController(
+  id: string,
+  controller: webview.WebviewController,
+): void {
+  liveWebviewControllers.set(id, controller);
+}
+
+/** Drops the index entry when the webview leaves the surface (#192). */
+export function unregisterLiveWebviewController(id: string): void {
+  liveWebviewControllers.delete(id);
+}
+
+/** Resolves the live controller for the sync `get-url` handler (#192). */
+export function liveWebviewController(id: string): webview.WebviewController | undefined {
+  return liveWebviewControllers.get(id);
+}
+
 function handleControllerAttached(data: ManagedWebview): void {
   if (!data.beginControllerAttach()) {
     return;
@@ -1738,9 +1804,14 @@ function handleControllerAttached(data: ManagedWebview): void {
       data.controller.loadData(data.html!, "text/html", "UTF-8", " ", " ");
     }
     data.markControllerReady();
+    // #192: index the attached controller for the main-thread sync bridge
+    // (WebviewUrlPlugin.get-url). Only the success path registers — a failed
+    // attach leaves no controller to resolve.
+    registerLiveWebviewController(data.id, data.controller as webview.WebviewController);
   } catch (error) {
     const reason = `WebView '${data.id}' controller initialization failed: ${String(error)}`;
     console.error(reason);
+    unregisterLiveWebviewController(data.id);
     data.failControllerAttach(reason);
   }
 }
@@ -1803,23 +1874,58 @@ function handleWebviewAreaChange(data: ManagedWebview, oldArea: Area, newArea: A
 
 /** https-intercept dispatch with the diagnostic log. `modeTag` keeps the two
  *  branches' log variants ('' vs '(embedded)') byte-identical to the former
- *  inline copies. */
+ *  inline copies. #186: the intercepted request's method and headers are
+ *  captured from the `WebResourceRequest` here (the only handler that holds
+ *  the event object) and threaded through to the bridge payload. Both reads
+ *  are guarded: a capture failure must not sink the intercept — the payload
+ *  simply stays without the optional fields (older-plugin shape). */
 function handleWebviewInterceptRequest(
   data: ManagedWebview,
   event: WebInterceptRequestEvent,
   modeTag: string,
 ): WebResourceResponse | null {
   const interceptUrl = event.request.getRequestUrl();
+  let method: string | undefined = undefined;
+  let headerNames: string[] | undefined = undefined;
+  let headerValues: string[] | undefined = undefined;
+  try {
+    method = event.request.getRequestMethod() || undefined;
+    // Parallel same-order arrays via Object.entries (the NAPI wire has no
+    // nested-map form — design D2, Context fix 4).
+    const headerRecord: Record<string, string> = event.request.getRequestHeader() ?? {};
+    const entries: Array<[string, string]> = Object.entries(headerRecord) as Array<[string, string]>;
+    const names: string[] = [];
+    const values: string[] = [];
+    for (const entry of entries) {
+      names.push(String(entry[0]));
+      values.push(String(entry[1] ?? ""));
+    }
+    headerNames = names.length > 0 ? names : undefined;
+    headerValues = values.length > 0 ? values : undefined;
+  } catch (captureError) {
+    hilog.warn(
+      0x1999,
+      "WebviewSurface",
+      "[https-intercept] method/header capture failed (payload degrades to no method/headers): id=%{public}s error=%{public}s",
+      String(data.id),
+      String(captureError),
+    );
+    method = undefined;
+    headerNames = undefined;
+    headerValues = undefined;
+  }
   hilog.info(
     0x1999,
     "WebviewSurface",
-    "[https-intercept] onInterceptRequest%{public}s fired: id=%{public}s url=%{public}s protocols_size=%{public}d",
+    "[https-intercept] onInterceptRequest%{public}s fired: id=%{public}s url=%{public}s protocols_size=%{public}d method=%{public}s header_count=%{public}d",
     modeTag,
     String(data.id),
     interceptUrl ?? "null",
     data.httpsInterceptProtocols?.size ?? 0,
+    method ?? "GET",
+    headerNames?.length ?? 0,
   );
-  return handleHttpsIntercept(data, interceptUrl);
+  return handleHttpsIntercept(data, interceptUrl, method, headerNames, headerValues);
 }
 
 /** pageBegin/pageEnd JS-callback dispatch, gated on the event options. */
@@ -1976,21 +2082,31 @@ class WebviewSurface {
       nativeTag,
       httpsInterceptProtocols: new Set<string>(payload.httpsInterceptProtocolList ?? []),
       resizeDebounceTimer: 0,
-      onHttpsInterceptRequest: (url: string): WebResourceResponse | null => {
+      onHttpsInterceptRequest: (url: string, method?: string,
+        headerNames?: string[], headerValues?: string[]): WebResourceResponse | null => {
         hilog.info(
           0x1999,
           "WebviewSurface",
-          "[https-intercept] onHttpsInterceptRequest enter: id=%{public}s nativeTag=%{public}s url=%{public}s",
+          "[https-intercept] onHttpsInterceptRequest enter: id=%{public}s nativeTag=%{public}s url=%{public}s method=%{public}s header_count=%{public}d",
           payload.id,
           nativeTag,
           url,
+          method ?? "GET",
+          headerNames?.length ?? 0,
         );
         try {
           const response = this.pluginContext.invokeNativeSync(
             "https-intercept",
             HTTPS_INTERCEPT_REQUEST_TYPE,
             HTTPS_INTERCEPT_RESPONSE_TYPE,
-            new WebviewHttpsInterceptRequestPayload(payload.id, nativeTag, url) as ESObject,
+            new WebviewHttpsInterceptRequestPayload(
+              payload.id,
+              nativeTag,
+              url,
+              method,
+              headerNames,
+              headerValues,
+            ) as ESObject,
           ) as WebviewHttpsInterceptResponse;
           hilog.info(
             0x1999,
@@ -2434,9 +2550,13 @@ class WebviewSurface {
   }
 
   async cookiesWithUrl(id: string, url: string, callContext: BridgeCallContext): Promise<string> {
-    await this.controllerEntry(id, callContext);
+    const entry = await this.controllerEntry(id, callContext);
     try {
-      return webview.WebCookieManager.fetchCookieSync(url);
+      // #188: read from the source webview's cookie store (fetchCookieSync's
+      // optional incognito selector, local SDK @ohos.web.webview.d.ts:1642).
+      // Absent style.incognito → false = the default non-incognito store.
+      const incognito = entry.data.style.incognito === true;
+      return webview.WebCookieManager.fetchCookieSync(url, incognito);
     } catch (error) {
       throw new Error(`Unable to get WebView cookies: ${String(error)}`);
     }
@@ -2482,6 +2602,9 @@ class WebviewSurface {
       return false;
     }
     this.entries.delete(id);
+    // #192: drop the sync-bridge controller index entry too (dispose() funnels
+    // through here, so this covers both teardown paths).
+    unregisterLiveWebviewController(id);
     // Unregister runtime blur refresh callback (sub-window webviews only).
     const wid = entry.data.windowId ?? 0;
     if (wid > 0) {
@@ -2830,9 +2953,15 @@ class WebviewSurface {
     return true;
   }
 
-  setCookie(url: string, value: string): boolean {
+  setCookie(id: string, url: string, value: string): boolean {
+    // #188: cookies are per-store — write into the source webview's store via
+    // configCookieSync's incognito third param (local SDK
+    // @ohos.web.webview.d.ts:1717). Unknown id or absent style.incognito →
+    // false = the default non-incognito store (previous behavior preserved).
+    const entry = this.entries.get(id);
+    const incognito = entry?.data.style.incognito === true;
     try {
-      webview.WebCookieManager.configCookieSync(url, value);
+      webview.WebCookieManager.configCookieSync(url, value, incognito);
       return true;
     } catch (error) {
       console.error("WebView set-cookie failed: " + String(error));
@@ -3173,7 +3302,7 @@ export class WebviewPlugin extends AsyncPluginBase {
       if (typeof request.value !== "string") {
         throw new Error("WebView set-cookie value must be a string");
       }
-      const accepted = surface.setCookie(request.url, request.value);
+      const accepted = surface.setCookie(request.id, request.url, request.value);
       return {
         typeName: ACKNOWLEDGEMENT_TYPE,
         value: new WebviewAcceptedResponse(accepted),

@@ -654,7 +654,14 @@ export class WindowPlugin extends AsyncPluginBase {
       // setWindowLayoutFullScreen calls below were the pluginize-era migration
       // of the legacy NAPI path and only implemented the mobile path — a silent
       // visual no-op on desktop (ack OK, no window change).
-      WindowManager.getInstance().setFullscreen(request.windowId, request.on);
+      // #219: the full multi-step chain is now awaited (serializeOpTracked) —
+      // a failed maximize/recover/system-bar step rejects the invoke instead of
+      // acking success.
+      try {
+        await WindowManager.getInstance().setFullscreen(request.windowId, request.on);
+      } catch (error) {
+        throw new Error(`set-fullscreen failed: ${String(error)}`);
+      }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
@@ -912,15 +919,28 @@ export class WindowPlugin extends AsyncPluginBase {
     if (action === "set-topmost") {
       // Delegates to WindowManager.setWindowTopmost (API14 guard + WINDOW_TOPMOST
       // permission handling live there, ported from upstream PR#45).
+      // #219: the platform promise is awaited — a failed setWindowTopmost
+      // (801 non-freeform / 1300002 abnormal state / unknown window) rejects
+      // the invoke (Rust Err → tao warn) instead of acking success.
       const request = parseTopmostRequest(payload);
-      WindowManager.getInstance().setWindowTopmost(request.windowId, request.topmost);
+      try {
+        await WindowManager.getInstance().setWindowTopmost(request.windowId, request.topmost);
+      } catch (error) {
+        throw new Error(`set-topmost failed: ${String(error)}`);
+      }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "set-title") {
       // Delegates to WindowManager.setWindowTitle (API9+, main window + Float sub-windows).
+      // #219: the platform promise is awaited — a failed setWindowTitle (or an
+      // unknown/destroyed window) rejects the invoke instead of acking success.
       const request = parseTitleRequest(payload);
-      WindowManager.getInstance().setWindowTitle(request.windowId, request.title);
+      try {
+        await WindowManager.getInstance().setWindowTitle(request.windowId, request.title);
+      } catch (error) {
+        throw new Error(`set-title failed: ${String(error)}`);
+      }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
@@ -1213,12 +1233,16 @@ export class WindowPlugin extends AsyncPluginBase {
 
     if (action === "set-cursor-icon") {
       // Delegates to WindowManager.setPointerStyle, which resolves the real OHOS
-      // window id internally (pointer.setPointerStyleSync). Fire-and-forget on
-      // the ArkTS side: per-window failures are logged there, the ack only
-      // confirms the request was dispatched (tao's set_cursor_icon is a void
-      // setter).
+      // window id internally (pointer.setPointerStyleSync). #219: failures
+      // propagate from the setPointerStyle chain (unknown window / sync throw)
+      // and reject the invoke — the ack only lands when the style actually
+      // applied.
       const request = parseCursorIconRequest(payload);
-      WindowManager.getInstance().setPointerStyle(request.windowId, request.style);
+      try {
+        WindowManager.getInstance().setPointerStyle(request.windowId, request.style);
+      } catch (error) {
+        throw new Error(`set-cursor-icon failed: ${String(error)}`);
+      }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
@@ -1226,9 +1250,14 @@ export class WindowPlugin extends AsyncPluginBase {
       // Delegates to WindowManager.setPointerVisible (pointer.setPointerVisible).
       // GLOBAL visibility — OHOS has no per-window variant, so this request
       // carries no windowId (multi-window caveat documented as 遗留问题六).
-      // Fire-and-forget: failures are logged in WindowManager.
+      // #219: a failed visibility flip rejects the invoke instead of acking
+      // success.
       const request = parseCursorVisibleRequest(payload);
-      WindowManager.getInstance().setPointerVisible(request.visible);
+      try {
+        WindowManager.getInstance().setPointerVisible(request.visible);
+      } catch (error) {
+        throw new Error(`set-cursor-visible failed: ${String(error)}`);
+      }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
@@ -1236,9 +1265,14 @@ export class WindowPlugin extends AsyncPluginBase {
       // Applies the decoration flag bit-field (closable/maximizable/minimizable/
       // resizable) to a Float sub-window's LocalStorage. The UIAbility main
       // window is a no-op (its decorations are system-managed) — WindowManager
-      // logs and returns, still acknowledged.
+      // logs and returns, still acknowledged. #219: an unknown/destroyed
+      // window throws out of WindowManager and rejects the invoke.
       const request = parseDecorationFlagsRequest(payload);
-      WindowManager.getInstance().setDecorationFlags(request.windowId, request.flags);
+      try {
+        WindowManager.getInstance().setDecorationFlags(request.windowId, request.flags);
+      } catch (error) {
+        throw new Error(`set-decoration-flags failed: ${String(error)}`);
+      }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
@@ -1306,8 +1340,11 @@ export class WindowPlugin extends AsyncPluginBase {
         // A minimized UIAbility main window cannot be brought back by
         // showWindow() — only restore() can (upstream PR#45). Delegate to
         // WindowManager.showWindowMethod, which picks restore() for a minimized
-        // main window and showWindow() for sub-windows.
-        WindowManager.getInstance().showWindowMethod(request.windowId);
+        // main window and showWindow() for sub-windows. #219: the promise is
+        // awaited — a failed restore/show (or an unknown window, thrown by
+        // showWindowMethod itself) rejects into the ack chain instead of a
+        // fake success ack.
+        await WindowManager.getInstance().showWindowMethod(request.windowId);
       }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     } catch (error) {

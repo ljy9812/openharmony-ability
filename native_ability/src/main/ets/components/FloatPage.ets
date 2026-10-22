@@ -180,6 +180,51 @@ struct FloatPage {
               String(e),
             );
           }
+          // #180①: Float-window focus transitions reach tao through the
+          // PENDING_WINDOW_FOCUS queue (notifyWindowFocus → event-loop drain
+          // with edge dedup + paired-blur synthesis). `windowFocusChange` is
+          // absent from the local SDK20 @ohos.window.d.ets; `windowEvent`
+          // (@since 20, WINDOW_ACTIVE=2 / WINDOW_INACTIVE=3) is the equivalent
+          // surface. Everything is probed at runtime: a host without the API
+          // degrades to a structured warn, never a panic.
+          try {
+            if (typeof this.windowClass.on !== "function") {
+              hilog.warn(
+                DOMAIN,
+                "FloatPage",
+                "windowEvent skipped: win.on is not a function",
+              );
+            } else if (
+              typeof arkWindow.WindowEventType === "undefined" ||
+              (arkWindow.WindowEventType as ESObject)?.WINDOW_ACTIVE === undefined ||
+              (arkWindow.WindowEventType as ESObject)?.WINDOW_INACTIVE === undefined
+            ) {
+              hilog.warn(
+                DOMAIN,
+                "FloatPage",
+                "windowEvent skipped: WindowEventType ACTIVE/INACTIVE not available on this host",
+              );
+            } else {
+              this.windowClass.on("windowEvent", (event: arkWindow.WindowEventType) => {
+                const nativeModule: Module | undefined =
+                  AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+                if (nativeModule && typeof nativeModule.notifyWindowFocus === "function") {
+                  if (event === arkWindow.WindowEventType.WINDOW_ACTIVE) {
+                    nativeModule.notifyWindowFocus(this.windowId, true);
+                  } else if (event === arkWindow.WindowEventType.WINDOW_INACTIVE) {
+                    nativeModule.notifyWindowFocus(this.windowId, false);
+                  }
+                }
+              });
+            }
+          } catch (e) {
+            hilog.warn(
+              DOMAIN,
+              "FloatPage",
+              "windowEvent registration failed: %{public}s",
+              String(e),
+            );
+          }
         } else {
           hilog.error(
             DOMAIN,

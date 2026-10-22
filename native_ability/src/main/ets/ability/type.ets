@@ -206,6 +206,11 @@ export interface Module {
   notifyWindowClose?: (windowId: number) => void;
   /** `notify_window_status` — NativeAbility windowStatusChange fan-in. */
   notifyWindowStatus?: (windowId: number, status: number) => void;
+  /** `notify_window_focus` — FloatPage windowEvent ACTIVE/INACTIVE fan-in
+   *  (#180①: Float-window focus transitions reach tao through the
+   *  PENDING_WINDOW_FOCUS queue; camelCase wire, typeof-probed like the other
+   *  optional exports so stale HARs degrade to a structured warn). */
+  notifyWindowFocus?: (windowId: number, focused: boolean) => void;
   /** `set_display_layout` — display.getAllDisplays() position overlay push
    *  (multi-monitor, issue Eulogizethesun/tauri#106). JSON `[[id, x, y], ...]`. */
   setDisplayLayout?: (layoutJson: string) => void;

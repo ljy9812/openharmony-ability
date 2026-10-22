@@ -339,7 +339,15 @@ export class PredefinedActionExecutor {
           // WindowManager.setFullscreen). The previous inline version only did
           // a bare immersive maximize on desktop — the system title bar / Dock
           // stayed visible, diverging from set_fullscreen().
-          WindowManager.getInstance().setFullscreen(resolvedWindowId, true);
+          WindowManager
+            .getInstance()
+            .setFullscreen(resolvedWindowId, true)
+            // #219: setFullscreen is tracked now — this predefined-menu caller
+            // is fire-and-forget; keep the rejection handled (log) instead of
+            // an unhandled rejection.
+            .catch((err: ESObject) => {
+              hilog.warn(DOMAIN, 'Menu', "predefined fullscreen failed: %{public}s", String(err));
+            });
           break;
         }
         case 'recover': {
@@ -348,7 +356,14 @@ export class PredefinedActionExecutor {
           // bars; menubar restored via MW-5 callbacks). Harmless when the
           // window is not fullscreen — the desktop recover() also serves the
           // plain un-maximize case.
-          WindowManager.getInstance().setFullscreen(resolvedWindowId, false);
+          WindowManager
+            .getInstance()
+            .setFullscreen(resolvedWindowId, false)
+            // #219: tracked fullscreen — fire-and-forget caller keeps the
+            // rejection handled (log).
+            .catch((err: ESObject) => {
+              hilog.warn(DOMAIN, 'Menu', "predefined recover failed: %{public}s", String(err));
+            });
           break;
         }
         case 'quit':

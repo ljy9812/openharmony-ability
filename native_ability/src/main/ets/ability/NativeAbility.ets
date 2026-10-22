@@ -183,7 +183,15 @@ export class NativeAbility extends UIAbility {
       }
       // Raise the primary window (restore from minimize, or raise to top —
       // WindowManager.showWindowMethod handles both for main windows).
-      WindowManager.getInstance().showWindowMethod(0);
+      // #219: showWindowMethod is async now — this duplicate-termination
+      // caller is fire-and-forget; keep the rejection handled so onNewWant
+      // continues into terminateSelf even if the raise fails.
+      WindowManager
+        .getInstance()
+        .showWindowMethod(0)
+        .catch((err: ESObject) => {
+          hilog.warn(DOMAIN, 'NativeAbility', 'duplicate-primary raise failed: %{public}s', String(err));
+        });
       // Terminate this duplicate. Async — later callbacks are gated on
       // isDuplicatePrimary in case the system still delivers them.
       (this.context as common.UIAbilityContext).terminateSelf().catch((e: ESObject) => {
@@ -735,7 +743,14 @@ export class NativeAbility extends UIAbility {
       // Dock hover hidden on entry (WindowManager.setFullscreen desktop path)
       // are restored too. The internal recover() triggers
       // windowRectChange(RECOVER) → menubar restore (see on("windowRectChange")).
-      WindowManager.getInstance().setFullscreen(this.abilityWindowId, false);
+      // #219: setFullscreen is tracked now — this Esc fire-and-forget caller
+      // keeps the rejection handled (log) instead of an unhandled rejection.
+      WindowManager
+        .getInstance()
+        .setFullscreen(this.abilityWindowId, false)
+        .catch((err: ESObject) => {
+          hilog.warn(DOMAIN, 'NativeAbility', 'Esc fullscreen exit failed: %{public}s', String(err));
+        });
     });
 
     setPrimaryWebviewControllerCallback((controller: ESObject) => {

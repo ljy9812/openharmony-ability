@@ -314,6 +314,8 @@ pub async fn create_bottom_demo_webview() -> Result<()> {
                     height: Some(Either::B("30%".to_owned())),
                     visible: None,
                     background_color: Some("#00000000".to_owned()),
+                    // #188: demo keeps the default non-incognito store.
+                    incognito: None,
                 })
                 .url(WEB_URL),
         )
