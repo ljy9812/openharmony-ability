@@ -1382,14 +1382,11 @@ pub trait WebviewUrlSyncExt {
 impl WebviewUrlSyncExt for OpenHarmonyApp {
     fn get_url_sync(&self, env: &Env, id: &str) -> Result<String> {
         self.with_main_thread_bridge(env, |bridge| {
-            let response = bridge.call_sync::<
-                WebviewUrlBridgePlugin,
-                WebviewUrlGetRequest,
-                WebviewUrlGetResponse,
-            >(
-                "get-url",
-                WebviewUrlGetRequest { id: id.to_string() },
-            )?;
+            let response = bridge
+                .call_sync::<WebviewUrlBridgePlugin, WebviewUrlGetRequest, WebviewUrlGetResponse>(
+                    "get-url",
+                    WebviewUrlGetRequest { id: id.to_string() },
+                )?;
             Ok(response.url)
         })
     }

@@ -747,7 +747,10 @@ mod tests {
             explicit.header_names.as_deref(),
             Some(&["Access-Control-Allow-Origin".to_owned()][..])
         );
-        assert_eq!(explicit.header_values.as_deref(), Some(&["*".to_owned()][..]));
+        assert_eq!(
+            explicit.header_values.as_deref(),
+            Some(&["*".to_owned()][..])
+        );
     }
 
     #[test]
