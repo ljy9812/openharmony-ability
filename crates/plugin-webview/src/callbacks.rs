@@ -13,10 +13,10 @@ use napi_ohos::{Error, Result};
 
 use super::{
     controller, WebviewCallbackOptions, WebviewDownloadEndEvent, WebviewDownloadStartRequest,
-    WebviewDownloadStartResponse, WebviewDragEvent, WebviewDropEvent, WebviewHttpsInterceptRequest,
-    WebviewHttpsInterceptResponse, WebviewNavigationRequest, WebviewNavigationResponse,
-    WebviewNewWindowRequest, WebviewNewWindowResponse, WebviewPageEvent, WebviewScaleChangeEvent,
-    WebviewTitleChangeEvent,
+    WebviewDownloadStartResponse, WebviewDragEvent, WebviewDropEvent, WebviewFullScreenChangeEvent,
+    WebviewHttpsInterceptRequest, WebviewHttpsInterceptResponse, WebviewNavigationRequest,
+    WebviewNavigationResponse, WebviewNewWindowRequest, WebviewNewWindowResponse, WebviewPageEvent,
+    WebviewScaleChangeEvent, WebviewTitleChangeEvent,
 };
 
 type NavigationCallback = Arc<dyn Fn(WebviewNavigationRequest) -> bool + Send + Sync + 'static>;
@@ -26,6 +26,7 @@ type DownloadStartCallback = Arc<
 type DownloadEndCallback = Arc<dyn Fn(WebviewDownloadEndEvent) + Send + Sync + 'static>;
 type TitleChangeCallback = Arc<dyn Fn(WebviewTitleChangeEvent) + Send + Sync + 'static>;
 type ScaleChangeCallback = Arc<dyn Fn(WebviewScaleChangeEvent) + Send + Sync + 'static>;
+type FullscreenChangeCallback = Arc<dyn Fn(WebviewFullScreenChangeEvent) + Send + Sync + 'static>;
 type DragEnterCallback = Arc<dyn Fn(WebviewDragEvent) + Send + Sync + 'static>;
 type DragOverCallback = Arc<dyn Fn(WebviewDragEvent) + Send + Sync + 'static>;
 type DragDropCallback = Arc<dyn Fn(WebviewDropEvent) + Send + Sync + 'static>;
@@ -48,6 +49,7 @@ struct WebviewCallbacks {
     download_end: Option<DownloadEndCallback>,
     title_change: Option<TitleChangeCallback>,
     scale_change: Option<ScaleChangeCallback>,
+    fullscreen_change: Option<FullscreenChangeCallback>,
     drag_enter: Option<DragEnterCallback>,
     drag_over: Option<DragOverCallback>,
     drag_drop: Option<DragDropCallback>,
@@ -67,6 +69,7 @@ impl WebviewCallbacks {
             download_end: self.download_end.is_some(),
             title_change: self.title_change.is_some(),
             scale_change: self.scale_change.is_some(),
+            full_screen_change: self.fullscreen_change.is_some(),
             drag_drop: self.drag_enter.is_some()
                 || self.drag_over.is_some()
                 || self.drag_drop.is_some()
@@ -83,6 +86,7 @@ impl WebviewCallbacks {
             && self.download_end.is_none()
             && self.title_change.is_none()
             && self.scale_change.is_none()
+            && self.fullscreen_change.is_none()
             && self.drag_enter.is_none()
             && self.drag_over.is_none()
             && self.drag_drop.is_none()
@@ -166,6 +170,18 @@ impl WebviewCallbacksBuilder {
         F: Fn(WebviewScaleChangeEvent) + Send + Sync + 'static,
     {
         self.callbacks.scale_change = Some(Arc::new(callback));
+        self
+    }
+
+    /// Receives element-fullscreen notifications (`onFullScreenEnter`/`onFullScreenExit`) on
+    /// the active N-API callback and should return promptly. `entering` is `true` on enter,
+    /// `false` on exit. The runtime forwards this as an automatic window-fullscreen drive
+    /// (Windows `ContainsFullScreenElementChanged` parity).
+    pub fn on_fullscreen_change<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(WebviewFullScreenChangeEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.fullscreen_change = Some(Arc::new(callback));
         self
     }
 
@@ -549,6 +565,22 @@ pub(crate) fn dispatch_scale_change(event: WebviewScaleChangeEvent) -> Result<()
         .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
         .get(&event.id)
         .and_then(|callbacks| callbacks.scale_change.as_ref())
+        .cloned();
+    if let Some(callback) = callback {
+        callback(event);
+    }
+    Ok(())
+}
+
+pub(crate) fn dispatch_fullscreen_change(event: WebviewFullScreenChangeEvent) -> Result<()> {
+    if !controller::is_current(&event.id, &event.native_tag)? {
+        return Ok(());
+    }
+    let callback = CALLBACKS
+        .read()
+        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
+        .get(&event.id)
+        .and_then(|callbacks| callbacks.fullscreen_change.as_ref())
         .cloned();
     if let Some(callback) = callback {
         callback(event);

@@ -41,6 +41,7 @@ const DOWNLOAD_START_RESPONSE_TYPE = "ohos.webview.DownloadStartResponse";
 const DOWNLOAD_END_EVENT_TYPE = "ohos.webview.DownloadEndEvent";
 const TITLE_CHANGE_EVENT_TYPE = "ohos.webview.TitleChangeEvent";
 const SCALE_CHANGE_EVENT_TYPE = "ohos.webview.ScaleChangeEvent";
+const FULLSCREEN_CHANGE_EVENT_TYPE = "ohos.webview.FullScreenChangeEvent";
 const ENGINE_LIFECYCLE_EVENT_TYPE = "ohos.webview.EngineLifecycleEvent";
 const ENGINE_LIFECYCLE_RESPONSE_TYPE = "ohos.webview.EngineLifecycleResponse";
 const CONTROLLER_EVENT_TYPE = "ohos.webview.ControllerEvent";
@@ -70,6 +71,13 @@ const SET_COOKIE_REQUEST_TYPE = "ohos.webview.SetCookieRequest";
 /** Shape of the Web component onInterceptRequest callback event. */
 interface WebInterceptRequestEvent {
   request: WebResourceRequest;
+}
+
+/** Shape of the Web component onFullScreenEnter callback event. Only the exit
+ *  handler is consumed (videoWidth/videoHeight ignored); declared locally to
+ *  preserve the API-12 package baseline (WebInterceptRequestEvent precedent). */
+interface WebFullScreenEnterEvent {
+  handler?: FullScreenExitHandler | null;
 }
 
 /** Optional static ArkWeb API resolved dynamically to preserve the API-12 package baseline. */
@@ -177,6 +185,7 @@ interface WebviewEventOptions {
   newWindow?: boolean | null;
   pageBegin?: boolean | null;
   pageEnd?: boolean | null;
+  fullScreenChange?: boolean | null;
 }
 
 interface WebviewCreatePayload {
@@ -265,6 +274,15 @@ interface ManagedWebview extends WebviewCreatePayload {
   onDragLeave: (x: number, y: number) => void;
   onPageBegin: (url: string) => void;
   onPageEnd: (url: string) => void;
+  /** Element-fullscreen notification (ArkWeb `onFullScreenEnter`/`onFullScreenExit`):
+   *  the page requested `requestFullscreen()` (courseware play, video, ...).
+   *  Reports entering=true/false so the runtime can drive window fullscreen
+   *  (Windows ContainsFullScreenElementChanged parity). */
+  onFullScreenChange: (entering: boolean) => void;
+  /** Handler captured on `onFullScreenEnter` so a host-initiated exit can call
+   *  `exitFullScreen()` (ArkWeb stays in fullscreen mode otherwise and stops
+   *  firing the callbacks). Cleared on `onFullScreenExit`. */
+  fullScreenExitHandler?: FullScreenExitHandler | null;
   onNewWindow: (targetUrl: string, isAlert: boolean, isUserTrigger: boolean) => boolean;
   /**
    * In-page popup shown by the `.onWindowNew` Allow branch. ArkWeb's own popup is
@@ -620,6 +638,18 @@ class WebviewScaleChangeEvent {
     this.nativeTag = nativeTag;
     this.oldScale = oldScale;
     this.newScale = newScale;
+  }
+}
+
+class WebviewFullScreenChangeEvent {
+  readonly id: string;
+  readonly nativeTag: string;
+  readonly entering: boolean;
+
+  constructor(id: string, nativeTag: string, entering: boolean) {
+    this.id = id;
+    this.nativeTag = nativeTag;
+    this.entering = entering;
   }
 }
 
@@ -1042,6 +1072,10 @@ function normalizeEventOptions(
     newWindow: optionalEventFlag(options?.newWindow, "WebView eventOptions.newWindow"),
     pageBegin: optionalEventFlag(options?.pageBegin, "WebView eventOptions.pageBegin"),
     pageEnd: optionalEventFlag(options?.pageEnd, "WebView eventOptions.pageEnd"),
+    fullScreenChange: optionalEventFlag(
+      options?.fullScreenChange,
+      "WebView eventOptions.fullScreenChange",
+    ),
   };
 }
 
@@ -1619,6 +1653,12 @@ function BuildWebview(data: ManagedWebview) {
         .onPageEnd((e) => {
           handleWebviewPageEnd(data, e.url);
         })
+        .onFullScreenEnter((event) => {
+          handleWebviewFullScreenEnter(data, event);
+        })
+        .onFullScreenExit(() => {
+          handleWebviewFullScreenExit(data);
+        })
         .onWindowNew((e) => {
           handleWebviewWindowNew(data, e);
         })
@@ -1759,6 +1799,12 @@ function BuildWebview(data: ManagedWebview) {
         })
         .onPageEnd((e) => {
           handleWebviewPageEnd(data, e.url);
+        })
+        .onFullScreenEnter((event) => {
+          handleWebviewFullScreenEnter(data, event);
+        })
+        .onFullScreenExit(() => {
+          handleWebviewFullScreenExit(data);
         })
         .onDragEnter((dragEvent: DragEvent) => {
           dispatchWebviewDragEnter(data, dragEvent);
@@ -2077,6 +2123,34 @@ function handleWebviewPageEnd(data: ManagedWebview, url: string): void {
 }
 
 /**
+ * onFullScreenEnter: the page requested element fullscreen (`requestFullscreen()`,
+ * courseware play, video, ...). Capture ArkWeb's exit handler for host-initiated
+ * exits, then report entering=true (gated) so the runtime can drive window
+ * fullscreen (Windows `ContainsFullScreenElementChanged` parity).
+ */
+function handleWebviewFullScreenEnter(data: ManagedWebview, event: WebFullScreenEnterEvent): void {
+  data.fullScreenExitHandler = event.handler ?? null;
+  hilog.info(
+    0x1999,
+    "WebviewSurface",
+    "web fullscreen enter: id=%{public}s handler=%{public}s",
+    data.id,
+    data.fullScreenExitHandler !== null ? "yes" : "no",
+  );
+  if (data.eventOptions.fullScreenChange === true) {
+    data.onFullScreenChange(true);
+  }
+}
+
+function handleWebviewFullScreenExit(data: ManagedWebview): void {
+  data.fullScreenExitHandler = null;
+  hilog.info(0x1999, "WebviewSurface", "web fullscreen exit: id=%{public}s", data.id);
+  if (data.eventOptions.fullScreenChange === true) {
+    data.onFullScreenChange(false);
+  }
+}
+
+/**
  * onWindowNew: ask the embedding runtime whether the new window is allowed.
  * - Deny / Create mode (auto suite): cancel ArkWeb's popup via
  *   `setWebController(null)` (non-blocking; `setWebController` on an unhosted
@@ -2338,6 +2412,7 @@ class WebviewSurface {
       naturalLayout,
       geometryModifier: new WebviewGeometryModifier(),
       didInitialLoad: false,
+      fullScreenExitHandler: null,
       beginControllerAttach: (): boolean => false,
       notifyNativeControllerAttached: (): void => {},
       markControllerReady: (): void => {},
@@ -2466,6 +2541,18 @@ class WebviewSurface {
           );
         } catch (error) {
           console.error("WebView page-end notification failed: " + String(error));
+        }
+      },
+      onFullScreenChange: (entering: boolean): void => {
+        try {
+          notifyNative(
+            this.pluginContext,
+            "fullscreen-change",
+            FULLSCREEN_CHANGE_EVENT_TYPE,
+            new WebviewFullScreenChangeEvent(payload.id, nativeTag, entering) as ESObject,
+          );
+        } catch (error) {
+          console.error("WebView fullscreen-change notification failed: " + String(error));
         }
       },
       onNewWindow: (targetUrl: string, isAlert: boolean, isUserTrigger: boolean): boolean => {

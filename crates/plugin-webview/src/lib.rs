@@ -77,9 +77,8 @@ impl BridgePlugin for WebviewBridgePlugin {
                 Self::on_callback_decision_event(&event)
             }
             "drag-enter" | "drag-over" | "drag-drop" | "drag-leave" | "page-begin" | "page-end"
-            | "download-end" | "title-change" | "print-state" | "scale-change" => {
-                Self::on_callback_ack_event(&event)
-            }
+            | "download-end" | "title-change" | "print-state" | "scale-change"
+            | "fullscreen-change" => Self::on_callback_ack_event(&event),
             _ => Err(unsupported_main_thread_event(&event)),
         }
     }
@@ -250,6 +249,11 @@ impl WebviewBridgePlugin {
             "scale-change" => {
                 let notification = event.decode::<WebviewScaleChangeEvent>()?;
                 callbacks::dispatch_scale_change(notification)?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
+            "fullscreen-change" => {
+                let notification = event.decode::<WebviewFullScreenChangeEvent>()?;
+                callbacks::dispatch_fullscreen_change(notification)?;
                 event.respond(WebviewEventAcknowledgement { accepted: true })
             }
             "print-state" => {
@@ -439,6 +443,8 @@ pub struct WebviewCallbackOptions {
     pub page_begin: bool,
     /// True when a page-end callback is registered.
     pub page_end: bool,
+    /// True when a fullscreen-change (`onFullScreenEnter`/`onFullScreenExit`) callback is registered.
+    pub full_screen_change: bool,
 }
 
 /// A document-start script and the URL rules for pages where ArkWeb may inject it.
@@ -814,9 +820,31 @@ pub struct WebviewScaleChangeEvent {
     pub new_scale: f64,
 }
 
+/// Element-fullscreen notification delivered directly through a named N-API callback.
+///
+/// The page requested `requestFullscreen()` (ArkWeb `onFullScreenEnter`/
+/// `onFullScreenExit`); the runtime uses it to drive window fullscreen with the
+/// same automatic chain as the Windows backend
+/// (`ContainsFullScreenElementChanged` → window set_fullscreen).
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewFullScreenChangeEvent {
+    /// Module-local WebView id whose page entered/exited element fullscreen.
+    pub id: String,
+    /// Process-unique controller generation used to reject callbacks from a replaced WebView.
+    pub native_tag: String,
+    /// `true` on enter (ArkWeb `onFullScreenEnter`), `false` on exit
+    /// (ArkWeb `onFullScreenExit`).
+    pub entering: bool,
+}
+
 impl_bridge_napi_type!(WebviewDownloadEndEvent, "ohos.webview.DownloadEndEvent");
 impl_bridge_napi_type!(WebviewTitleChangeEvent, "ohos.webview.TitleChangeEvent");
 impl_bridge_napi_type!(WebviewScaleChangeEvent, "ohos.webview.ScaleChangeEvent");
+impl_bridge_napi_type!(
+    WebviewFullScreenChangeEvent,
+    "ohos.webview.FullScreenChangeEvent"
+);
 
 /// Response used by one-way named N-API notifications sent directly from ArkTS.
 #[napi(object)]
@@ -2491,6 +2519,10 @@ mod tests {
         assert_eq!(
             <WebviewScaleChangeEvent as BridgeNapiType>::TYPE_NAME,
             "ohos.webview.ScaleChangeEvent"
+        );
+        assert_eq!(
+            <WebviewFullScreenChangeEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.FullScreenChangeEvent"
         );
         assert_eq!(
             <WebviewEventAcknowledgement as BridgeNapiType>::TYPE_NAME,
