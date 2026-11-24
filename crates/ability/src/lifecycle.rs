@@ -435,12 +435,30 @@ fn make_on_configuration_updated<'a>(
             mcc,
             mnc,
         };
-        // S1-061 fix-wave probe: log every instance's callback BEFORE the
+        // S1-061 fix-wave probe: log every callback invocation BEFORE the
         // primary gate -- a device round can then tell "NAPI callback never
         // arrived" (no line at the switch moment) from "arrived but only a
         // non-primary instance saw it" (line with non-zero window_id) from
         // "arrived and dispatched" (line with window_id=0, followed by the
         // event_loop ConfigChanged probe line).
+        //
+        // Probe-reading caveats (four):
+        // (a) The line only exists when the `log` feature is enabled
+        //     (otherwise `crate::debug!` expands to a no-op) AND the host app
+        //     has installed a `log` backend (e.g. hilog init) — this crate
+        //     ships none.
+        // (b) "No probe line" is not total silence: a property-read failure
+        //     in this closure propagates back to the ArkTS forEachLifecycle
+        //     catch, which logs error-level "Lifecycle callback error"
+        //     (NativeAbility.ets). Only a reading protocol that trusts the
+        //     probe line alone can misread that as "callback never arrived".
+        // (c) The ArkTS side dispatches this callback through
+        //     enqueueLifecycleOperation ("configuration-updated"), so the
+        //     line can land a queued tick after the actual switch moment.
+        // (d) forEachLifecycle invokes the NAPI callback once per loaded
+        //     module, so line count = instances x modules — "every instance's
+        //     callback" means once per instance per module, not once per
+        //     instance.
         crate::debug!(
             "onConfigurationUpdate: window_id={}, font_size_scale={}",
             window_id,

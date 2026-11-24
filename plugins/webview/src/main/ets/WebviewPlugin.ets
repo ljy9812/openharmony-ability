@@ -3460,7 +3460,11 @@ class WebviewSurface {
       return false;
     }
     try {
-      // 1) Dynamically request PRINT permission (user_grant; undgranted → print fails).
+      // 1) Dynamically request PRINT permission. PRINT is system_grant
+      // (normal, since API 10) — granted at install, so requestPermissionsFromUser
+      // returns immediately with no runtime dialog (this step is a defensive
+      // guard, effectively a no-op on current SDKs). The grant check below is
+      // still honored: undgranted → print fails.
       const atManager = abilityAccessCtrl.createAtManager();
       const permResult = await atManager.requestPermissionsFromUser(ctx, ["ohos.permission.PRINT"]);
       const granted =

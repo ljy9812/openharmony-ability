@@ -1220,7 +1220,7 @@ export class NativeAbility extends UIAbility {
     // come from ArkTS Display.x/y (API 19+; on lower versions undefined → 0,
     // same as before the fix). add/remove fire on external-monitor hot-plug;
     // change on attribute changes (resolution/orientation/fold).
-    // getAllDisplays is API 12+.
+    // getAllDisplays is API 9+ (both overloads).
     this.pushDisplayLayout();
     try {
       this.displayAddListener = (displayId: number): void =>

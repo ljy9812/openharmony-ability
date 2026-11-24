@@ -61,6 +61,10 @@ impl UrlOpenResponse {
 /// NOT a `file://` URI — the ArkTS side maps the real path to the file-manager
 /// virtual uri and dispatches the implicit `ohos.want.action.viewData` Want —
 /// the system resolves the handling file manager (no hardcoded bundleName).
+/// Error surface: if no installed skill matches the implicit Want,
+/// `startAbility` throws 16000019 ("No matching ability") and the ArkTS catch
+/// rethrows it as an explicit "reveal-in-dir is unsupported on this system"
+/// error — a loud failure with no fallback bundle.
 /// Sandbox or unmappable-prefix paths are rejected ArkTS-side with a
 /// documented platform-limitation error.
 #[napi(object)]

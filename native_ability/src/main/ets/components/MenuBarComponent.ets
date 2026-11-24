@@ -769,7 +769,7 @@ export struct MenuBarComponent {
       // bindMenu + showInSubWindow on an invisible anchor renders visually but
       // does not deliver pointer events to MenuItem.onClick in the sub-window.
       // bindContextMenu is the documented sub-window menu API (HarmonyOS 5.0.0/API12+),
-      // and its MenuItem.onClick fires reliably. Position via `offset` (API12);
+      // and its MenuItem.onClick fires reliably. Position via `offset` (API10);
       // `anchorPosition` is API20+ and unavailable here.
       Column()
         .width(1)
