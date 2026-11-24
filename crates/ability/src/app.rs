@@ -1511,6 +1511,12 @@ pub fn notify_window_status(window_id: i32, status: i32) {
             poisoned.into_inner().push((window_id, status));
         }
     }
+    // Wake the embedding runtime's event loop so the queued status drains on the
+    // next pass instead of sitting until an unrelated event — same discipline as
+    // `notify_window_close` (whose comment explains the waker aliasing); tao only
+    // drains at the start of an iteration, so a sub-window status edge arriving
+    // while the loop is idle would otherwise be delayed indefinitely.
+    crate::waker::wake_installed_app();
 }
 
 /// Drain all pending window status changes.
@@ -1552,6 +1558,11 @@ pub fn notify_window_focus(window_id: i64, focused: bool) {
             poisoned.into_inner().push((window_id, focused));
         }
     }
+    // Wake the embedding runtime's event loop so the queued focus transition
+    // drains promptly (see `notify_window_status` above) — otherwise a
+    // sub-window focus edge arriving while the loop is idle leaves a stale
+    // focused mirror until the next unrelated event.
+    crate::waker::wake_installed_app();
 }
 
 /// Drain all pending window focus transitions.

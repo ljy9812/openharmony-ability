@@ -240,7 +240,7 @@ export class PredefinedActionExecutor {
     try {
       // Resolve target window for window operations
       // getTargetWindow() handles both Menu Bar (targetWindowId provided) and Tray (undefined → lastUserInteractedWindow)
-      const { win, windowId: resolvedWindowId } = this.getTargetWindow(targetWindowId);
+      const { windowId: resolvedWindowId } = this.getTargetWindow(targetWindowId);
 
       hilog.info(
         DOMAIN,
@@ -373,9 +373,17 @@ export class PredefinedActionExecutor {
           await this.closeWindow(targetWindowId);
           break;
         case "maximize":
-          // Use FOLLOW_APP_IMMERSIVE_SETTING to preserve existing fullscreen layout (avoid white bar).
-          // ENTER_IMMERSIVE explicitly enters/exits fullscreen on maximize/recover, causing a layout gap.
-          await win?.maximize(window.MaximizePresentation.FOLLOW_APP_IMMERSIVE_SETTING);
+          // Delegate to WindowManager.maximizeWindow so the predefined-menu
+          // maximize goes through the same per-window serializeOp serial chain,
+          // the maximizable gate, and the preMaximizeRect snapshot as every
+          // other maximize entry point (#27): the previous raw
+          // win.maximize(FOLLOW_APP_IMMERSIVE_SETTING) call bypassed all three —
+          // a menu recover (queued) could interleave with this direct maximize,
+          // and the skipped snapshot made the later paired recoverWindow land in
+          // the no-snapshot branch ([0,0] re-anchoring bug it exists to fix).
+          // FOLLOW_APP_IMMERSIVE_SETTING semantics are preserved inside
+          // maximizeWindow (same presentation constant).
+          WindowManager.getInstance().maximizeWindow(resolvedWindowId);
           break;
         case "fullscreen": {
           // Delegate to WindowManager.setFullscreen so predefined fullscreen

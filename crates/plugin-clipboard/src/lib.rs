@@ -188,6 +188,17 @@ pub struct ClipboardClearResponse {
 
 impl_bridge_napi_type!(ClipboardClearResponse, "ohos.clipboard.ClearResponse");
 
+/// Read actions gate on `ohos.permission.READ_PASTEBOARD`, which is `user_grant`:
+/// the first read on a phone pops the system permission dialog inside the bridge
+/// window, and the user may legitimately take longer than the 15s bridge default
+/// to answer it (the ArkTS side then completes anyway and its result would be
+/// dropped). Give reads a wider budget - aligned with the plugin-webview snapshot
+/// / plugin-files / plugin-permission precedent of 60s for heavy or
+/// user-interaction-gated actions.
+fn read_call_options() -> BridgeCallOptions {
+    BridgeCallOptions::default().with_timeout_ms(60_000)
+}
+
 /// Worker-safe facade for the system clipboard.
 #[derive(Clone)]
 pub struct ClipboardClient {
@@ -210,12 +221,24 @@ impl ClipboardClient {
         Request: BridgeNapiType,
         Response: BridgeNapiType,
     {
+        self.call_with_options(action, request, BridgeCallOptions::default())
+            .await
+    }
+
+    /// Like [`call`] with an explicit per-call policy - permission-gated reads
+    /// override the 15s default timeout via [`read_call_options`].
+    async fn call_with_options<Request, Response>(
+        &self,
+        action: &str,
+        request: Request,
+        options: BridgeCallOptions,
+    ) -> Result<Response>
+    where
+        Request: BridgeNapiType,
+        Response: BridgeNapiType,
+    {
         self.bridge
-            .call_async::<ClipboardBridgePlugin, Request, Response>(
-                action,
-                request,
-                BridgeCallOptions::default(),
-            )
+            .call_async::<ClipboardBridgePlugin, Request, Response>(action, request, options)
             .await
     }
 
@@ -223,9 +246,10 @@ impl ClipboardClient {
     /// Returns `None` if the clipboard contains no text.
     pub async fn read_text(&self) -> Result<Option<String>> {
         let response = self
-            .call::<ClipboardReadTextRequest, ClipboardReadTextResponse>(
+            .call_with_options::<ClipboardReadTextRequest, ClipboardReadTextResponse>(
                 "read-text",
                 ClipboardReadTextRequest {},
+                read_call_options(),
             )
             .await?;
         Ok(response.text)
@@ -275,9 +299,10 @@ impl ClipboardClient {
     /// `read_text` returning `None`.
     pub async fn read_image(&self) -> Result<ClipboardImage> {
         let response = self
-            .call::<ClipboardReadImageRequest, ClipboardReadImageResponse>(
+            .call_with_options::<ClipboardReadImageRequest, ClipboardReadImageResponse>(
                 "read-image",
                 ClipboardReadImageRequest {},
+                read_call_options(),
             )
             .await?;
         decode_png_base64(&response.png_base64, response.width, response.height)

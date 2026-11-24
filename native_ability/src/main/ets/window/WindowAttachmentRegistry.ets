@@ -1,8 +1,8 @@
-import { UIContext } from '@kit.ArkUI';
-import { FrameNode } from '@ohos.arkui.node';
-import web_webview from '@ohos.web.webview';
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { DOMAIN } from '../helper/constants';
+import { UIContext } from "@kit.ArkUI";
+import { FrameNode } from "@ohos.arkui.node";
+import web_webview from "@ohos.web.webview";
+import { hilog } from "@kit.PerformanceAnalysisKit";
+import { DOMAIN } from "../helper/constants";
 
 /**
  * Per-window attachment registry, extracted from WindowManager (issue #87 major-5).
@@ -63,7 +63,12 @@ export class WindowAttachmentRegistry {
   // controller into executor.controller), so this map never diverges from main behavior.
   registerWebviewController(windowId: number, controller: web_webview.WebviewController): void {
     this.webviewControllers.set(windowId, controller);
-    hilog.info(DOMAIN, 'WindowManager', 'WebviewController registered for window: %{public}d', windowId);
+    hilog.info(
+      DOMAIN,
+      "WindowManager",
+      "WebviewController registered for window: %{public}d",
+      windowId,
+    );
   }
 
   // Lookup for menu.getTargetController. Returns undefined for main window (id=0) and
@@ -72,11 +77,22 @@ export class WindowAttachmentRegistry {
     return this.webviewControllers.get(windowId);
   }
 
+  // Owner-checked removal counterpart of registerWebviewController (#C3): a webview
+  // remove/dispose clears the window entry it registered, but a sibling in the same
+  // window may have re-registered after it — only delete when the registered
+  // controller IS the caller's. No-op when the entry is absent or held by a newer
+  // sibling (window teardown still clears everything through clearWindow).
+  unregisterWebviewController(windowId: number, controller: web_webview.WebviewController): void {
+    if (this.webviewControllers.get(Number(windowId)) === controller) {
+      this.webviewControllers.delete(Number(windowId));
+    }
+  }
+
   // ─── UIContext / component root ───
 
   // Register UIContext (main window calls in aboutToAppear, sub-window calls after loadContent)
   registerUIContext(windowId: number, ctx: UIContext): void {
-    hilog.info(DOMAIN, 'WindowManager', `UIContext registered for window: %{public}d`, windowId);
+    hilog.info(DOMAIN, "WindowManager", `UIContext registered for window: %{public}d`, windowId);
     this.uiContexts.set(windowId, ctx);
   }
 
@@ -87,7 +103,12 @@ export class WindowAttachmentRegistry {
 
   // Register component root for a sub-window (called by DefaultXComponent sub-window mode)
   registerComponentRoot(windowId: number, root: FrameNode): void {
-    hilog.info(DOMAIN, 'WindowManager', `Component root registered for window: %{public}d`, windowId);
+    hilog.info(
+      DOMAIN,
+      "WindowManager",
+      `Component root registered for window: %{public}d`,
+      windowId,
+    );
     this.componentRoots.set(windowId, root);
     // Flush any pending callbacks registered by plugins (e.g. webview create deferred
     // due to timing race -- webview bridge create arriving before SubWindowPage.aboutToAppear).
@@ -97,7 +118,13 @@ export class WindowAttachmentRegistry {
   // Get component root for a sub-window (called by WebviewSurface.create)
   getComponentRoot(windowId: number): FrameNode | undefined {
     const root = this.componentRoots.get(windowId);
-    hilog.info(DOMAIN, 'WindowManager', 'getComponentRoot windowId=%{public}d found=%{public}s', windowId, root !== undefined ? 'true' : 'false');
+    hilog.info(
+      DOMAIN,
+      "WindowManager",
+      "getComponentRoot windowId=%{public}d found=%{public}s",
+      windowId,
+      root !== undefined ? "true" : "false",
+    );
     return root;
   }
 
@@ -107,7 +134,13 @@ export class WindowAttachmentRegistry {
       return;
     }
     WindowAttachmentRegistry.pendingComponentRootCallbacks.delete(windowId);
-    hilog.info(DOMAIN, 'WindowManager', 'Flushing %{public}d pending componentRoot callbacks for window %{public}d', callbacks.length, windowId);
+    hilog.info(
+      DOMAIN,
+      "WindowManager",
+      "Flushing %{public}d pending componentRoot callbacks for window %{public}d",
+      callbacks.length,
+      windowId,
+    );
     for (const cb of callbacks) {
       cb();
     }
@@ -139,14 +172,29 @@ export class WindowAttachmentRegistry {
   fireBlurRefresh(windowId: number, radius: number): void {
     const refreshCb = this.blurRefreshCallbacks.get(Number(windowId));
     if (refreshCb) {
-      hilog.info(DOMAIN, 'WindowManager', 'applyWindowBlur: blurRefreshCb FOUND, invoking id=%{public}d', windowId);
+      hilog.info(
+        DOMAIN,
+        "WindowManager",
+        "applyWindowBlur: blurRefreshCb FOUND, invoking id=%{public}d",
+        windowId,
+      );
       try {
         refreshCb(radius);
       } catch (e) {
-        hilog.warn(DOMAIN, 'WindowManager', 'applyWindowBlur refresh callback failed: %{public}s', String(e));
+        hilog.warn(
+          DOMAIN,
+          "WindowManager",
+          "applyWindowBlur refresh callback failed: %{public}s",
+          String(e),
+        );
       }
     } else {
-      hilog.warn(DOMAIN, 'WindowManager', 'applyWindowBlur: NO blurRefreshCb registered id=%{public}d (webview not created yet, or path mismatch)', windowId);
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "applyWindowBlur: NO blurRefreshCb registered id=%{public}d (webview not created yet, or path mismatch)",
+        windowId,
+      );
     }
   }
 

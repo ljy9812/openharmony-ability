@@ -1,18 +1,28 @@
-import { window, UIContext } from '@kit.ArkUI';
-import { FrameNode } from '@ohos.arkui.node';
-import { common } from '@kit.AbilityKit';
-import pointer from '@ohos.multimodalInput.pointer';
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { deviceInfo } from '@kit.BasicServicesKit';
-import display from '@ohos.display';
-import * as SubWindowPage from '../components/SubWindowPage';
-import { getMenuDataCallback, windowKeyForId } from '../components/MenuBarComponent';
-import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from '../helper/constants';
-import { clearClipboardEnabled, clearZoomHotkeysEnabled, setClipboardEnabled, setZoomHotkeysEnabled } from '../helper/accelerator_matcher';
-import { unregisterKeySynthesisController, unregisterWebFocus } from '../helper/key_synthesis';
-import web_webview from '@ohos.web.webview';
-import { RectThrottle, WindowRectEventWrap, WindowRectSnapshot, WindowSizeEventWrap } from './RectThrottle';
-import { WindowAttachmentRegistry } from './WindowAttachmentRegistry';
+import { window, UIContext } from "@kit.ArkUI";
+import { FrameNode } from "@ohos.arkui.node";
+import { common } from "@kit.AbilityKit";
+import pointer from "@ohos.multimodalInput.pointer";
+import { hilog } from "@kit.PerformanceAnalysisKit";
+import { deviceInfo } from "@kit.BasicServicesKit";
+import display from "@ohos.display";
+import * as SubWindowPage from "../components/SubWindowPage";
+import { getMenuDataCallback, windowKeyForId } from "../components/MenuBarComponent";
+import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "../helper/constants";
+import {
+  clearClipboardEnabled,
+  clearZoomHotkeysEnabled,
+  setClipboardEnabled,
+  setZoomHotkeysEnabled,
+} from "../helper/accelerator_matcher";
+import { unregisterKeySynthesisController, unregisterWebFocus } from "../helper/key_synthesis";
+import web_webview from "@ohos.web.webview";
+import {
+  RectThrottle,
+  WindowRectEventWrap,
+  WindowRectSnapshot,
+  WindowSizeEventWrap,
+} from "./RectThrottle";
+import { WindowAttachmentRegistry } from "./WindowAttachmentRegistry";
 
 // Event payload types moved to RectThrottle (issue #87 major-5); re-exported here so
 // existing importers (`import {...} from "../window/WindowManager"`) keep working.
@@ -163,7 +173,10 @@ export class WindowManager {
   // uninitialized is also semantically right: no instance means no registered
   // stage, so a first cold launch takes the normal path.
   static isStageRegistered(windowId: number): boolean {
-    return WindowManager.instance !== null && WindowManager.instance.uiAbilityStages.has(Number(windowId));
+    return (
+      WindowManager.instance !== null &&
+      WindowManager.instance.uiAbilityStages.has(Number(windowId))
+    );
   }
 
   registerUIAbilityStage(
@@ -184,7 +197,12 @@ export class WindowManager {
     // defense-in-depth for any future caller.
     const existingContext = this.uiAbilityContexts.get(wid);
     if (existingContext !== undefined && existingContext !== context) {
-      hilog.error(DOMAIN, 'WindowManager', 'registerUIAbilityStage REFUSED: id %{public}d already registered by another instance (D4b corrosion guard)', wid);
+      hilog.error(
+        DOMAIN,
+        "WindowManager",
+        "registerUIAbilityStage REFUSED: id %{public}d already registered by another instance (D4b corrosion guard)",
+        wid,
+      );
       return;
     }
     this.uiAbilityStages.set(wid, windowStage);
@@ -210,7 +228,7 @@ export class WindowManager {
     // shared by all UIAbility instances, NG4), so the AppStorage-stored module
     // is the right handle regardless of which instance registers.
     const nativeModule: ESObject = AppStorage.get<ESObject>(NATIVE_MODULE_STORAGE_KEY);
-    if (nativeModule && typeof nativeModule.registerUiAbilityStage === 'function') {
+    if (nativeModule && typeof nativeModule.registerUiAbilityStage === "function") {
       try {
         nativeModule.registerUiAbilityStage(wid);
       } catch (e) {
@@ -220,12 +238,22 @@ export class WindowManager {
         // is safe here and keeps the domain tag for hilog-side filtering
         // (unlike setPointerStyle below, which IS called back from Rust and
         // needs the console fallback).
-        hilog.error(DOMAIN, 'WindowManager', 'registerUiAbilityStage NAPI call failed for id=%{public}d (Rust handshake registry not notified): %{public}s', wid, String(e));
+        hilog.error(
+          DOMAIN,
+          "WindowManager",
+          "registerUiAbilityStage NAPI call failed for id=%{public}d (Rust handshake registry not notified): %{public}s",
+          wid,
+          String(e),
+        );
       }
     } else {
-      hilog.warn(DOMAIN, 'WindowManager', 'nativeModule.registerUiAbilityStage unavailable; Rust handshake registry not notified for id=%{public}d', wid);
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "nativeModule.registerUiAbilityStage unavailable; Rust handshake registry not notified for id=%{public}d",
+        wid,
+      );
     }
-
 
     // Register focus tracking for this window
     try {
@@ -371,8 +399,24 @@ export class WindowManager {
     });
     // Queue tail stays failure-neutral (serializeOp semantics: the chain always
     // continues); the caller's `next` copy still rejects.
-    this.windowOpQueues.set(wid, next.catch(() => {}));
+    this.windowOpQueues.set(
+      wid,
+      next.catch(() => {}),
+    );
     return next;
+  }
+
+  // Public tracked-serialization entry for the window bridge path (#2): the
+  // WindowPlugin windowCommand arms (minimize/maximize/restore/recover) run their
+  // raw window mutations through the SAME per-window serial queue as the
+  // ArkTS-internal callers (predefined menu, Esc, SubWindowPage buttons,
+  // setFullscreen), instead of forming a second disjoint serial domain that
+  // could interleave with a queued fullscreen-exit (recover) — the exact race
+  // serializeOp exists to prevent. Tracked (not serializeOp) so the bridge's
+  // await-completion semantics survive: the ack still resolves only after the op
+  // itself settles, and a failed op rejects into the ack chain.
+  runSerializedWindowOp(windowId: number, op: () => Promise<void>): Promise<void> {
+    return this.serializeOpTracked(windowId, op);
   }
 
   // Apply transparent background + container color to a UIAbility main window.
@@ -432,7 +476,13 @@ export class WindowManager {
         // setWindowContainerColor is API 20+; below that the container layer
         // stays opaque, so the transparent window background has no visible
         // effect. Non-fatal.
-        hilog.warn(DOMAIN, 'WindowManager', 'applyTransparentBackground: windowId=%{public}d transparent container requires API20+, current %{public}d; container stays opaque', wid, deviceInfo.sdkApiVersion);
+        hilog.warn(
+          DOMAIN,
+          "WindowManager",
+          "applyTransparentBackground: windowId=%{public}d transparent container requires API20+, current %{public}d; container stays opaque",
+          wid,
+          deviceInfo.sdkApiVersion,
+        );
       }
     } catch (e) {
       hilog.warn(
@@ -949,9 +999,11 @@ export class WindowManager {
       // without un-maximizing it; the F3/D un-maximize hazard only applies to
       // restore()/set_visible, which stay confined to the minimized branch.
       const win = this.getWindow(windowId);
-      if (!win) { throw new Error(`showWindowMethod: window ${windowId} not found`); }
+      if (!win) {
+        throw new Error(`showWindowMethod: window ${windowId} not found`);
+      }
       await win.showWindow().then(() => {
-        hilog.info(DOMAIN, 'WindowManager', 'showWindowMethod raise %{public}d OK', windowId);
+        hilog.info(DOMAIN, "WindowManager", "showWindowMethod raise %{public}d OK", windowId);
       });
       return;
     }
@@ -1535,13 +1587,7 @@ export class WindowManager {
   }
 
   async createSubWindow(opts: SubWindowOptions): Promise<number> {
-    const {
-      name,
-      windowId,
-      decorations = true,
-      transparent = false,
-      backgroundColor,
-    } = opts;
+    const { name, windowId, decorations = true, transparent = false, backgroundColor } = opts;
     // Geometry defaults (formerly destructuring defaults) — `let` because the
     // phone-form clamp below may shrink them into the display rect.
     let width: number = opts.width ?? 800;
@@ -1892,7 +1938,13 @@ export class WindowManager {
           // setWindowContainerColor is API 20+; below that the container layer
           // stays opaque, so a transparent sub-window shows no visible blur
           // (vibrancy) effect. Non-fatal: the window itself still works.
-          hilog.warn(DOMAIN, 'WindowManager', `Sub-window %{public}d transparent container requires API20+, current %{public}d; container stays opaque (no visible blur)`, windowId, deviceInfo.sdkApiVersion);
+          hilog.warn(
+            DOMAIN,
+            "WindowManager",
+            `Sub-window %{public}d transparent container requires API20+, current %{public}d; container stays opaque (no visible blur)`,
+            windowId,
+            deviceInfo.sdkApiVersion,
+          );
         }
       } else if (backgroundColor !== undefined) {
         const colorStr = "#" + backgroundColor.toString(16).padStart(8, "0");
@@ -2003,24 +2055,47 @@ export class WindowManager {
   // created by createSubWindow (the sub-window kind), while UIAbility main windows are tracked in
   // `windowKinds` and never carry a `windows` entry.
   setDecorations(windowId: number, decorations: boolean): boolean {
-    hilog.info(DOMAIN, 'WindowManager', 'setDecorations %{public}d decorations=%{public}s ENTER', windowId, String(decorations));
+    hilog.info(
+      DOMAIN,
+      "WindowManager",
+      "setDecorations %{public}d decorations=%{public}s ENTER",
+      windowId,
+      String(decorations),
+    );
     // Sub-window: write LocalStorage to drive SubWindowPage title bar show/hide
     const entry = this.windows.get(windowId);
     if (entry && entry.storage) {
-      entry.storage.setOrCreate('decorations', decorations);
-      hilog.info(DOMAIN, 'WindowManager', `Decorations set to %{public}s for sub-window %{public}d (LocalStorage)`, String(decorations), windowId);
+      entry.storage.setOrCreate("decorations", decorations);
+      hilog.info(
+        DOMAIN,
+        "WindowManager",
+        `Decorations set to %{public}s for sub-window %{public}d (LocalStorage)`,
+        String(decorations),
+        windowId,
+      );
       return true;
     }
     // UIAbility main window: call setWindowDecorVisible directly to control the system title bar
     if (this.isUIAbilityMainWindow(windowId)) {
       const win = this.getWindow(windowId);
       if (!win) {
-        hilog.warn(DOMAIN, 'WindowManager', 'setDecorations: main window %{public}d not found', windowId);
+        hilog.warn(
+          DOMAIN,
+          "WindowManager",
+          "setDecorations: main window %{public}d not found",
+          windowId,
+        );
         return false;
       }
       try {
         win.setWindowDecorVisible(decorations);
-        hilog.info(DOMAIN, 'WindowManager', 'setDecorations %{public}d setWindowDecorVisible(%{public}s) OK', windowId, String(decorations));
+        hilog.info(
+          DOMAIN,
+          "WindowManager",
+          "setDecorations %{public}d setWindowDecorVisible(%{public}s) OK",
+          windowId,
+          String(decorations),
+        );
         // Decor visibility changes the drawable area WITHOUT changing the
         // window rect, so the system fires no windowRectChange here
         // (device-probed 2026-10-12,
@@ -2038,12 +2113,18 @@ export class WindowManager {
         return true;
       } catch (err) {
         // 801: device not supported (phones); 1300002: abnormal window state. Does not affect other logic.
-        hilog.warn(DOMAIN, 'WindowManager', 'setDecorations %{public}d setWindowDecorVisible failed: %{public}s', windowId, JSON.stringify(err));
+        hilog.warn(
+          DOMAIN,
+          "WindowManager",
+          "setDecorations %{public}d setWindowDecorVisible failed: %{public}s",
+          windowId,
+          JSON.stringify(err),
+        );
         return false;
       }
     }
     // Unknown window kind (never created through WindowManager).
-    hilog.warn(DOMAIN, 'WindowManager', 'setDecorations: unknown window %{public}d', windowId);
+    hilog.warn(DOMAIN, "WindowManager", "setDecorations: unknown window %{public}d", windowId);
     return false;
   }
 
@@ -2070,12 +2151,29 @@ export class WindowManager {
         rect: snapshot.rect,
         drawable: snapshot.drawable,
       };
-      this.throttledRectDispatch(windowId, wrapped, (w: object) => {
-        this.rectChangeCallback?.(w as WindowRectEventWrap);
-      }, 'rect');
-      hilog.info(DOMAIN, 'WindowManager', 'pushSyntheticRectChange %{public}d drawable=%{public}s', windowId, JSON.stringify(snapshot.drawable));
+      this.throttledRectDispatch(
+        windowId,
+        wrapped,
+        (w: object) => {
+          this.rectChangeCallback?.(w as WindowRectEventWrap);
+        },
+        "rect",
+      );
+      hilog.info(
+        DOMAIN,
+        "WindowManager",
+        "pushSyntheticRectChange %{public}d drawable=%{public}s",
+        windowId,
+        JSON.stringify(snapshot.drawable),
+      );
     } catch (e) {
-      hilog.warn(DOMAIN, 'WindowManager', 'pushSyntheticRectChange %{public}d failed: %{public}s', windowId, String(e));
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "pushSyntheticRectChange %{public}d failed: %{public}s",
+        windowId,
+        String(e),
+      );
     }
   }
 
@@ -2293,6 +2391,13 @@ export class WindowManager {
   // any not-yet-attached sub-window — caller falls back to executor.controller.
   getWebviewController(windowId: number): web_webview.WebviewController | undefined {
     return this.attachments.getWebviewController(windowId);
+  }
+
+  // Owner-checked removal counterpart of registerWebviewController (#C3): drops
+  // the per-window attached controller only when it is still the caller's, so a
+  // sibling webview's later registration is never cleared by an earlier remove.
+  unregisterWebviewController(windowId: number, controller: web_webview.WebviewController): void {
+    this.attachments.unregisterWebviewController(windowId, controller);
   }
 
   // Register UIContext (main window calls in aboutToAppear, sub-window calls after loadContent)

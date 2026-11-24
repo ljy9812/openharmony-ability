@@ -1305,10 +1305,11 @@ impl WebviewClient {
     }
 }
 
-/// Snapshot actions run a 10s-capped ArkWeb capture (up to 3 retries) plus, for
-/// `capture-webview`, PNG packing of a potentially multi-MB image; give them a wider
-/// budget than the 15s bridge default (aligned with the plugin-files/plugin-permission
-/// precedent of 60s for heavy actions).
+/// Snapshot and page-output actions run a 10s-capped ArkWeb capture (up to 3 retries)
+/// plus, for `capture-webview`, PNG packing of a potentially multi-MB image; `print`/
+/// `create-pdf` render the whole page to PDF with no ArkTS-side duration cap at all.
+/// Give these heavy actions a wider budget than the 15s bridge default (aligned with
+/// the plugin-files/plugin-permission precedent of 60s for heavy actions).
 fn snapshot_call_options() -> BridgeCallOptions {
     BridgeCallOptions::default().with_timeout_ms(60_000)
 }
@@ -2033,15 +2034,22 @@ impl WebviewHandle {
     }
 
     /// Prints a previously generated PDF file at `path` using `@ohos.print`.
+    ///
+    /// Uses the heavy-action 60s budget (see [`snapshot_call_options`]): the ArkTS
+    /// print flow runs the `@ohos.print` spooler pipeline with no duration cap,
+    /// and the 15s default has been observed to bite successful slow actions on
+    /// this stack. (`PRINT` itself is `system_grant` - no runtime dialog - so the
+    /// budget is for the print pipeline, not a permission round-trip.)
     pub async fn print(&self, path: impl Into<String>) -> Result<()> {
         self.client
-            .call::<_, WebviewAcknowledgement>(
+            .call_with_options::<_, WebviewAcknowledgement>(
                 "print",
                 WebviewPrintRequest {
                     id: self.id.clone(),
                     path: path.into(),
                     pdf_config: None,
                 },
+                snapshot_call_options(),
             )
             .await?
             .ensure()
@@ -2073,6 +2081,10 @@ impl WebviewHandle {
     /// The ArkTS side guards `createPdf()` with an API 14+ version check; on older
     /// devices it returns `success: false`. Callers should invoke this after
     /// `page-end` to ensure the page is fully loaded.
+    ///
+    /// Uses the heavy-action 60s budget (see [`snapshot_call_options`]): the ArkTS
+    /// `createPdf` renders the whole page with no duration cap, so a long page on a
+    /// slow device can legitimately exceed the 15s bridge default.
     pub async fn create_pdf(
         &self,
         path: impl Into<String>,
@@ -2080,13 +2092,14 @@ impl WebviewHandle {
     ) -> Result<()> {
         let response = self
             .client
-            .call::<_, WebviewPrintResponse>(
+            .call_with_options::<_, WebviewPrintResponse>(
                 "create-pdf",
                 WebviewPrintRequest {
                     id: self.id.clone(),
                     path: path.into(),
                     pdf_config,
                 },
+                snapshot_call_options(),
             )
             .await?;
         if response.success {

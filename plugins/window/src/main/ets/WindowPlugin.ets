@@ -596,7 +596,12 @@ export class WindowPlugin extends AsyncPluginBase {
           // setWindowContainerColor is API 20+; below that the opaque container
           // layer stays, so a transparent window background / blur (vibrancy)
           // has no visible effect. Non-fatal: the window is still created.
-          hilog.warn(DOMAIN, TAG, "create-os-window: transparent container requires API 20+, current %{public}d; container stays opaque (no visible blur)", deviceInfo.sdkApiVersion);
+          hilog.warn(
+            DOMAIN,
+            TAG,
+            "create-os-window: transparent container requires API 20+, current %{public}d; container stays opaque (no visible blur)",
+            deviceInfo.sdkApiVersion,
+          );
         }
         await created.showWindow();
         this.assertCallActive(context);
@@ -1170,7 +1175,9 @@ export class WindowPlugin extends AsyncPluginBase {
       // error instead of the old ArkHelper no-op.
       const request = parseDraggableRequest(payload);
       if (deviceInfo.sdkApiVersion < 20) {
-        throw new Error(`setDraggable requires API level 20+ on OpenHarmony (current: ${deviceInfo.sdkApiVersion})`);
+        throw new Error(
+          `setDraggable requires API level 20+ on OpenHarmony (current: ${deviceInfo.sdkApiVersion})`,
+        );
       }
       const win = WindowManager.getInstance().getWindow(request.windowId);
       if (!win) {
@@ -1338,31 +1345,51 @@ export class WindowPlugin extends AsyncPluginBase {
     const win = this.requireWindow(request.windowId, context);
     try {
       const dynamic: ESObject = this.dynamic(win);
+      // Route the raw window mutations through WindowManager's per-window serial
+      // op queue (#2). The ArkTS-internal paths (predefined menu, Esc, SubWindowPage
+      // buttons, setFullscreen) serialize via serializeOp/serializeOpTracked; this
+      // bridge path used to inline-execute, forming a second disjoint serial domain
+      // from which a Rust maximize could interleave with a queued fullscreen-exit
+      // (recover) — the exact race serializeOp exists to prevent. runSerializedWindowOp
+      // joins the same queue while KEEPING this bridge's await-completion semantics
+      // (the constraint that barred delegating to the fire-and-forget maximizeWindow:
+      // callers immediately query is-maximized afterwards), and a failed op still
+      // rejects into the ack chain below instead of a fake success ack.
+      // destroy-window above stays outside the queue: it is idempotent
+      // (already-gone treated as success) and WindowManager tolerates a destroy
+      // racing an in-flight op (destroying flag + null-window soft-fail checks).
       if (action === "minimize") {
-        await (dynamic.minimize() as Promise<void>);
+        await WindowManager.getInstance().runSerializedWindowOp(request.windowId, async () => {
+          await (dynamic.minimize() as Promise<void>);
+        });
       } else if (action === "maximize") {
-        // Use FOLLOW_APP_IMMERSIVE_SETTING (not the default ENTER_IMMERSIVE) to
-        // preserve the existing fullscreen layout mode. ENTER_IMMERSIVE causes a
-        // layout gap (white bar at bottom) after recover().
-        // Snapshot the floating rect first: WMS recover() re-anchors the floating
-        // position to the pointer (GetFullScreenToFloatingRect), so the paired
-        // recover below must moveTo() back — see WindowManager.preMaximizeRects.
-        // Cannot delegate to WindowManager.maximizeWindow (fire-and-forget) without
-        // losing this bridge's await-completion semantics (callers immediately
-        // query is-maximized afterwards).
-        WindowManager.getInstance().snapshotPreMaximizeRect(request.windowId, win);
-        await win.maximize(window.MaximizePresentation.FOLLOW_APP_IMMERSIVE_SETTING);
+        await WindowManager.getInstance().runSerializedWindowOp(request.windowId, async () => {
+          // Use FOLLOW_APP_IMMERSIVE_SETTING (not the default ENTER_IMMERSIVE) to
+          // preserve the existing fullscreen layout mode. ENTER_IMMERSIVE causes a
+          // layout gap (white bar at bottom) after recover().
+          // Snapshot the floating rect first: WMS recover() re-anchors the floating
+          // position to the pointer (GetFullScreenToFloatingRect), so the paired
+          // recover below must moveTo() back — see WindowManager.preMaximizeRects.
+          // The snapshot runs INSIDE the queued op so it cannot interleave with a
+          // pending recover either.
+          WindowManager.getInstance().snapshotPreMaximizeRect(request.windowId, win);
+          await win.maximize(window.MaximizePresentation.FOLLOW_APP_IMMERSIVE_SETTING);
+        });
       } else if (action === "restore") {
-        await (dynamic.restore() as Promise<void>);
+        await WindowManager.getInstance().runSerializedWindowOp(request.windowId, async () => {
+          await (dynamic.restore() as Promise<void>);
+        });
       } else if (action === "recover") {
-        await (dynamic.recover() as Promise<void>);
-        // Restore the pre-maximize position snapshotted above (WMS recover()
-        // pointer-anchors the floating rect). Best-effort — recover already
-        // succeeded.
-        await WindowManager.getInstance().restorePreMaximizeRect(request.windowId, win);
-        // NOTE: Do NOT call showWindow() after recover() — recover() already makes
-        // the window visible, and showWindow() resets the window position to centered
-        // state, causing the window to jump to the center of the screen.
+        await WindowManager.getInstance().runSerializedWindowOp(request.windowId, async () => {
+          await (dynamic.recover() as Promise<void>);
+          // Restore the pre-maximize position snapshotted above (WMS recover()
+          // pointer-anchors the floating rect). Best-effort — recover already
+          // succeeded.
+          await WindowManager.getInstance().restorePreMaximizeRect(request.windowId, win);
+          // NOTE: Do NOT call showWindow() after recover() — recover() already makes
+          // the window visible, and showWindow() resets the window position to centered
+          // state, causing the window to jump to the center of the screen.
+        });
       } else if (action === "show") {
         // A minimized UIAbility main window cannot be brought back by
         // showWindow() — only restore() can (upstream PR#45). Delegate to

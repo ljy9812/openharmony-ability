@@ -1915,6 +1915,19 @@ export function liveWebviewController(id: string): webview.WebviewController | u
   return liveWebviewControllers.get(id);
 }
 
+// ── Per-window blur-refresh fan-out (window-keyed slot vs webview lifetime) ──
+// WindowManager's blurRefreshCallbacks registry is a single slot per window, but
+// the callbacks are per-webview: a second webview created in the same window
+// (tauri Window::add_child) used to overwrite the first one's refresh callback
+// (the first webview went deaf to set-blur), and any webview remove() used to
+// drop the window slot even while a sibling still lived. Track the live
+// per-webview callbacks here (windowId -> webview id -> callback) and register
+// one fan-out dispatcher per window instead: each create re-arms the dispatcher,
+// each remove drops only its own webview's entry, and the window slot is
+// unregistered when the last webview of that window goes away (window teardown
+// still clears the slot through clearWindowState -> attachments.clearWindow).
+const blurCallbacksByWindow = new Map<number, Map<string, (radius: number) => void>>();
+
 function handleControllerAttached(data: ManagedWebview): void {
   if (!data.beginControllerAttach()) {
     return;
@@ -2634,14 +2647,25 @@ class WebviewSurface {
     // Wire up close-window callback: when the webview navigates to close-window.invalid,
     // destroy the sub-window via WindowManager. Notify Rust FIRST (mirrors menu.ets
     // closeWindow and the SubWindowPage close button) so the tauri manager drains PENDING_WINDOW_CLOSES
-    // and removes its registry entry — otherwise getByLabel returns a zombie handle and the
-    // same-label window can never be rebuilt (manual_tests §二十八 close lifecycle defect).
+    // and synthesizes CloseRequested. This callback must NOT destroy the window
+    // itself: the drained CloseRequested is the runtime's veto point
+    // (prevent_close). Destroying here unconditionally would kill the window
+    // before the veto decision lands — a vetoed close would leave a
+    // "registry-alive dead window" (getByLabel returns a zombie handle and the
+    // same-label window can never be rebuilt, exactly the manual_tests §二十八
+    // close lifecycle defect) and re-synthesize a CloseRequested from
+    // aboutToDisappear that gets vetoed again, fixating the zombie. The unvetoed
+    // path drives the physical destroy itself (tao Window::close ->
+    // destroy-window bridge action -> WindowManager.destroyWindow), and its Ok
+    // resolve enqueues the destruction confirmation that removes the registry
+    // entry and fires Destroyed — so the registry entry can never outlive the
+    // physical window on either arm.
     if (windowId > 0) {
       data.onCloseWindow = (): void => {
         hilog.info(
           0x1999,
           "WebviewSurface",
-          "onCloseWindow: destroying windowId=%{public}d",
+          "onCloseWindow: notifying Rust close for windowId=%{public}d",
           windowId,
         );
         try {
@@ -2658,7 +2682,6 @@ class WebviewSurface {
             String(e),
           );
         }
-        WindowManager.getInstance().destroyWindow(windowId);
       };
     }
     data.beginControllerAttach = (): boolean => entry.beginControllerAttach();
@@ -2721,8 +2744,11 @@ class WebviewSurface {
     }
     // Register runtime blur refresh callback so later set-blur commands update this
     // webview's backdropBlur live (build-time pendingBlur only applies at create).
+    // The window-keyed registry slot holds one fan-out dispatcher that serves
+    // every live webview of the window — a sibling create must not overwrite this
+    // webview's callback out of the slot (see blurCallbacksByWindow above).
     if (windowId > 0) {
-      WindowManager.getInstance().registerBlurRefreshCallback(windowId, (radius: number): void => {
+      const refreshCb = (radius: number): void => {
         entry.data.style.blurRadius = radius > 0 ? radius : null;
         entry.node.update(entry.data);
         hilog.info(
@@ -2733,6 +2759,36 @@ class WebviewSurface {
           windowId,
           radius,
         );
+      };
+      let liveCallbacks = blurCallbacksByWindow.get(windowId);
+      if (!liveCallbacks) {
+        liveCallbacks = new Map<string, (radius: number) => void>();
+        blurCallbacksByWindow.set(windowId, liveCallbacks);
+      }
+      liveCallbacks.set(payload.id, refreshCb);
+      // Re-arm the dispatcher on every create: idempotent for siblings, and it
+      // self-heals the slot if a window teardown cleared it while entries here
+      // remained.
+      WindowManager.getInstance().registerBlurRefreshCallback(windowId, (radius: number): void => {
+        const live = blurCallbacksByWindow.get(windowId);
+        if (!live) {
+          return;
+        }
+        live.forEach((cb: (radius: number) => void) => {
+          // Per-callback guard mirrors WindowAttachmentRegistry.fireBlurRefresh:
+          // one failing webview must not starve its siblings of the update.
+          try {
+            cb(radius);
+          } catch (e) {
+            hilog.warn(
+              0x1999,
+              "WebviewSurface",
+              "blur refresh dispatch failed for windowId=%{public}d: %{public}s",
+              windowId,
+              String(e),
+            );
+          }
+        });
       });
     }
   }
@@ -2876,10 +2932,48 @@ class WebviewSurface {
     // #192: drop the sync-bridge controller index entry too (dispose() funnels
     // through here, so this covers both teardown paths).
     unregisterLiveWebviewController(id);
-    // Unregister runtime blur refresh callback (sub-window webviews only).
+    // Drop THIS webview's blur-refresh callback (sub-window webviews only). The
+    // window-keyed slot is only unregistered when the last webview of the window
+    // goes away — a sibling in the same window keeps receiving set-blur pushes
+    // (see blurCallbacksByWindow above).
     const wid = entry.data.windowId ?? 0;
     if (wid > 0) {
-      WindowManager.getInstance().unregisterBlurRefreshCallback(wid);
+      const liveCallbacks = blurCallbacksByWindow.get(wid);
+      if (liveCallbacks) {
+        liveCallbacks.delete(id);
+        if (liveCallbacks.size === 0) {
+          blurCallbacksByWindow.delete(wid);
+          WindowManager.getInstance().unregisterBlurRefreshCallback(wid);
+        }
+      }
+      // Window-keyed attached-controller cleanup: handleControllerAttached
+      // registers data.controller under the WINDOW id, but only window teardown
+      // (clearWindowState / DefaultXComponent aboutToDisappear) used to clear it
+      // — a webview removed while its window lives left a disposed controller
+      // behind for menu.getTargetController (Tray Copy/Cut) to resolve. Drop the
+      // entry when THIS webview owns it, re-pointing at a surviving sibling of
+      // the same window when one exists (last created wins, mirroring the
+      // registration's last-attached-wins semantics); a window with no live
+      // webview left returns to the documented not-yet-attached fallback in
+      // getTargetController.
+      const registered = WindowManager.getInstance().getWebviewController(wid);
+      if (
+        registered !== undefined &&
+        registered === (entry.data.controller as webview.WebviewController)
+      ) {
+        let sibling: webview.WebviewController | undefined = undefined;
+        for (const candidate of this.entries.values()) {
+          if (candidate !== entry && (candidate.data.windowId ?? 0) === wid) {
+            sibling = candidate.data.controller as webview.WebviewController;
+            break;
+          }
+        }
+        if (sibling !== undefined) {
+          WindowManager.getInstance().registerWebviewController(wid, sibling);
+        } else {
+          WindowManager.getInstance().unregisterWebviewController(wid, registered);
+        }
+      }
     }
     entry.failController(`WebView '${id}' was removed before its controller attached`);
     if (detachNode) {

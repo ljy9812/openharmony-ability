@@ -88,5 +88,15 @@ console.warn,不向调用方抛权限错误,读取按"空剪贴板"降级:
 两者与真空剪贴板不可区分 —— 这是有意设计的降级契约,保证缺权限不把可用的读取
 变成硬失败(见 `ClipboardPlugin.ets` 中 `ensureReadPermission` 的注释)。
 
+### 读取的桥接超时档(60s)
+
+读取类 action(`read-text`/`read-image`)的 Rust 桥接调用使用 **60s** 超时,而
+非桥接默认的 15s(`plugin-webview` 快照族 / `plugin-files` / `plugin-permission`
+同款 60s 重动作先例):`READ_PASTEBOARD` 为 `user_grant`,手机端首次读取会在桥接
+窗口内弹系统权限对话框,用户作答可能超过 15s。用户在 60s 内作答则读取正常完成;
+超时未作答时 Rust 侧收到 timeout 错误(与「未声明/被拒」的空板降级不同,这是
+显式失败),而 ArkTS 侧读取随后仍会完成、结果被丢弃。写入类与 `clear` 不走权限
+弹窗,保持 15s 默认预算。
+
 Rust 侧 facade 见 [crates/plugin-clipboard](../../crates/plugin-clipboard),
 完整插件规则见[插件开发规范](../../docs/plugin-development-standard.md)。
