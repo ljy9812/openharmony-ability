@@ -24,6 +24,7 @@ import {
   notifyPrimaryWebviewController,
   notifyKeySynthesisController,
   KEY_SYNTHESIS_SHIM,
+  isZoomHotkeysEnabled,
   setWebFocused,
 } from "@ohos-rs/ability";
 
@@ -1605,6 +1606,11 @@ function BuildWebview(data: ManagedWebview) {
         .javaScriptAccess(data.javascriptEnabled ?? true)
         .domStorageAccess(true)
         .mediaPlayGestureAccess(data.autoplay === true ? false : true)
+        // Pinch-zoom follows the zoom-hotkeys policy: zoom_hotkeys=false (wry's
+        // attribute default) disables gesture zoom (webview2 parity,
+        // SetIsPinchZoomEnabled(zoom_hotkeys_enabled)); the absent-field default
+        // (non-wry bridge callers) keeps the ArkWeb default (true).
+        .zoomAccess(isZoomHotkeysEnabled(data.windowId ?? 0))
         .javaScriptOnDocumentStart(keySynthesisScripts(data))
         .multiWindowAccess(data.eventOptions.newWindow === true)
         .allowWindowOpenMethod(data.eventOptions.newWindow === true)
@@ -1661,6 +1667,12 @@ function BuildWebview(data: ManagedWebview) {
         })
         .onWindowNew((e) => {
           handleWebviewWindowNew(data, e);
+        })
+        // Web-standard `window.close()`: routes through the same notify-only
+        // close chain as the close-window.invalid intercept (see
+        // handleWebviewWindowExit) — never a direct destroyWindow.
+        .onWindowExit(() => {
+          handleWebviewWindowExit(data);
         })
       Stack()
         .width("100%")
@@ -1753,6 +1765,11 @@ function BuildWebview(data: ManagedWebview) {
         .javaScriptAccess(data.javascriptEnabled ?? true)
         .domStorageAccess(true)
         .mediaPlayGestureAccess(data.autoplay === true ? false : true)
+        // Pinch-zoom follows the zoom-hotkeys policy: zoom_hotkeys=false (wry's
+        // attribute default) disables gesture zoom (webview2 parity,
+        // SetIsPinchZoomEnabled(zoom_hotkeys_enabled)); the absent-field default
+        // (non-wry bridge callers) keeps the ArkWeb default (true).
+        .zoomAccess(isZoomHotkeysEnabled(data.windowId ?? 0))
         .javaScriptOnDocumentStart(keySynthesisScripts(data))
         .multiWindowAccess(data.eventOptions.newWindow === true)
         .allowWindowOpenMethod(data.eventOptions.newWindow === true)
@@ -1820,6 +1837,12 @@ function BuildWebview(data: ManagedWebview) {
         })
         .onWindowNew((e) => {
           handleWebviewWindowNew(data, e);
+        })
+        // Web-standard `window.close()`: same notify-only close chain as the
+        // overlay branch (see handleWebviewWindowExit) — never a direct
+        // destroyWindow.
+        .onWindowExit(() => {
+          handleWebviewWindowExit(data);
         })
     }
     // Geometry carrier (same as the overlay branch, decision D1): the wrapper
@@ -2023,6 +2046,38 @@ function handleLoadIntercept(data: ManagedWebview, url: string): boolean {
     return true; // block navigation
   }
   return data.onNavigationRequest(url);
+}
+
+/**
+ * Web-standard `window.close()` (ArkWeb `onWindowExit`): routes through the same
+ * close chain as the close-window.invalid intercept — notify-only. The drained
+ * PENDING_WINDOW_CLOSES entry synthesizes CloseRequested (the runtime's veto
+ * point); the unvetoed leg drives the physical destroy itself (same contract as
+ * the onCloseWindow wiring in create()). Only windows WITH the close chain
+ * (windowId > 0 — sub-windows and spawned UIAbility instances) notify: the
+ * bootstrap main window (id 0) has no close chain (the destroy-window bridge
+ * refuses id 0, WindowStage-hosted UIAbility windows are not destroyable), so
+ * its JS window.close() stays a no-op — tauri documents exactly that
+ * (webview_window.rs close() OpenHarmony note).
+ */
+function handleWebviewWindowExit(data: ManagedWebview): void {
+  hilog.info(
+    0x1999,
+    "WebviewSurface",
+    "onWindowExit: web-initiated close id=%{public}s windowId=%{public}d",
+    data.id,
+    data.windowId ?? 0,
+  );
+  if (typeof data.onCloseWindow === "function") {
+    data.onCloseWindow();
+    return;
+  }
+  hilog.info(
+    0x1999,
+    "WebviewSurface",
+    "onWindowExit: no close chain for windowId=%{public}d (main window) — web window.close() is a no-op",
+    data.windowId ?? 0,
+  );
 }
 
 // ─── Shared Web-callback handlers (issue #87 major-6) ─────────────────────────
