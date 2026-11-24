@@ -47,7 +47,10 @@ pub mod clipboard;
 pub mod global_shortcut;
 
 // ─── Logging macros (gated behind "log" feature) ───
-// When the feature is on, delegate to the `log` crate (backed by ohos-hilog-binding on OHOS).
+// When the feature is on, delegate to the `log` facade. This crate ships no
+// backend: the host application installs one (e.g. `ohos-hilog-binding`'s
+// `hilog::Builder...init()` on OHOS). Without a host-installed backend all
+// macros here expand to silent no-ops at the facade level.
 // When off, expand to no-ops - zero overhead, no dependency on `log`.
 
 /// Logs at error level (delegates to `log::error!`; no-op without the `log` feature).

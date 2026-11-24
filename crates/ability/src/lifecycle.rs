@@ -189,7 +189,7 @@ pub fn create_lifecycle_handle<'a>(
 
     let on_window_stage_create_app = app.clone();
     let on_window_stage_create =
-        env.create_function_from_closure("on_ability_create", move |ctx| {
+        env.create_function_from_closure("on_window_stage_create", move |ctx| {
             let window_id = window_id_arg(&ctx, 0);
             let _ = on_window_stage_create_app
                 .dispatch_plugin_lifecycle(PluginLifecycleEvent::WindowStageCreated { window_id });

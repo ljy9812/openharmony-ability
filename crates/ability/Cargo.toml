@@ -14,7 +14,7 @@ description = "Binding Rust application on Harmony with Ability"
 default = ["log", "updater", "window"]
 account = []
 clipboard = ["log"]
-log = ["dep:log", "dep:ohos-hilog-binding"]
+log = ["dep:log"]
 updater = []
 window = []
 global_shortcut = []
@@ -23,7 +23,6 @@ fault-injection = []
 [dependencies]
 # common dependencies
 futures-channel = { workspace = true }
-crossbeam-channel = { workspace = true }
 uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -44,6 +43,3 @@ ohos-arkui-sys = { workspace = true }
 ohos-ime-binding = { workspace = true }
 ohos-display-binding = { workspace = true }
 ohos-resource-manager-binding = { workspace = true }
-
-# for clipboard feature
-ohos-hilog-binding = { workspace = true, optional = true }

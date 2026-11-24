@@ -5,11 +5,14 @@
 //! OHOS global shortcut types.
 //!
 //! The bridge plugin facade (`openharmony-ability-plugin-global-shortcut`)
-//! now handles register/unregister/event operations through the bridge
-//! plugin model. This module retains only the type definitions and the
-//! NAPI event callback for backward compatibility.
+//! handles register/unregister/event operations through the bridge
+//! plugin model; this module retains only the type definitions.
+//!
+//! Shortcut-triggered events do NOT flow through this module: the facade
+//! decodes `on-shortcut-triggered` main-thread events and forwards them
+//! through its own crossbeam channel (`openharmony-ability-plugin-global-shortcut`
+//! `SHORTCUT_EVENT_CHANNEL`), which consumers poll via its NAPI exports.
 
-pub mod event;
 pub mod types;
 
 // Re-export public types

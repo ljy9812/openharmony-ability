@@ -6,7 +6,6 @@ import {
 } from "@ohos-rs/ability";
 import { BusinessError } from "@kit.BasicServicesKit";
 import Want from "@ohos.app.ability.Want";
-import wantConstant from "@ohos.app.ability.wantConstant";
 
 const OPEN_REQUEST_TYPE = "ohos.url.OpenRequest";
 const REVEAL_REQUEST_TYPE = "ohos.url.RevealRequest";
@@ -226,14 +225,13 @@ export class UrlPlugin extends AsyncPluginBase {
       // diskNameArray; cloud = "cloud").
       //
       // Action uses the raw string literal: the wantConstant.Action constants
-      // are deprecated since API 9. FLAG_AUTH_READ_URI_PERMISSION (@since 9)
-      // grants the receiving ability read access to the uri carried by
-      // `want.uri`; this want has NO uri field (the FM reads the target from
-      // `want.parameters.fileUri`, see above), so the flag is inert in the
-      // current form and kept for a want.uri-bearing variant.
+      // are deprecated since API 9. No `flags` are set: FLAG_AUTH_READ_URI_PERMISSION
+      // only grants read access to a `want.uri` carrier (removed in R1 #14 — it
+      // was inert here, since this want has NO uri field and the FM reads the
+      // target from `want.parameters.fileUri`, see above). Re-introduce the flag
+      // together with a want.uri-bearing variant, never standalone.
       const want: Want = {
         action: "ohos.want.action.viewData",
-        flags: wantConstant.Flags.FLAG_AUTH_READ_URI_PERMISSION,
         parameters: {
           fileUri: mapToVirtualUri(request.path),
           external_storage_uuid: "LOCAL",

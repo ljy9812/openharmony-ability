@@ -1172,43 +1172,60 @@ export class NativeAbility extends UIAbility {
   }
 
   // issue Eulogizethesun/tauri#106: display is a process-level module and
-  // the listeners strongly capture this instance; keep the references and
-  // unregister them in onWindowStageDestroy, otherwise repeated stage
-  // lifecycles accumulate leaked listeners (unlike the windowStage/window
-  // event sources, which die with the stage). add/remove fire on external
-  // monitor hot-plug, change on attribute changes.
-  private displayAddListener?: (displayId: number) => void;
-  private displayRemoveListener?: (displayId: number) => void;
-  private displayChangeListener?: (displayId: number) => void;
+  // the listener references must be kept and unregistered in
+  // onWindowStageDestroy, otherwise repeated stage lifecycles accumulate
+  // leaked listeners (unlike the windowStage/window event sources, which die
+  // with the stage). add/remove fire on external monitor hot-plug, change on
+  // attribute changes.
+  //
+  // R1 #15 dedup: display.on/off are process-scoped, but registration ran
+  // per UIAbility instance — N live instances armed N closure sets and every
+  // display event pushed the identical full layout N times (idempotent but
+  // redundant). The handle set is now a process-level singleton (statics, one
+  // shared table for every NativeAbility subclass instance): the closures
+  // capture no instance state (the layout push reads the process-level native
+  // module from AppStorage), which is what makes the singleton safe. A
+  // per-instance registered flag plus a static ref count keep register /
+  // destroy paired exactly one-to-one per instance, and
+  // onWindowStageDestroy tears the set down only when the LAST registered
+  // instance dies — a surviving instance never loses display monitoring.
+  private static displayAddListener?: (displayId: number) => void;
+  private static displayRemoveListener?: (displayId: number) => void;
+  private static displayChangeListener?: (displayId: number) => void;
+  private static displayListenerInstanceCount: number = 0;
+  private displayListenersRegistered: boolean = false;
 
   // Display listener registration (issue Eulogizethesun/tauri#134): off the
   // PREVIOUS handle generation before assigning new refs. Re-entry is real —
   // onWindowStageRestore's cold-continuation path delegates to
   // onWindowStageCreate again, and the pre-#134 code overwrote the handle
   // fields without off-ing, leaking one closure set per pass: display is a
-  // process-level module and the closures capture this, so nothing dies with
-  // the stage, and a leaked set kept firing pushDisplayLayout on every display
-  // event forever. The offs below target exactly the fields
-  // onWindowStageDestroy offs, so register / unregister stay paired on one
-  // handle generation.
+  // process-level module, so nothing dies with the stage, and a leaked set
+  // kept firing pushDisplayLayout on every display event forever. The offs
+  // below target exactly the fields onWindowStageDestroy offs, so register /
+  // unregister stay paired on one handle generation.
   private registerDisplayListeners(): void {
-    if (this.displayAddListener) {
+    if (!this.displayListenersRegistered) {
+      NativeAbility.displayListenerInstanceCount += 1;
+      this.displayListenersRegistered = true;
+    }
+    if (NativeAbility.displayAddListener) {
       try {
-        display.off("add", this.displayAddListener);
+        display.off("add", NativeAbility.displayAddListener);
       } catch (e) {
         hilog.warn(DOMAIN, "NativeAbility", "display.off(add) failed: %{public}s", String(e));
       }
     }
-    if (this.displayRemoveListener) {
+    if (NativeAbility.displayRemoveListener) {
       try {
-        display.off("remove", this.displayRemoveListener);
+        display.off("remove", NativeAbility.displayRemoveListener);
       } catch (e) {
         hilog.warn(DOMAIN, "NativeAbility", "display.off(remove) failed: %{public}s", String(e));
       }
     }
-    if (this.displayChangeListener) {
+    if (NativeAbility.displayChangeListener) {
       try {
-        display.off("change", this.displayChangeListener);
+        display.off("change", NativeAbility.displayChangeListener);
       } catch (e) {
         hilog.warn(DOMAIN, "NativeAbility", "display.off(change) failed: %{public}s", String(e));
       }
@@ -1221,17 +1238,17 @@ export class NativeAbility extends UIAbility {
     // same as before the fix). add/remove fire on external-monitor hot-plug;
     // change on attribute changes (resolution/orientation/fold).
     // getAllDisplays is API 9+ (both overloads).
-    this.pushDisplayLayout();
+    NativeAbility.pushDisplayLayout();
     try {
-      this.displayAddListener = (displayId: number): void =>
-        this.onDisplayLayoutEvent("add", displayId);
-      this.displayRemoveListener = (displayId: number): void =>
-        this.onDisplayLayoutEvent("remove", displayId);
-      this.displayChangeListener = (displayId: number): void =>
-        this.onDisplayLayoutEvent("change", displayId);
-      display.on("add", this.displayAddListener);
-      display.on("remove", this.displayRemoveListener);
-      display.on("change", this.displayChangeListener);
+      NativeAbility.displayAddListener = (displayId: number): void =>
+        NativeAbility.onDisplayLayoutEvent("add", displayId);
+      NativeAbility.displayRemoveListener = (displayId: number): void =>
+        NativeAbility.onDisplayLayoutEvent("remove", displayId);
+      NativeAbility.displayChangeListener = (displayId: number): void =>
+        NativeAbility.onDisplayLayoutEvent("change", displayId);
+      display.on("add", NativeAbility.displayAddListener);
+      display.on("remove", NativeAbility.displayRemoveListener);
+      display.on("change", NativeAbility.displayChangeListener);
     } catch (e) {
       hilog.warn(
         DOMAIN,
@@ -1244,8 +1261,10 @@ export class NativeAbility extends UIAbility {
 
   // Shared display-event handler: log the event (with the display id the
   // callback reports) and re-push the layout — the positions of every display
-  // can change when one is added/removed/resized, so always push the full list.
-  private onDisplayLayoutEvent(type: string, displayId: number): void {
+  // can change when one is added/removed/resized, so always push the full
+  // list. Static since the R1 #15 dedup: the process-level singleton listener
+  // set must not depend on any instance.
+  private static onDisplayLayoutEvent(type: string, displayId: number): void {
     hilog.info(
       DOMAIN,
       "NativeAbility",
@@ -1253,7 +1272,7 @@ export class NativeAbility extends UIAbility {
       type,
       displayId,
     );
-    this.pushDisplayLayout();
+    NativeAbility.pushDisplayLayout();
   }
 
   // Multi-display layout push (issue Eulogizethesun/tauri#106): push the full
@@ -1261,7 +1280,10 @@ export class NativeAbility extends UIAbility {
   // Positions come from Display.x/y (API 19+; on lower versions undefined → 0,
   // no worse than before the fix). The Rust side overlays it onto the C API
   // CreateAllDisplays display list (the C struct has no x/y fields).
-  private pushDisplayLayout(): void {
+  // Static since the R1 #15 dedup: the push is process-scoped end to end
+  // (module-level display APIs + the process-level native module), so the
+  // singleton listener set can invoke it without an instance.
+  private static pushDisplayLayout(): void {
     try {
       display
         .getAllDisplays()
@@ -1295,29 +1317,40 @@ export class NativeAbility extends UIAbility {
     this.forEachLifecycle((lifecycle) =>
       lifecycle.windowStageEventCallback.onWindowStageDestroy(this.abilityWindowId),
     );
-    if (this.displayAddListener) {
-      try {
-        display.off("add", this.displayAddListener);
-      } catch (e) {
-        hilog.warn(DOMAIN, "NativeAbility", "display.off(add) failed: %{public}s", String(e));
-      }
-      this.displayAddListener = undefined;
+    // R1 #15 dedup: the display listener set is a process-level singleton
+    // shared by every live instance — only the LAST registered instance's
+    // destroy tears it down (see registerDisplayListeners). A surviving
+    // instance keeps display monitoring intact.
+    if (this.displayListenersRegistered) {
+      this.displayListenersRegistered = false;
+      NativeAbility.displayListenerInstanceCount -= 1;
     }
-    if (this.displayRemoveListener) {
-      try {
-        display.off("remove", this.displayRemoveListener);
-      } catch (e) {
-        hilog.warn(DOMAIN, "NativeAbility", "display.off(remove) failed: %{public}s", String(e));
+    if (NativeAbility.displayListenerInstanceCount <= 0) {
+      NativeAbility.displayListenerInstanceCount = 0;
+      if (NativeAbility.displayAddListener) {
+        try {
+          display.off("add", NativeAbility.displayAddListener);
+        } catch (e) {
+          hilog.warn(DOMAIN, "NativeAbility", "display.off(add) failed: %{public}s", String(e));
+        }
+        NativeAbility.displayAddListener = undefined;
       }
-      this.displayRemoveListener = undefined;
-    }
-    if (this.displayChangeListener) {
-      try {
-        display.off("change", this.displayChangeListener);
-      } catch (e) {
-        hilog.warn(DOMAIN, "NativeAbility", "display.off(change) failed: %{public}s", String(e));
+      if (NativeAbility.displayRemoveListener) {
+        try {
+          display.off("remove", NativeAbility.displayRemoveListener);
+        } catch (e) {
+          hilog.warn(DOMAIN, "NativeAbility", "display.off(remove) failed: %{public}s", String(e));
+        }
+        NativeAbility.displayRemoveListener = undefined;
       }
-      this.displayChangeListener = undefined;
+      if (NativeAbility.displayChangeListener) {
+        try {
+          display.off("change", NativeAbility.displayChangeListener);
+        } catch (e) {
+          hilog.warn(DOMAIN, "NativeAbility", "display.off(change) failed: %{public}s", String(e));
+        }
+        NativeAbility.displayChangeListener = undefined;
+      }
     }
     try {
       // Mirror of registerUIAbilityStage (HC-10): must unregister THIS

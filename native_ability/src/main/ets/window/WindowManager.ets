@@ -582,8 +582,13 @@ export class WindowManager {
    * Returns a Promise that resolves only after win.minimize() settles, so the
    * serializeOp slot stays held for the whole deferred minimize — a subsequent
    * queued op (maximize/recover) cannot reorder ahead of it.
+   *
+   * R5 #31: windowId is threaded in purely for attribution — the failure
+   * branch below resolves (never rejects), so no outer withWindow/serializeOp
+   * log would ever name the window; without the id in this message a failed
+   * deferred minimize is unattributable.
    */
-  private minimizeWithRestoreGuard(win: window.Window): Promise<void> {
+  private minimizeWithRestoreGuard(win: window.Window, windowId: number): Promise<void> {
     return new Promise<void>((resolve) => {
       let consumed = false;
       const finish = () => {
@@ -603,7 +608,8 @@ export class WindowManager {
             hilog.warn(
               DOMAIN,
               "WindowManager",
-              "minimizeWithRestoreGuard minimize failed: %{public}s",
+              "minimizeWithRestoreGuard minimize failed (window %{public}d): %{public}s",
+              windowId,
               JSON.stringify(err),
             );
             resolve();
@@ -654,7 +660,7 @@ export class WindowManager {
       // Promise keeps the serialization slot held until the deferred minimize
       // settles, preserving op ordering.
       this.serializeOp(windowId, () =>
-        this.minimizeWithRestoreGuard(win).then(() => {
+        this.minimizeWithRestoreGuard(win, windowId).then(() => {
           // Only reset tracking if the minimized window was the last interacted one
           if (this.lastUserInteractedWindowId === windowId) {
             this.resetUserInteractionTracking();

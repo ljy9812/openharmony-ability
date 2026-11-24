@@ -280,9 +280,14 @@ interface ManagedWebview extends WebviewCreatePayload {
    *  Reports entering=true/false so the runtime can drive window fullscreen
    *  (Windows ContainsFullScreenElementChanged parity). */
   onFullScreenChange: (entering: boolean) => void;
-  /** Handler captured on `onFullScreenEnter` so a host-initiated exit can call
-   *  `exitFullScreen()` (ArkWeb stays in fullscreen mode otherwise and stops
-   *  firing the callbacks). Cleared on `onFullScreenExit`. */
+  /** Diagnostic storage for ArkWeb's `onFullScreenEnter` exit handler.
+   *  Written on `onFullScreenEnter`, cleared on `onFullScreenExit`, and read
+   *  only by the "web fullscreen enter: ... handler=yes/no" info log (the
+   *  device-side anchor for verifying element-fullscreen capture). No
+   *  controller action calls `exitFullScreen()` yet — this plugin has no
+   *  host-initiated element-fullscreen exit channel; if one is added later,
+   *  this stored handler is what it would invoke (ArkWeb stays in fullscreen
+   *  mode otherwise and stops firing the callbacks). */
   fullScreenExitHandler?: FullScreenExitHandler | null;
   onNewWindow: (targetUrl: string, isAlert: boolean, isUserTrigger: boolean) => boolean;
   /**
@@ -1186,7 +1191,7 @@ function navigationDecision(
     }
     return response.intercept;
   } catch (error) {
-    console.error("WebView navigation decision failed: " + String(error));
+    console.error(`WebView navigation decision failed for webview '${id}': ${String(error)}`);
     // Navigation interception must fail open so a temporarily unavailable Rust handler cannot
     // strand the user on a page.
     return false;
@@ -1219,7 +1224,7 @@ function downloadStartDecision(
     }
     return response;
   } catch (error) {
-    console.error("WebView download decision failed: " + String(error));
+    console.error(`WebView download decision failed for webview '${id}': ${String(error)}`);
     // A download callback explicitly requested a synchronous admission decision. Failing closed
     // avoids writing to an unintended path when native state is no longer available.
     return { allow: false };
@@ -1261,7 +1266,7 @@ function notifyPrintState(
     // Best-effort: the bridge session may be disposed before the print dialog
     // closes (webview navigated/destroyed). Drop silently — the terminal state
     // is informational, not part of the printPdf call contract.
-    console.error("WebView print-state notification failed: " + String(e));
+    console.error(`WebView print-state notification failed for webview '${id}': ${String(e)}`);
   }
 }
 
@@ -2192,9 +2197,11 @@ function handleWebviewPageEnd(data: ManagedWebview, url: string): void {
 
 /**
  * onFullScreenEnter: the page requested element fullscreen (`requestFullscreen()`,
- * courseware play, video, ...). Capture ArkWeb's exit handler for host-initiated
- * exits, then report entering=true (gated) so the runtime can drive window
- * fullscreen (Windows `ContainsFullScreenElementChanged` parity).
+ * courseware play, video, ...). Capture ArkWeb's exit handler as diagnostic
+ * state (nothing calls it yet — there is no host-initiated element-fullscreen
+ * exit channel; see the `fullScreenExitHandler` field doc), then report
+ * entering=true (gated) so the runtime can drive window fullscreen (Windows
+ * `ContainsFullScreenElementChanged` parity).
  */
 function handleWebviewFullScreenEnter(data: ManagedWebview, event: WebFullScreenEnterEvent): void {
   data.fullScreenExitHandler = event.handler ?? null;
@@ -2503,7 +2510,9 @@ class WebviewSurface {
             new WebviewTitleChangeEvent(payload.id, nativeTag, title) as ESObject,
           );
         } catch (error) {
-          console.error("WebView title notification failed: " + String(error));
+          console.error(
+            `WebView title notification failed for webview '${payload.id}': ${String(error)}`,
+          );
         }
       },
       onScaleChange: (oldScale: number, newScale: number): void => {
@@ -2518,7 +2527,9 @@ class WebviewSurface {
             new WebviewScaleChangeEvent(payload.id, nativeTag, oldScale, newScale) as ESObject,
           );
         } catch (error) {
-          console.error("WebView scale notification failed: " + String(error));
+          console.error(
+            `WebView scale notification failed for webview '${payload.id}': ${String(error)}`,
+          );
         }
       },
       onDownloadStart: (url: string, tempPath: string | null): WebviewDownloadStartResponse => {
@@ -2536,7 +2547,9 @@ class WebviewSurface {
             new WebviewDownloadEndEvent(payload.id, nativeTag, url, tempPath, success) as ESObject,
           );
         } catch (error) {
-          console.error("WebView download-end notification failed: " + String(error));
+          console.error(
+            `WebView download-end notification failed for webview '${payload.id}': ${String(error)}`,
+          );
         }
       },
       onDragEnter: (x: number, y: number): void => {
@@ -2548,7 +2561,9 @@ class WebviewSurface {
             new WebviewDragEventPayload(payload.id, nativeTag, x, y) as ESObject,
           );
         } catch (error) {
-          console.error("WebView drag-enter notification failed: " + String(error));
+          console.error(
+            `WebView drag-enter notification failed for webview '${payload.id}': ${String(error)}`,
+          );
         }
       },
       onDragMove: (x: number, y: number): void => {
@@ -2560,7 +2575,9 @@ class WebviewSurface {
             new WebviewDragEventPayload(payload.id, nativeTag, x, y) as ESObject,
           );
         } catch (error) {
-          console.error("WebView drag-over notification failed: " + String(error));
+          console.error(
+            `WebView drag-over notification failed for webview '${payload.id}': ${String(error)}`,
+          );
         }
       },
       onDrop: (x: number, y: number, paths: string[]): void => {
@@ -2572,7 +2589,9 @@ class WebviewSurface {
             new WebviewDropEventPayload(payload.id, nativeTag, x, y, paths) as ESObject,
           );
         } catch (error) {
-          console.error("WebView drag-drop notification failed: " + String(error));
+          console.error(
+            `WebView drag-drop notification failed for webview '${payload.id}': ${String(error)}`,
+          );
         }
       },
       onDragLeave: (x: number, y: number): void => {
@@ -2584,7 +2603,9 @@ class WebviewSurface {
             new WebviewDragEventPayload(payload.id, nativeTag, x, y) as ESObject,
           );
         } catch (error) {
-          console.error("WebView drag-leave notification failed: " + String(error));
+          console.error(
+            `WebView drag-leave notification failed for webview '${payload.id}': ${String(error)}`,
+          );
         }
       },
       onPageBegin: (url: string): void => {
@@ -2596,7 +2617,9 @@ class WebviewSurface {
             new WebviewPageEventPayload(payload.id, nativeTag, url) as ESObject,
           );
         } catch (error) {
-          console.error("WebView page-begin notification failed: " + String(error));
+          console.error(
+            `WebView page-begin notification failed for webview '${payload.id}': ${String(error)}`,
+          );
         }
       },
       onPageEnd: (url: string): void => {
@@ -2608,7 +2631,9 @@ class WebviewSurface {
             new WebviewPageEventPayload(payload.id, nativeTag, url) as ESObject,
           );
         } catch (error) {
-          console.error("WebView page-end notification failed: " + String(error));
+          console.error(
+            `WebView page-end notification failed for webview '${payload.id}': ${String(error)}`,
+          );
         }
       },
       onFullScreenChange: (entering: boolean): void => {
@@ -2620,7 +2645,9 @@ class WebviewSurface {
             new WebviewFullScreenChangeEvent(payload.id, nativeTag, entering) as ESObject,
           );
         } catch (error) {
-          console.error("WebView fullscreen-change notification failed: " + String(error));
+          console.error(
+            `WebView fullscreen-change notification failed for webview '${payload.id}': ${String(error)}`,
+          );
         }
       },
       onNewWindow: (targetUrl: string, isAlert: boolean, isUserTrigger: boolean): boolean => {
@@ -2987,6 +3014,14 @@ class WebviewSurface {
     // #192: drop the sync-bridge controller index entry too (dispose() funnels
     // through here, so this covers both teardown paths).
     unregisterLiveWebviewController(id);
+    // C5/R3 #23: drop any PrintTask still held for THIS webview — the entry
+    // must not outlive the webview (an unterminated task would otherwise pin
+    // its framework callbacks for the process lifetime and keep tripping the
+    // printPdf pending check for a webview that no longer exists). Terminal
+    // events for an in-flight print stay best-effort by contract (see
+    // notifyPrintState); the 120s safety net inside printPdf still cleans the
+    // temp PDF.
+    activePrintTasks.delete(id);
     // Drop THIS webview's blur-refresh callback (sub-window webviews only). The
     // window-keyed slot is only unregistered when the last webview of the window
     // goes away — a sibling in the same window keeps receiving set-blur pushes
@@ -3055,7 +3090,9 @@ class WebviewSurface {
         new WebviewControllerEvent(id, entry.data.nativeTag) as ESObject,
       );
     } catch (error) {
-      console.error("WebView controller-removed notification failed: " + String(error));
+      console.error(
+        `WebView controller-removed notification failed for webview '${id}': ${String(error)}`,
+      );
     }
     return true;
   }
@@ -3459,6 +3496,22 @@ class WebviewSurface {
       cleanup();
       return false;
     }
+    // C5/R3 #23 pending check: a second concurrent printPdf on the same webview
+    // would overwrite this webview's activePrintTasks entry — the only strong
+    // reference to the first PrintTask — so the framework would unregister the
+    // first task's callbacks and its terminal event (and print-state
+    // notification) would never arrive. One in-flight print per webview; the
+    // entry clears on the first terminal state (or on webview removal).
+    if (activePrintTasks.has(id)) {
+      hilog.warn(
+        PRINT_LOG_DOMAIN,
+        PRINT_LOG_TAG,
+        "printPdf: a print task is already pending for webview %{public}s; refusing concurrent print",
+        id,
+      );
+      cleanup();
+      return false;
+    }
     try {
       // 1) Dynamically request PRINT permission. PRINT is system_grant
       // (normal, since API 10) — granted at install, so requestPermissionsFromUser
@@ -3582,12 +3635,27 @@ class WebviewSurface {
             String(e),
           );
         }
-        activePrintTasks.set(id, task);
-        hilog.info(
-          PRINT_LOG_DOMAIN,
-          PRINT_LOG_TAG,
-          "PrintTask listeners registered (succeed/fail/cancel/block), task held",
-        );
+        if (activePrintTasks.has(id)) {
+          // Narrow racy overlap: a concurrent printPdf for the same webview
+          // passed the pending check above and set its task while this call was
+          // still awaiting print(). Keep the first entry (its terminal events
+          // stay deliverable); this task's strong ref is dropped here, so its
+          // terminal events may never fire — the same loss the pre-C5 silent
+          // overwrite caused, now detected and attributed in the log.
+          hilog.warn(
+            PRINT_LOG_DOMAIN,
+            PRINT_LOG_TAG,
+            "printPdf: concurrent print task already held for webview %{public}s; keeping the first task, this job's terminal events may be lost",
+            id,
+          );
+        } else {
+          activePrintTasks.set(id, task);
+          hilog.info(
+            PRINT_LOG_DOMAIN,
+            PRINT_LOG_TAG,
+            "PrintTask listeners registered (succeed/fail/cancel/block), task held",
+          );
+        }
       } else {
         hilog.warn(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "printPdf: PrintTask has no .on method");
       }

@@ -59,18 +59,6 @@ impl Default for WindowCreateParams {
     }
 }
 
-/// Generates a unique window ID for use when creating sub-windows
-/// outside of `create_os_window` (e.g., from `handleWindowNew` when
-/// `window_kind == "window"`). Uses the same `NEXT_WINDOW_ID` counter to
-/// ensure no collision with Rust-created windows.
-///
-/// Currently unused — reserved for future when `OnWindowNewResult` carries
-/// a pre-generated window ID for ArkTS-side sub-window creation.
-#[allow(dead_code)]
-pub fn generate_window_id() -> i64 {
-    NEXT_WINDOW_ID.fetch_add(1, Ordering::SeqCst)
-}
-
 /// Creates a new OS-level window on OpenHarmony.
 ///
 /// Uses `WindowCreateParams` to pass all window attributes (geometry, decorations,

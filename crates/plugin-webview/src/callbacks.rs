@@ -697,6 +697,10 @@ mod tests {
         assert!(!empty_opts.new_window);
         assert!(!empty_opts.page_begin);
         assert!(!empty_opts.page_end);
+        assert!(!empty_opts.title_change);
+        assert!(!empty_opts.download_end);
+        assert!(!empty_opts.scale_change);
+        assert!(!empty_opts.full_screen_change);
 
         let full = WebviewCallbacks {
             navigation: Some(Arc::new(|_| true)),
@@ -709,6 +713,7 @@ mod tests {
             page_end: Some(Arc::new(|_| ())),
             title_change: Some(Arc::new(|_| ())),
             scale_change: Some(Arc::new(|_| ())),
+            fullscreen_change: Some(Arc::new(|_| ())),
             download_end: Some(Arc::new(|_| ())),
             close_window: Some(Arc::new(|| ())),
             https_intercept: Some(Arc::new(|_| {
@@ -724,6 +729,10 @@ mod tests {
         assert!(opts.new_window);
         assert!(opts.page_begin);
         assert!(opts.page_end);
+        assert!(opts.title_change);
+        assert!(opts.download_end);
+        assert!(opts.scale_change);
+        assert!(opts.full_screen_change);
     }
 
     #[test]
