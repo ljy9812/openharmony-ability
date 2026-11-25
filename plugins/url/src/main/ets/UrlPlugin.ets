@@ -192,25 +192,20 @@ export class UrlPlugin extends AsyncPluginBase {
     if (action === "reveal-in-dir") {
       const request = parseRevealRequest(payload);
       // Map the real filesystem parent path to the file-manager virtual uri and
-      // start an IMPLICIT Want (issue Eulogizethesun/tauri#223). The pre-#223
-      // form pinned the dispatch to one vendor package with an explicit triple
-      // (com.huawei.hmos.filemanager / MainAbility / module "pc"), so any
-      // non-Huawei environment or package rename failed outright — picking a
-      // bundle by name was the implementer's choice, not a system contract. The
-      // implicit form (action "ohos.want.action.viewData") lets whichever file
-      // manager on the system declares matching skills handle the want, and an
-      // unmatched system now fails LOUDLY: startAbility throws 16000019, which
-      // the catch below rethrows as an explicit unsupported error.
+      // start an EXPLICIT Want pinned to the 2in1 PC file manager
+      // (com.huawei.hmos.filemanager / MainAbility / module "pc").
       //
-      // Honest history (2026-08-28 2in1 device experiment): a bare
-      // viewData+file:// want WITHOUT the parameter contract matched only
-      // archive utd types and silently fell back to the notepad handler — that
-      // observation is why the explicit triple existed. #223 trades that risk
-      // for vendor neutrality: the parameters contract below is retained (it is
-      // what steers the FM to the target folder), the vendor triple is not.
-      // Whether a given system's FM skills actually match this implicit want is
-      // verified by bm dump in the device round (pending); until then the
-      // fallback/unsupported behavior is disclosed, never silent.
+      // #223's implicit-viewData experiment is closed by its pending device
+      // round (2026-11-25, after the 2026-11-24 system update): the implicit
+      // want no longer resolves to the file manager — the system AppSelector
+      // (application picker) intercepts multi-match viewData wants, so
+      // reveal-in-dir degraded to "user picks an app", and a picked
+      // non-file-manager handler does not reveal anything. On this system the
+      // implicit form is unusable, so determinism wins: the explicit triple
+      // lands on the FM directly (verified 2026-08-28, re-verified 1125 by the
+      // suite's filemanager/MainAbility anchors), and a non-Huawei environment
+      // or package rename fails LOUDLY below instead of silently opening a
+      // wrong handler.
       //
       // Sandbox/unmappable-prefix paths throw before startAbility, so they can
       // never fall through to a wrong handler. No fallback candidate list is
@@ -224,14 +219,15 @@ export class UrlPlugin extends AsyncPluginBase {
       // `external_storage_uuid = "LOCAL"` is the local disk id (verified via FM
       // diskNameArray; cloud = "cloud").
       //
-      // Action uses the raw string literal: the wantConstant.Action constants
-      // are deprecated since API 9. No `flags` are set: FLAG_AUTH_READ_URI_PERMISSION
-      // only grants read access to a `want.uri` carrier (removed in R1 #14 — it
-      // was inert here, since this want has NO uri field and the FM reads the
-      // target from `want.parameters.fileUri`, see above). Re-introduce the flag
-      // together with a want.uri-bearing variant, never standalone.
+      // No `flags` are set: FLAG_AUTH_READ_URI_PERMISSION only grants read
+      // access to a `want.uri` carrier (removed in R1 #14 — it was inert here,
+      // since this want has NO uri field and the FM reads the target from
+      // `want.parameters.fileUri`, see above). Re-introduce the flag together
+      // with a want.uri-bearing variant, never standalone.
       const want: Want = {
-        action: "ohos.want.action.viewData",
+        bundleName: "com.huawei.hmos.filemanager",
+        abilityName: "MainAbility",
+        moduleName: "pc",
         parameters: {
           fileUri: mapToVirtualUri(request.path),
           external_storage_uuid: "LOCAL",
@@ -240,15 +236,17 @@ export class UrlPlugin extends AsyncPluginBase {
       try {
         await context.abilityContext.startAbility(want);
       } catch (error) {
-        // 16000019 "No matching ability" (@since 12): no skill on this system
-        // matches the implicit want — rethrow as an explicit unsupported error
-        // (the issue #223 no-fallback policy: 明确报不支持, never a silent
-        // wrong-handler open). Any other code keeps the generic translation.
+        // 16000019 "No matching ability" (@since 12): the pinned file manager
+        // (or its module) is not on this system — rethrow as an explicit
+        // unsupported error (the issue #223 no-fallback policy: 明确报不
+        // 支持, never a silent wrong-handler open). Any other code keeps the
+        // generic translation.
         const err = error as BusinessError;
         if (err.code === 16000019) {
           throw new Error(
-            "reveal-in-dir is unsupported on this system: no ability matches " +
-              "the implicit viewData Want (16000019 No matching ability)",
+            "reveal-in-dir is unsupported on this system: the pinned file " +
+              "manager (com.huawei.hmos.filemanager) is absent (16000019 " +
+              "No matching ability)",
           );
         }
         throw new Error(`reveal-in-dir startAbility failed: ${String(error)}`);
