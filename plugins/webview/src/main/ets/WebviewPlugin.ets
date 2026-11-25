@@ -24,7 +24,6 @@ import {
   notifyPrimaryWebviewController,
   notifyKeySynthesisController,
   KEY_SYNTHESIS_SHIM,
-  isZoomHotkeysEnabled,
   setWebFocused,
 } from "@ohos-rs/ability";
 
@@ -1611,11 +1610,15 @@ function BuildWebview(data: ManagedWebview) {
         .javaScriptAccess(data.javascriptEnabled ?? true)
         .domStorageAccess(true)
         .mediaPlayGestureAccess(data.autoplay === true ? false : true)
-        // Pinch-zoom follows the zoom-hotkeys policy: zoom_hotkeys=false (wry's
-        // attribute default) disables gesture zoom (webview2 parity,
-        // SetIsPinchZoomEnabled(zoom_hotkeys_enabled)); the absent-field default
-        // (non-wry bridge callers) keeps the ArkWeb default (true).
-        .zoomAccess(isZoomHotkeysEnabled(data.windowId ?? 0))
+        // ArkWeb's zoomAccess is a master switch over BOTH gesture zoom and
+        // the programmatic WebviewController.zoom()/zoomIn/zoomOut APIs —
+        // gating it on zoom_hotkeys (a keyboard-only concern on other
+        // platforms) wrongly rejects programmatic zoom with "Function not
+        // enabled" (1125 regression, M36-36/42/45). Keyboard zoom is
+        // synthesized host-side (MainPage.onKeyPreIme/SubWindowPage key path)
+        // and ArkWeb has no engine-level keyboard page-zoom to disable, so
+        // zoom_hotkeys maps to no ArkWeb switch: always enable.
+        .zoomAccess(true)
         .javaScriptOnDocumentStart(keySynthesisScripts(data))
         .multiWindowAccess(data.eventOptions.newWindow === true)
         .allowWindowOpenMethod(data.eventOptions.newWindow === true)
@@ -1770,11 +1773,15 @@ function BuildWebview(data: ManagedWebview) {
         .javaScriptAccess(data.javascriptEnabled ?? true)
         .domStorageAccess(true)
         .mediaPlayGestureAccess(data.autoplay === true ? false : true)
-        // Pinch-zoom follows the zoom-hotkeys policy: zoom_hotkeys=false (wry's
-        // attribute default) disables gesture zoom (webview2 parity,
-        // SetIsPinchZoomEnabled(zoom_hotkeys_enabled)); the absent-field default
-        // (non-wry bridge callers) keeps the ArkWeb default (true).
-        .zoomAccess(isZoomHotkeysEnabled(data.windowId ?? 0))
+        // ArkWeb's zoomAccess is a master switch over BOTH gesture zoom and
+        // the programmatic WebviewController.zoom()/zoomIn/zoomOut APIs —
+        // gating it on zoom_hotkeys (a keyboard-only concern on other
+        // platforms) wrongly rejects programmatic zoom with "Function not
+        // enabled" (1125 regression, M36-36/42/45). Keyboard zoom is
+        // synthesized host-side (MainPage.onKeyPreIme/SubWindowPage key path)
+        // and ArkWeb has no engine-level keyboard page-zoom to disable, so
+        // zoom_hotkeys maps to no ArkWeb switch: always enable.
+        .zoomAccess(true)
         .javaScriptOnDocumentStart(keySynthesisScripts(data))
         .multiWindowAccess(data.eventOptions.newWindow === true)
         .allowWindowOpenMethod(data.eventOptions.newWindow === true)
