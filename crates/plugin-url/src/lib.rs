@@ -59,12 +59,17 @@ impl UrlOpenResponse {
 /// `path` is the **absolute real filesystem path** of the directory to reveal
 /// (the file's parent), e.g. `/storage/media/100/local/files/Docs/IDEProjects`.
 /// NOT a `file://` URI — the ArkTS side maps the real path to the file-manager
-/// virtual uri and dispatches the implicit `ohos.want.action.viewData` Want —
-/// the system resolves the handling file manager (no hardcoded bundleName).
-/// Error surface: if no installed skill matches the implicit Want,
-/// `startAbility` throws 16000019 ("No matching ability") and the ArkTS catch
-/// rethrows it as an explicit "reveal-in-dir is unsupported on this system"
-/// error — a loud failure with no fallback bundle.
+/// virtual uri and dispatches an EXPLICIT Want pinned to the PC file manager
+/// (`com.huawei.hmos.filemanager` / `MainAbility` / module `pc` — issue #223:
+/// a 2026-11 system update started routing the implicit
+/// `ohos.want.action.viewData` Want into the AppSelector chooser instead of
+/// the file manager, so the pin removes the resolution ambiguity).
+/// Error surface: with the explicit Want, a file manager absent from this
+/// system surfaces as `startAbility` 16000011 ("bundle not installed") or
+/// 16000003 ("ability does not exist") — 16000019 ("No matching ability")
+/// belongs to implicit-Want resolution — and the ArkTS catch rethrows those
+/// as an explicit "reveal-in-dir is unsupported on this system" error — a
+/// loud failure with no fallback bundle.
 /// Sandbox or unmappable-prefix paths are rejected ArkTS-side with a
 /// documented platform-limitation error.
 #[napi(object)]
@@ -103,8 +108,8 @@ pub trait UrlExt {
     /// Reveals a directory in the system file manager. `path` must be the
     /// absolute **real filesystem path** of the directory (the file's parent),
     /// not a `file://` URI — the ArkTS side maps it to the file-manager
-    /// virtual uri and dispatches the implicit `ohos.want.action.viewData`
-    /// Want (the system resolves the handler; no hardcoded bundleName).
+    /// virtual uri and dispatches an explicit Want pinned to the PC file
+    /// manager (issue #223; see `UrlRevealRequest` for the error surface).
     fn reveal_in_dir(
         &self,
         path: impl Into<String>,

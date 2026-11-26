@@ -495,14 +495,19 @@ pub struct WebviewCreateRequest {
     /// Enable ArkWeb native clipboard (Ctrl+C/V/X/A/Z/Y). Defaults to true (ArkWeb default).
     /// false disables native clipboard so accelerator_matcher can intercept clipboard shortcuts.
     pub clipboard: Option<bool>,
-    /// Zoom-hotkey policy (Ctrl+/-/0). The only Rust caller (wry's
+    /// Zoom-hotkey policy (Ctrl+/-/0), keyboard ONLY. The Rust caller (wry's
     /// `zoom_hotkeys_enabled` attribute) always sends an explicit value,
     /// defaulting to FALSE — the ArkTS accelerator matcher then consumes the
     /// shortcuts before the page. `true` only makes the matcher stop blocking:
-    /// ArkWeb's engine has no keyboard page-zoom (Chromium keeps those
-    /// accelerators in the browser layer, which ArkWeb does not ship), so the
-    /// keys reach the page as plain key events. See the ETS side
-    /// (`isZoomHotkeysEnabled`) for the absent-field (map-miss) default.
+    /// Ctrl+=/- page zoom is ArkWeb-ENGINE-native (M27-08 device probe —
+    /// Chromium ships those accelerators inside the web engine, which ArkWeb
+    /// DOES include), so unblocked keys zoom the engine directly; Ctrl+0 has
+    /// no native engine binding and reaches the page as a plain key event.
+    /// This flag does NOT control gesture (pinch) or programmatic zoom:
+    /// ArkWeb `zoomAccess` is pinned `true` at webview build (8e32424d, the
+    /// 1125 M36-36/42/45 regression fix), so those are always enabled.
+    /// See the ETS side (`isZoomHotkeysEnabled`) for the absent-field
+    /// (map-miss) default.
     pub zoom_hotkeys: Option<bool>,
     /// Use a transparent Stack overlay to receive drag events (instead of binding directly on the
     /// Web component). Defaults to false. Use when ArkWeb drag events are unreliable.

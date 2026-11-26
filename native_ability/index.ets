@@ -83,12 +83,16 @@ export {
   isWebFocused,
 } from "./src/main/ets/helper/key_synthesis";
 
-// ─── Zoom-flag reader (exported for WebviewPlugin.ets bridge plugin) ─────────
+// ─── Zoom-flag reader (consumed via the helper module directly) ──────────────
 // WebviewPlugin.create stores the create payload's zoomHotkeys policy through
-// WindowManager.setWebviewFlags -> accelerator_matcher's per-window map; the
-// Web builder reads the same map to gate ArkWeb `zoomAccess` (pinch-zoom) so
-// gesture zoom follows the same policy as the keyboard accelerator matcher.
-export { isZoomHotkeysEnabled } from "./src/main/ets/helper/accelerator_matcher";
+// WindowManager.setWebviewFlags -> accelerator_matcher's per-window map; ONLY
+// the keyboard accelerator matcher (MainPage/SubWindowPage) reads it, to decide
+// whether to consume Ctrl+=/-/0 before the page. It no longer gates ArkWeb
+// `zoomAccess`: 8e32424d pinned zoomAccess(true) at webview build because it
+// is the master switch over gesture AND programmatic zoom (1125 regression
+// M36-36/42/45 — a false value rejects WebviewController.zoom() with
+// "Function not enabled"). Consumers import `isZoomHotkeysEnabled` from
+// ../helper/accelerator_matcher directly; no package-level re-export remains.
 
 // ─── Shared bridge-plugin utilities (issue #87 minor-6) ──────────────────────
 // DOMAIN used to be re-declared in every plugin that logs via hilog; the

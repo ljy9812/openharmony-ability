@@ -236,17 +236,20 @@ export class UrlPlugin extends AsyncPluginBase {
       try {
         await context.abilityContext.startAbility(want);
       } catch (error) {
-        // 16000019 "No matching ability" (@since 12): the pinned file manager
-        // (or its module) is not on this system — rethrow as an explicit
-        // unsupported error (the issue #223 no-fallback policy: 明确报不
-        // 支持, never a silent wrong-handler open). Any other code keeps the
-        // generic translation.
+        // Pinned-manager absence, per the explicit Want: 16000011 "bundle
+        // not installed" (bundleName missing) or 16000003 "ability does not
+        // exist" (abilityName/moduleName missing) — 16000019 "No matching
+        // ability" is the implicit-Want resolution failure, kept defensively
+        // in case an OS build routes explicit Wants through resolution too.
+        // Any of them means the pinned file manager is not on this system —
+        // rethrow as an explicit unsupported error (the issue #223
+        // no-fallback policy: 明确报不支持, never a silent wrong-handler
+        // open). Any other code keeps the generic translation.
         const err = error as BusinessError;
-        if (err.code === 16000019) {
+        if (err.code === 16000019 || err.code === 16000011 || err.code === 16000003) {
           throw new Error(
             "reveal-in-dir is unsupported on this system: the pinned file " +
-              "manager (com.huawei.hmos.filemanager) is absent (16000019 " +
-              "No matching ability)",
+              `manager (com.huawei.hmos.filemanager) is absent (${err.code})`,
           );
         }
         throw new Error(`reveal-in-dir startAbility failed: ${String(error)}`);

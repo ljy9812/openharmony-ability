@@ -1614,10 +1614,12 @@ function BuildWebview(data: ManagedWebview) {
         // the programmatic WebviewController.zoom()/zoomIn/zoomOut APIs —
         // gating it on zoom_hotkeys (a keyboard-only concern on other
         // platforms) wrongly rejects programmatic zoom with "Function not
-        // enabled" (1125 regression, M36-36/42/45). Keyboard zoom is
-        // synthesized host-side (MainPage.onKeyPreIme/SubWindowPage key path)
-        // and ArkWeb has no engine-level keyboard page-zoom to disable, so
-        // zoom_hotkeys maps to no ArkWeb switch: always enable.
+        // enabled" (1125 regression, M36-36/42/45). Pinned true, always.
+        // Keyboard Ctrl+=/- page zoom is ArkWeb-ENGINE-native and not gated
+        // by this switch (M27-08 device probe: a JS-free page with no host
+        // synthesis still zoomed, vvs 1.2); zoom_hotkeys controls it solely
+        // through the accelerator matcher consuming the shortcuts
+        // (MainPage/SubWindowPage). Ctrl+0 has no native engine binding.
         .zoomAccess(true)
         .javaScriptOnDocumentStart(keySynthesisScripts(data))
         .multiWindowAccess(data.eventOptions.newWindow === true)
@@ -1777,10 +1779,12 @@ function BuildWebview(data: ManagedWebview) {
         // the programmatic WebviewController.zoom()/zoomIn/zoomOut APIs —
         // gating it on zoom_hotkeys (a keyboard-only concern on other
         // platforms) wrongly rejects programmatic zoom with "Function not
-        // enabled" (1125 regression, M36-36/42/45). Keyboard zoom is
-        // synthesized host-side (MainPage.onKeyPreIme/SubWindowPage key path)
-        // and ArkWeb has no engine-level keyboard page-zoom to disable, so
-        // zoom_hotkeys maps to no ArkWeb switch: always enable.
+        // enabled" (1125 regression, M36-36/42/45). Pinned true, always.
+        // Keyboard Ctrl+=/- page zoom is ArkWeb-ENGINE-native and not gated
+        // by this switch (M27-08 device probe: a JS-free page with no host
+        // synthesis still zoomed, vvs 1.2); zoom_hotkeys controls it solely
+        // through the accelerator matcher consuming the shortcuts
+        // (MainPage/SubWindowPage). Ctrl+0 has no native engine binding.
         .zoomAccess(true)
         .javaScriptOnDocumentStart(keySynthesisScripts(data))
         .multiWindowAccess(data.eventOptions.newWindow === true)
@@ -3048,9 +3052,10 @@ class WebviewSurface {
       // (clearWindowState / DefaultXComponent aboutToDisappear) used to clear it
       // — a webview removed while its window lives left a disposed controller
       // behind for menu.getTargetController (Tray Copy/Cut) to resolve. Drop the
-      // entry when THIS webview owns it, re-pointing at a surviving sibling of
-      // the same window when one exists (last created wins, mirroring the
-      // registration's last-attached-wins semantics); a window with no live
+      // entry when THIS webview owns it, re-pointing at the first-CREATED
+      // surviving sibling of the same window (Map insertion order; note this
+      // tie-break intentionally differs from fresh registration, where a later
+      // attach overwrites — last-attached-wins); a window with no live
       // webview left returns to the documented not-yet-attached fallback in
       // getTargetController.
       const registered = WindowManager.getInstance().getWebviewController(wid);
