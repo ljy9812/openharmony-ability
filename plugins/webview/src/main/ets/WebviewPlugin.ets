@@ -211,13 +211,18 @@ interface WebviewCreatePayload {
   transparent?: boolean | null;
   /** Enable ArkWeb native clipboard (Ctrl+C/V/X/A/Z/Y). Defaults to true. */
   clipboard?: boolean | null;
-  /** Zoom-hotkey policy (Ctrl+/-/0). The only Rust caller (wry's `zoom_hotkeys`
-   *  attribute) always sends an explicit value, defaulting to FALSE — the ArkTS
-   *  accelerator matcher then consumes the shortcuts before the page. true only
-   *  makes the matcher stop blocking: ArkWeb's engine has no keyboard
-   *  page-zoom (Chromium keeps those accelerators in the browser layer, which
-   *  ArkWeb does not ship), so the keys reach the page as plain key events.
-   *  See `isZoomHotkeysEnabled` for the absent-field (map-miss) default. */
+  /** Zoom-hotkey policy (Ctrl+/-/0), keyboard ONLY. The only Rust caller (wry's
+   *  `zoom_hotkeys_enabled` attribute) always sends an explicit value,
+   *  defaulting to FALSE — the ArkTS accelerator matcher then consumes the
+   *  shortcuts, suppressing the engine zoom. `true` makes the matcher stop
+   *  consuming: Ctrl+=/- page zoom is ArkWeb-ENGINE-native (M27-08 device
+   *  probe; on by default), so unblocked keys zoom the engine directly; Ctrl+0
+   *  has no native engine binding and reaches the page as a plain key event.
+   *  Keyboard-only flag: `zoomAccess` is pinned `true` at webview build
+   *  (8e32424d, the 1125 M36-36/42/45 regression fix) and is unrelated;
+   *  pinch/Ctrl+wheel zoom are not controlled by this flag. The absent-field
+   *  (map-miss) default lives in the matcher-side flag store
+   *  (accelerator_matcher's per-window map; no package-level re-export). */
   zoomHotkeys?: boolean | null;
   /** Use a transparent Stack overlay to receive drag events. Defaults to false. */
   dragDropOverlay?: boolean | null;
@@ -262,9 +267,8 @@ interface ManagedWebview extends WebviewCreatePayload {
   onCloseWindow?: () => void;
   onTitleChange: (title: string) => void;
   /** Page-zoom notification (ArkWeb `onScaleChange`): every real zoom change
-   *  fires it — programmatic `zoom()` and pinch. (ArkWeb has no keyboard
-   *  page-zoom; the zoom-hotkeys flag only controls whether the matcher
-   *  consumes those keys.) */
+   *  fires it — programmatic `zoom()`, pinch, and engine-native Ctrl+=/-
+   *  when the zoom-hotkeys policy lets the keys through. */
   onScaleChange: (oldScale: number, newScale: number) => void;
   onDownloadStart: (url: string, tempPath: string | null) => WebviewDownloadStartResponse;
   onDownloadEnd: (url: string, tempPath: string | null, success: boolean) => void;
@@ -3581,7 +3585,13 @@ class WebviewSurface {
           task.on("succeed", () => {
             hilog.info(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "PrintTask 'succeed': job submitted");
             notifyPrintState(this.pluginContext, id, "succeed");
-            activePrintTasks.delete(id);
+            // Owner-checked removal: a concurrently-rejected task's listeners
+            // stay registered (see the overlap note below), and ITS terminal
+            // event must never clear the slot held by the task that WON the
+            // overlap — only the current holder deletes.
+            if (activePrintTasks.get(id) === task) {
+              activePrintTasks.delete(id);
+            }
             // The spooler reads the temp PDF asynchronously after job submission; deleting
             // immediately would abort the print. Delay cleanup so the file survives the read.
             setTimeout(cleanup, 10000);
@@ -3608,7 +3618,10 @@ class WebviewSurface {
               "fail",
               String(err?.message ?? err) || undefined,
             );
-            activePrintTasks.delete(id);
+            // Owner-checked removal — see the 'succeed' handler note.
+            if (activePrintTasks.get(id) === task) {
+              activePrintTasks.delete(id);
+            }
             cleanup();
           });
         } catch (e) {
@@ -3623,7 +3636,10 @@ class WebviewSurface {
           task.on("cancel", () => {
             hilog.info(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "PrintTask 'cancel': user cancelled");
             notifyPrintState(this.pluginContext, id, "cancel");
-            activePrintTasks.delete(id);
+            // Owner-checked removal — see the 'succeed' handler note.
+            if (activePrintTasks.get(id) === task) {
+              activePrintTasks.delete(id);
+            }
             cleanup();
           });
         } catch (e) {
@@ -3651,9 +3667,10 @@ class WebviewSurface {
           // Narrow racy overlap: a concurrent printPdf for the same webview
           // passed the pending check above and set its task while this call was
           // still awaiting print(). Keep the first entry (its terminal events
-          // stay deliverable); this task's strong ref is dropped here, so its
-          // terminal events may never fire — the same loss the pre-C5 silent
-          // overwrite caused, now detected and attributed in the log.
+          // stay deliverable — this task's listeners are still registered, but
+          // their owner-checked removal can never clear the first task's slot);
+          // this task's strong ref is dropped here, so its terminal events may
+          // never fire — attributed in the log.
           hilog.warn(
             PRINT_LOG_DOMAIN,
             PRINT_LOG_TAG,
@@ -3675,9 +3692,17 @@ class WebviewSurface {
       // 5) PrintTask obtained → framework will raise the dialog; no longer unconditionally true.
       // Safety-net cleanup: terminal states (cancel/fail/succeed) should fire and clean up, but
       // some dialog-dismiss paths on OHOS have been observed to not deliver any terminal event,
-      // leaking the temp PDF. A 120s unconditional cleanup guards against that without racing the
-      // spooler (succeed's 10s delay is shorter and runs first; idempotent unlink is safe twice).
-      setTimeout(cleanup, 120000);
+      // leaking the temp PDF AND leaving the pending slot set — which would make printPdf reject
+      // every later print for this webview (issue #23 regression). The 120s unconditional net
+      // clears BOTH (the slot removal is owner-checked: this timer belongs to the task that
+      // armed it, so it can never clear a concurrent winner's slot) without racing the spooler
+      // (succeed's 10s delay is shorter and runs first; idempotent unlink is safe twice).
+      setTimeout(() => {
+        if (activePrintTasks.get(id) === task) {
+          activePrintTasks.delete(id);
+        }
+        cleanup();
+      }, 120000);
       hilog.info(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "printPdf: PrintTask created, dialog pending");
       return true;
     } catch (error) {

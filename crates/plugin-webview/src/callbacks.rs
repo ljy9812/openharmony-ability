@@ -162,8 +162,8 @@ impl WebviewCallbacksBuilder {
 
     /// Receives page zoom updates (`onScaleChange`: oldScale/newScale) on the active N-API
     /// callback and should return promptly. Fires for every real ArkWeb zoom change source —
-    /// programmatic `zoom()` and pinch. (ArkWeb has no keyboard page-zoom; the zoom-hotkeys
-    /// flag only controls whether the ArkTS accelerator matcher consumes those keys.)
+    /// programmatic `zoom()`, pinch, and engine-native Ctrl+=/- when the zoom-hotkeys policy
+    /// (see `zoom_hotkeys`) lets the keys through.
     /// This is the only read path for the current zoom level (ArkWeb exposes no getter).
     pub fn on_scale_change<F>(mut self, callback: F) -> Self
     where

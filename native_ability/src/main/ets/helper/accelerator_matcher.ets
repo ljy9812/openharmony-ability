@@ -279,10 +279,12 @@ export class AcceleratorMatcher {
 
   /**
    * Returns true if the key event is a zoom hotkey (Ctrl+=/-/0, incl. KEYCODE_* forms).
-   * Used by onKeyPreIme to consume the shortcuts when zoom hotkeys are disabled —
-   * ArkWeb's engine has no keyboard page-zoom (Chromium keeps those accelerators
-   * in the browser layer, which ArkWeb does not ship), so this only stops the
-   * keys from reaching the page, it does not block an existing zoom.
+   * Used by onKeyPreIme to consume the shortcuts when zoom hotkeys are disabled:
+   * consuming Ctrl+=/- suppresses the ArkWeb-ENGINE-native keyboard page zoom
+   * (M27-08 device probe — those accelerators ship inside the web engine and
+   * are on by default); Ctrl+0 has no native engine binding, so consuming it
+   * only stops the key from reaching the page. Pinch and Ctrl+wheel zoom are
+   * not controlled by this flag (zoomAccess is pinned true, 8e32424d).
    * See ohos-webview-flag-zoom-hotkeys spec.
    */
   matchesZoomShortcut(event: KeyEvent): boolean {
@@ -354,8 +356,9 @@ export function clearClipboardEnabled(windowId: number): void {
 // explicit value and its attribute defaults to false. Set by
 // WindowManager.setWebviewFlags (from WebviewPlugin.create's
 // payload.zoomHotkeys); read by onKeyPreIme to decide whether to consume the
-// shortcuts before the page. "Enabled" does not create keyboard zoom:
-// ArkWeb's engine has no page-zoom accelerator.
+// shortcuts before the page. "Enabled" needs no synthesis of its own:
+// Ctrl+=/- page zoom is ArkWeb-ENGINE-native and on by default (M27-08), so
+// an unconsumed key zooms the engine directly; Ctrl+0 has no native binding.
 // See ohos-webview-flag-zoom-hotkeys spec.
 const zoomHotkeysEnabledMap: Map<number, boolean> = new Map();
 

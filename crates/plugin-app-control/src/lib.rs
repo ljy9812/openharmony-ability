@@ -376,18 +376,18 @@ impl AppControlExt for OpenHarmonyApp {
 /// `!accepted` leg — it is surfaced through the notify channel instead, where
 /// the ArkTS deferred catch calls `notify_set_color_mode_failed` and the
 /// deferred tick calls `notify_set_color_mode_succeeded` on success; the
-/// latest completion is readable via
+/// completions are readable via
 /// `openharmony_ability::take_color_mode_completion()` — `Some(false)` =
-/// failed, `Some(true)` = executed, `None` = nothing since the last take
-/// (issue #222 / C85). The consumer is tao's event loop drain (tao PR#31,
-/// `apply_color_mode_completion`): the slot is consumed at the head of every
-/// MainEvent dispatch and `Some(false)` surfaces as an error log plus the
-/// theme-override rollback to follow-system — the JS caller still sees the
-/// bridge's accepted=true Ok, so the visible failure surface is that error
-/// log (ArkTS console.error + the ability crate's error!), not a real Err;
-/// an honest Err would need the call chain moved off the ArkTS main thread
-/// (worker migration, out of scope). The sync `Err` paths here only cover
-/// bridge/payload failures.
+/// one failed, `Some(true)` = one executed, `None` = nothing since the last
+/// take, one verdict per take (FIFO, issue #222 / C85). The consumer is
+/// tao's event loop drain (tao PR#31, `apply_color_mode_completion`): the
+/// queue is drained at the head of every MainEvent dispatch and each
+/// `Some(false)` verdict feeds tao's FIFO theme-receipt channel
+/// (`set_theme_with_receipt`), which tauri's `set_app_theme` command turns
+/// into a JS Err — no worker migration is needed for that leg. The bridge
+/// response itself stays accepted=true ("queued"); the sync-failure and
+/// timeout residue is tracked in #264. The sync `Err` paths here only
+/// cover bridge/payload failures.
 pub trait ColorModeExt {
     /// Sets the system color mode (`0 = Dark`, `1 = Light`, `2 = NoSet`).
     ///

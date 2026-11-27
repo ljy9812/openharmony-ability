@@ -11,7 +11,7 @@ use napi_ohos::threadsafe_function::{
     ThreadsafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode,
 };
 use napi_ohos::Env;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
@@ -457,11 +457,14 @@ pub fn notify_ui_ability_start_failed(window_id: i64) {
 // The AppControlPlugin now reports BOTH outcomes through
 // notify_set_color_mode_failed / notify_set_color_mode_succeeded.
 //
-// Unlike the spawn-rejection trace there is nothing to roll back in this slot
-// (no registry or queue is mutated by set-color-mode; the failure correction
-// is consumer-side — see take_color_mode_completion below), so this is a
-// single-slot diagnostic: the latest completion is the one a caller diagnosing
-// "theme didn't change" needs. Keyed by nothing — the app has exactly one
+// Unlike the spawn-rejection trace there is nothing to roll back in this
+// queue (no registry or queue is mutated by set-color-mode; the failure
+// correction is consumer-side — see take_color_mode_completion below), so
+// this is a diagnostic FIFO: every completion (success AND failure) is
+// queued, one per notification, and consumed in arrival order — matching
+// tao#31's THEME_RECEIPTS one-receipt-per-completion semantics so two
+// concurrent set-color-mode calls each surface their own verdict instead of
+// one overwriting the other. Keyed by nothing — the app has exactly one
 // application context.
 //
 // Wire compatibility: notify_set_color_mode_failed keeps its napi name and
@@ -472,9 +475,9 @@ pub fn notify_ui_ability_start_failed(window_id: i64) {
 // was removed; the failure payload lives on in the error log emitted by
 // notify_set_color_mode_failed.
 
-static COLOR_MODE_COMPLETION: Mutex<Option<bool>> = Mutex::new(None);
+static COLOR_MODE_COMPLETION: Mutex<VecDeque<bool>> = Mutex::new(VecDeque::new());
 
-fn color_mode_completion() -> std::sync::MutexGuard<'static, Option<bool>> {
+fn color_mode_completion() -> std::sync::MutexGuard<'static, VecDeque<bool>> {
     // Poisoned lock: same policy as the pending registry — keep serving, the
     // trace is diagnostic only.
     COLOR_MODE_COMPLETION
@@ -482,32 +485,30 @@ fn color_mode_completion() -> std::sync::MutexGuard<'static, Option<bool>> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Records the latest deferred setColorMode completion reported by the ArkTS
-/// side: `false` = execution failed (deferred catch), `true` = the deferred
-/// tick executed setColorMode without throwing. Overwrites any earlier
-/// completion: the slot holds "most recent", not a history.
+/// Queues a deferred setColorMode completion reported by the ArkTS side:
+/// `false` = execution failed (deferred catch), `true` = the deferred tick
+/// executed setColorMode without throwing. FIFO — each notification is
+/// queued (never merged or overwritten); `take_color_mode_completion` pops
+/// the oldest.
 fn note_color_mode_completion(ok: bool) {
-    *color_mode_completion() = Some(ok);
+    color_mode_completion().push_back(ok);
 }
 
-/// Takes the latest recorded setColorMode completion: `Some(true)` = the
-/// deferred tick executed setColorMode, `Some(false)` = it failed,
-/// `None` = nothing reported since the last take. Consuming keeps the slot
-/// bounded and makes "none since last check" a meaningful answer. The
-/// consumer is tao's event loop drain (tao PR#31,
-/// `apply_color_mode_completion`): the slot is consumed at the head of every
-/// MainEvent dispatch (both notify legs wake the loop) and `Some(false)`
-/// surfaces as an error log plus the consumer-side theme-override reset to
-/// follow-system (tao's drain resets its own APP_THEME_OVERRIDE flag, issue
-/// #222 — nothing recorded by this slot is undone, consistent with the
-/// "nothing to roll back in this slot" note in the section comment above) —
-/// the JS caller still sees the bridge's accepted=true Ok, so
-/// the visible failure surface is that error log (ArkTS console.error + this
-/// crate's error!), not a real Err; an honest Err would need the call chain
-/// moved off the ArkTS main thread (worker migration, deliberately out of
-/// scope). This crate only builds the channel.
+/// Takes the OLDEST unconsumed setColorMode completion (FIFO): `Some(true)` =
+/// a deferred tick executed setColorMode, `Some(false)` = one failed,
+/// `None` = nothing reported since the last take. One completion per take:
+/// every recorded completion is eventually surfaced — concurrent calls are
+/// NOT merged into "latest wins". The consumer is tao's event loop drain
+/// (tao PR#31, `apply_color_mode_completion`): the queue is drained at the
+/// head of every MainEvent dispatch (both notify legs wake the loop) and
+/// each `false` verdict feeds tao's FIFO theme-receipt channel
+/// (`set_theme_with_receipt`), which tauri's `set_app_theme` command turns
+/// into a JS Err — no worker migration is needed for that honest-Err leg;
+/// the bridge response itself stays accepted=true ("queued"), and the
+/// sync-failure/timeout residue is tracked in #264. This crate only builds
+/// the channel.
 pub fn take_color_mode_completion() -> Option<bool> {
-    color_mode_completion().take()
+    color_mode_completion().pop_front()
 }
 
 /// NAPI: Called by the ArkTS `set-color-mode` handler's deferred catch
@@ -547,23 +548,27 @@ mod color_mode_completion_tests {
     use super::*;
 
     #[test]
-    fn notify_overwrites_and_take_consumes() {
-        // Only this test touches the slot, so the cold-start state is empty.
+    fn fifo_one_verdict_per_completion() {
+        // Only this test touches the queue, so the cold-start state is empty.
         assert!(take_color_mode_completion().is_none());
         notify_set_color_mode_failed(16000011, "context does not exist".to_string());
         assert_eq!(take_color_mode_completion(), Some(false));
-        // Consuming clears the slot — "none since last check" is meaningful.
         assert!(take_color_mode_completion().is_none());
-        // The slot holds the LATEST completion, not a history: a success
-        // after a failure overwrites it, and vice versa. (Both notify fns
+        // FIFO: every completion is queued and taken in arrival order — a
+        // failure followed by successes surfaces ALL verdicts, in order,
+        // instead of the last one overwriting the rest (matches tao#31's
+        // one-receipt-per-completion THEME_RECEIPTS semantics; concurrent
+        // set-color-mode calls each get their own verdict). (Both notify fns
         // also wake the installed app's event loop — a no-op here because
         // lifecycle setup has not run in this test process.)
         notify_set_color_mode_failed(401, "parameter error".to_string());
         notify_set_color_mode_succeeded();
-        assert_eq!(take_color_mode_completion(), Some(true));
         notify_set_color_mode_succeeded();
         notify_set_color_mode_failed(16000011, "context does not exist".to_string());
-        assert_eq!(take_color_mode_completion(), Some(false));
+        assert_eq!(take_color_mode_completion(), Some(false)); // 401 failure
+        assert_eq!(take_color_mode_completion(), Some(true)); // first success
+        assert_eq!(take_color_mode_completion(), Some(true)); // second success
+        assert_eq!(take_color_mode_completion(), Some(false)); // 16000011 failure
         assert!(take_color_mode_completion().is_none());
     }
 }

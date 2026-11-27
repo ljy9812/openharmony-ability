@@ -59,17 +59,18 @@ impl UrlOpenResponse {
 /// `path` is the **absolute real filesystem path** of the directory to reveal
 /// (the file's parent), e.g. `/storage/media/100/local/files/Docs/IDEProjects`.
 /// NOT a `file://` URI — the ArkTS side maps the real path to the file-manager
-/// virtual uri and dispatches an EXPLICIT Want pinned to the PC file manager
-/// (`com.huawei.hmos.filemanager` / `MainAbility` / module `pc` — issue #223:
-/// a 2026-11 system update started routing the implicit
-/// `ohos.want.action.viewData` Want into the AppSelector chooser instead of
-/// the file manager, so the pin removes the resolution ambiguity).
-/// Error surface: with the explicit Want, a file manager absent from this
-/// system surfaces as `startAbility` 16000011 ("bundle not installed") or
-/// 16000003 ("ability does not exist") — 16000019 ("No matching ability")
-/// belongs to implicit-Want resolution — and the ArkTS catch rethrows those
-/// as an explicit "reveal-in-dir is unsupported on this system" error — a
-/// loud failure with no fallback bundle.
+/// virtual uri and dispatches an IMPLICIT `ohos.want.action.viewData` Want
+/// (issue #223: no bundle/ability/module pin — vendor file-manager packages
+/// must not appear in code, not even as a fallback). Whichever file manager
+/// on the system declares matching skills handles the want; on systems whose
+/// AppSelector intercepts multi-match viewData wants the user may see an
+/// application picker instead (disclosed boundary, not worked around).
+/// Error surface: `startAbility` 16000019 ("No matching ability") or 16000001
+/// ("The specified ability does not exist") — no handler for the implicit
+/// want on this system — is rethrown ArkTS-side as an explicit "reveal-in-dir
+/// is unsupported on this system" error: a loud failure with no fallback
+/// bundle. 16000011 ("The context does not exist") is a destroyed-calling-
+/// context error, not an unsupported signal.
 /// Sandbox or unmappable-prefix paths are rejected ArkTS-side with a
 /// documented platform-limitation error.
 #[napi(object)]
@@ -108,8 +109,8 @@ pub trait UrlExt {
     /// Reveals a directory in the system file manager. `path` must be the
     /// absolute **real filesystem path** of the directory (the file's parent),
     /// not a `file://` URI — the ArkTS side maps it to the file-manager
-    /// virtual uri and dispatches an explicit Want pinned to the PC file
-    /// manager (issue #223; see `UrlRevealRequest` for the error surface).
+    /// virtual uri and dispatches an implicit `viewData` Want
+    /// (issue #223; see `UrlRevealRequest` for the boundary and error surface).
     fn reveal_in_dir(
         &self,
         path: impl Into<String>,

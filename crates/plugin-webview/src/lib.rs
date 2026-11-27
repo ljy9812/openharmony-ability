@@ -809,9 +809,9 @@ pub struct WebviewTitleChangeEvent {
 /// Page-zoom notification delivered directly through a named N-API callback.
 ///
 /// ArkWeb's `Web` component fires `onScaleChange` for every real zoom change
-/// source (programmatic `zoom()`, pinch; ArkWeb has no keyboard page-zoom) and
-/// exposes no getter, so this event is the only way to observe the actual zoom
-/// level.
+/// source (programmatic `zoom()`, pinch, and engine-native Ctrl+=/- when the
+/// `zoom_hotkeys` policy lets the keys through) and exposes no getter, so this
+/// event is the only way to observe the actual zoom level.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct WebviewScaleChangeEvent {
@@ -1311,10 +1311,12 @@ impl WebviewClient {
 }
 
 /// Snapshot and page-output actions run a 10s-capped ArkWeb capture (up to 3 retries)
-/// plus, for `capture-webview`, PNG packing of a potentially multi-MB image; `print`/
-/// `create-pdf` render the whole page to PDF with no ArkTS-side duration cap at all.
-/// Give these heavy actions a wider budget than the 15s bridge default (aligned with
-/// the plugin-files/plugin-permission precedent of 60s for heavy actions).
+/// plus, for `capture-webview`, PNG packing of a potentially multi-MB image. The two
+/// page-output paths differ: `create-pdf` renders the full page ArkTS-side
+/// (`controller.createPdf`, no built-in duration cap), while `print` only calls the
+/// framework's `print.print()` and reports via PrintTask events. Give these heavy
+/// actions a wider budget than the 15s bridge default (aligned with the
+/// plugin-files/plugin-permission precedent of 60s for heavy actions).
 fn snapshot_call_options() -> BridgeCallOptions {
     BridgeCallOptions::default().with_timeout_ms(60_000)
 }

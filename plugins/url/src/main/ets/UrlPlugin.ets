@@ -192,20 +192,23 @@ export class UrlPlugin extends AsyncPluginBase {
     if (action === "reveal-in-dir") {
       const request = parseRevealRequest(payload);
       // Map the real filesystem parent path to the file-manager virtual uri and
-      // start an EXPLICIT Want pinned to the 2in1 PC file manager
-      // (com.huawei.hmos.filemanager / MainAbility / module "pc").
+      // start an IMPLICIT Want (issue Eulogizethesun/tauri#223): action
+      // "ohos.want.action.viewData" + the parameter contract below, with NO
+      // bundle/ability/module triple. Vendor pinning is forbidden by the
+      // adaptation contract ("no Huawei file manager in code, not even as a
+      // fallback"): the earlier explicit triple
+      // (com.huawei.hmos.filemanager / MainAbility / module "pc") was removed —
+      // picking a bundle by name was the implementer's choice, not a system
+      // contract, and any non-Huawei environment or package rename failed
+      // outright.
       //
-      // #223's implicit-viewData experiment is closed by its pending device
-      // round (2026-11-25, after the 2026-11-24 system update): the implicit
-      // want no longer resolves to the file manager — the system AppSelector
-      // (application picker) intercepts multi-match viewData wants, so
-      // reveal-in-dir degraded to "user picks an app", and a picked
-      // non-file-manager handler does not reveal anything. On this system the
-      // implicit form is unusable, so determinism wins: the explicit triple
-      // lands on the FM directly (verified 2026-08-28, re-verified 1125 by the
-      // suite's filemanager/MainAbility anchors), and a non-Huawei environment
-      // or package rename fails LOUDLY below instead of silently opening a
-      // wrong handler.
+      // Known boundary (2026-11-25 device round, after the 2026-11-24 system
+      // update): on that 2in1 image the system AppSelector intercepted
+      // multi-match viewData wants, so the implicit want may surface an
+      // application picker instead of going straight to the file manager — a
+      // picked non-file-manager handler does not reveal anything. This is
+      // disclosed as the platform's resolution behavior, not worked around by
+      // re-pinning a vendor package; an unmatched system fails LOUDLY below.
       //
       // Sandbox/unmappable-prefix paths throw before startAbility, so they can
       // never fall through to a wrong handler. No fallback candidate list is
@@ -224,10 +227,10 @@ export class UrlPlugin extends AsyncPluginBase {
       // since this want has NO uri field and the FM reads the target from
       // `want.parameters.fileUri`, see above). Re-introduce the flag together
       // with a want.uri-bearing variant, never standalone.
+      // Action uses the raw string literal: the wantConstant.Action constants
+      // are deprecated since API 9.
       const want: Want = {
-        bundleName: "com.huawei.hmos.filemanager",
-        abilityName: "MainAbility",
-        moduleName: "pc",
+        action: "ohos.want.action.viewData",
         parameters: {
           fileUri: mapToVirtualUri(request.path),
           external_storage_uuid: "LOCAL",
@@ -236,20 +239,26 @@ export class UrlPlugin extends AsyncPluginBase {
       try {
         await context.abilityContext.startAbility(want);
       } catch (error) {
-        // Pinned-manager absence, per the explicit Want: 16000011 "bundle
-        // not installed" (bundleName missing) or 16000003 "ability does not
-        // exist" (abilityName/moduleName missing) — 16000019 "No matching
-        // ability" is the implicit-Want resolution failure, kept defensively
-        // in case an OS build routes explicit Wants through resolution too.
-        // Any of them means the pinned file manager is not on this system —
-        // rethrow as an explicit unsupported error (the issue #223
-        // no-fallback policy: 明确报不支持, never a silent wrong-handler
-        // open). Any other code keeps the generic translation.
+        // Error codes per UIAbilityContext.d.ts: 16000019 "No matching
+        // ability" and 16000001 "The specified ability does not exist" mean no
+        // handler on this system matches the implicit want — rethrow as an
+        // explicit unsupported error (the issue #223 no-fallback policy:
+        // 明确报不支持, never a silent wrong-handler open). 16000011 "The
+        // context does not exist" is a calling-context failure, surfaced as a
+        // context error, NOT as "unsupported". 16000003 is not in
+        // startAbility's error table (16300003 is a different "target
+        // application" case) and is deliberately not handled. Any other code
+        // keeps the generic translation.
         const err = error as BusinessError;
-        if (err.code === 16000019 || err.code === 16000011 || err.code === 16000003) {
+        if (err.code === 16000019 || err.code === 16000001) {
           throw new Error(
-            "reveal-in-dir is unsupported on this system: the pinned file " +
-              `manager (com.huawei.hmos.filemanager) is absent (${err.code})`,
+            "reveal-in-dir is unsupported on this system: no ability matches " +
+              `the implicit viewData Want (${err.code})`,
+          );
+        }
+        if (err.code === 16000011) {
+          throw new Error(
+            "reveal-in-dir failed: the calling ability context was destroyed " + "(16000011)",
           );
         }
         throw new Error(`reveal-in-dir startAbility failed: ${String(error)}`);

@@ -11,7 +11,11 @@
 //! Shortcut-triggered events do NOT flow through this module: the facade
 //! decodes `on-shortcut-triggered` main-thread events and forwards them
 //! through its own crossbeam channel (`openharmony-ability-plugin-global-shortcut`
-//! `SHORTCUT_EVENT_CHANNEL`), which consumers poll via its NAPI exports.
+//! `SHORTCUT_EVENT_CHANNEL`). Rust consumers do not touch that channel (or any
+//! NAPI export) directly — they poll the facade's Rust API
+//! [`GlobalShortcutClient::event_receiver`]
+//! (via the `GlobalShortcutExt::global_shortcut()` accessor), which is how the
+//! plugins-workspace global-shortcut backend drains triggered shortcuts.
 
 pub mod types;
 
